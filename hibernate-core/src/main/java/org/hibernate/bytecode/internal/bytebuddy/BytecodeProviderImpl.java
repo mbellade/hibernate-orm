@@ -73,6 +73,7 @@ public class BytecodeProviderImpl implements BytecodeProvider {
 
 	private static final String INSTANTIATOR_PROXY_NAMING_SUFFIX = "HibernateInstantiator";
 	private static final String OPTIMIZER_PROXY_NAMING_SUFFIX = "HibernateAccessOptimizer";
+	private static final String OPTIMIZER_PROXY_BRIDGE_NAMING_SUFFIX = "HibernateAccessOptimizerBridge";
 	private static final ElementMatcher.Junction<NamedElement> newInstanceMethodName = ElementMatchers.named(
 			"newInstance" );
 	private static final ElementMatcher.Junction<NamedElement> getPropertyValuesMethodName = ElementMatchers.named(
@@ -304,12 +305,14 @@ public class BytecodeProviderImpl implements BytecodeProvider {
 		for ( int i = foreignPackageClassInfos.size() - 1; i >= 0; i-- ) {
 			final ForeignPackageClassInfo foreignPackageClassInfo = foreignPackageClassInfos.get( i );
 			final Class<?> newSuperClass = superClass;
+
+			final String suffix = OPTIMIZER_PROXY_BRIDGE_NAMING_SUFFIX + encodeName( foreignPackageClassInfo.propertyNames, foreignPackageClassInfo.getters, foreignPackageClassInfo.setters );
 			superClass = byteBuddyState.load(
 					foreignPackageClassInfo.clazz,
 					byteBuddy -> {
 						DynamicType.Builder<?> builder = byteBuddy.with(
 								new NamingStrategy.SuffixingRandom(
-										OPTIMIZER_PROXY_NAMING_SUFFIX,
+										suffix,
 										new NamingStrategy.SuffixingRandom.BaseNameResolver.ForFixedValue(
 												foreignPackageClassInfo.clazz.getName() )
 								)
@@ -381,6 +384,42 @@ public class BytecodeProviderImpl implements BytecodeProvider {
 		}
 
 		return superClass;
+	}
+
+	private static String encodeName(String[] propertyNames, Member[] getters, Member[] setters) {
+		return encodeName( Arrays.asList( propertyNames ), Arrays.asList( getters ), Arrays.asList( setters ) );
+	}
+
+	private static String encodeName(List<String> propertyNames, List<Member> getters, List<Member> setters) {
+		final StringBuilder sb = new StringBuilder();
+		for ( int i = 0; i < propertyNames.size(); i++ ) {
+			final String propertyName = propertyNames.get( i );
+			final Member getter = getters.get( i );
+			final Member setter = setters.get( i );
+			// Encode the two member types as 4 bit integer encoded as hex character
+			sb.append( Integer.toHexString( getKind( getter ) << 2 | getKind( setter ) ) );
+			sb.append( propertyName );
+		}
+		return sb.toString();
+	}
+
+	private static int getKind(Member member) {
+		// Encode the member type as 2 bit integer
+		if ( member == EMBEDDED_MEMBER ) {
+			return 0;
+		}
+		else if ( member instanceof Field ) {
+			return 1;
+		}
+		else if ( member instanceof Method ) {
+			return 2;
+		}
+		else if ( member instanceof ForeignPackageMember ) {
+			return 3;
+		}
+		else {
+			throw new IllegalArgumentException( "Unknown member type: " + member );
+		}
 	}
 
 	private static class ForeignPackageMember implements Member {
