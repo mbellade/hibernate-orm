@@ -43,6 +43,7 @@ import org.hibernate.metamodel.mapping.ValuedModelPart;
 import org.hibernate.metamodel.mapping.internal.BasicValuedCollectionPart;
 import org.hibernate.metamodel.mapping.internal.EmbeddedAttributeMapping;
 import org.hibernate.metamodel.mapping.internal.SingleAttributeIdentifierMapping;
+import org.hibernate.persister.collection.CollectionPersister;
 import org.hibernate.type.BasicPluralType;
 import org.hibernate.type.BasicType;
 import org.hibernate.type.SqlTypes;
@@ -347,20 +348,28 @@ public class JsonHelper {
 			case MAP:
 			case SORTED_MAP:
 			case ORDERED_MAP:
-				final PersistentMap<?, ?> pm = (PersistentMap<?, ?>) value;
-				serializePersistentMap( pm, plural.getIndexDescriptor(), element, options, writer );
+				serializePersistentMap(
+						(PersistentMap<?, ?>) value,
+						plural.getIndexDescriptor(),
+						element,
+						options,
+						writer
+				);
 				break;
 			default:
-				final PersistentCollection<?> pc = (PersistentCollection<?>) value;
-				final Iterator<?> entries = pc.entries( plural.getCollectionDescriptor() );
-				writer.startArray();
-				while ( entries.hasNext() ) {
-					serializeCollectionPart( entries.next(), element, options, writer );
-				}
-				writer.endArray();
+				serializePersistentCollection(
+						(PersistentCollection<?>) value,
+						plural.getCollectionDescriptor(),
+						element,
+						options,
+						writer
+				);
 		}
 	}
 
+	/**
+	 * Serializes a persistent map to JSON [{key: ..., value: ...}, ...]
+	 */
 	private static <K, E> void serializePersistentMap(
 			PersistentMap<K, E> map,
 			CollectionPart key,
@@ -377,6 +386,23 @@ public class JsonHelper {
 			writer.endObject();
 		}
 		writer.endArray();
+	}
+
+	/**
+	 * Serializes a persistent collection to a JSON array
+	 */
+	private static <E> void serializePersistentCollection(
+			PersistentCollection<E> collection,
+			CollectionPersister persister,
+			CollectionPart element,
+			WrapperOptions options,
+			JsonDocumentWriter appender) throws IOException {
+		appender.startArray();
+		final Iterator<?> entries = collection.entries( persister );
+		while ( entries.hasNext() ) {
+			serializeCollectionPart( entries.next(), element, options, appender );
+		}
+		appender.endArray();
 	}
 
 	private static void serializeCollectionPart(
