@@ -79,7 +79,7 @@ public class OracleOsonJdbcType extends OracleJsonJdbcType {
 				if ( getEmbeddableMappingType() != null ) {
 					// OracleJsonFactory is used and not OracleOsonFactory as Jackson is not involved here
 					try (OracleJsonGenerator generator = OSON_JSON_FACTORY.createJsonBinaryGenerator( out )) {
-						JsonHelper.serialize(
+						JSON_VISITOR.visit(
 								getEmbeddableMappingType(),
 								value,
 								options,

@@ -17,6 +17,7 @@ import org.hibernate.type.descriptor.ValueBinder;
 import org.hibernate.type.descriptor.ValueExtractor;
 import org.hibernate.type.descriptor.WrapperOptions;
 import org.hibernate.type.descriptor.java.JavaType;
+import org.hibernate.type.descriptor.jdbc.spi.JsonGeneratingVisitor;
 import org.hibernate.type.format.StringJsonDocumentReader;
 import org.hibernate.type.format.StringJsonDocumentWriter;
 
@@ -31,6 +32,8 @@ public class JsonJdbcType implements AggregateJdbcType {
 	 * Singleton access
 	 */
 	public static final JsonJdbcType INSTANCE = new JsonJdbcType( null );
+
+	protected static final JsonGeneratingVisitor JSON_VISITOR = new JsonGeneratingVisitor();
 
 	private final EmbeddableMappingType embeddableMappingType;
 
@@ -92,7 +95,7 @@ public class JsonJdbcType implements AggregateJdbcType {
 		assert embeddableMappingType != null;
 		final StringJsonDocumentWriter writer = new StringJsonDocumentWriter();
 		try {
-			JsonHelper.serialize( embeddableMappingType, domainValue, options, writer );
+			JSON_VISITOR.visit( embeddableMappingType, domainValue, options, writer );
 			return writer.getJson();
 		}
 		catch (IOException e) {
@@ -110,7 +113,7 @@ public class JsonJdbcType implements AggregateJdbcType {
 		if ( embeddableMappingType != null ) {
 			try {
 				final StringJsonDocumentWriter writer = new StringJsonDocumentWriter();
-				JsonHelper.serialize( embeddableMappingType, value, options, writer );
+				JSON_VISITOR.visit( embeddableMappingType, value, options, writer );
 				return writer.getJson();
 			}
 			catch (IOException e) {

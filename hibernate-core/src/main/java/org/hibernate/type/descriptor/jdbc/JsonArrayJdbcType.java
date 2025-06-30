@@ -17,6 +17,7 @@ import org.hibernate.type.descriptor.WrapperOptions;
 import org.hibernate.type.descriptor.java.BasicPluralJavaType;
 import org.hibernate.type.descriptor.java.JavaType;
 import org.hibernate.type.descriptor.java.spi.UnknownBasicJavaType;
+import org.hibernate.type.descriptor.jdbc.spi.JsonGeneratingVisitor;
 import org.hibernate.type.format.StringJsonDocumentWriter;
 
 /**
@@ -25,6 +26,8 @@ import org.hibernate.type.format.StringJsonDocumentWriter;
  * @author Christian Beikov
  */
 public class JsonArrayJdbcType extends ArrayJdbcType {
+
+	protected static final JsonGeneratingVisitor JSON_VISITOR = new JsonGeneratingVisitor();
 
 	public JsonArrayJdbcType(JdbcType elementJdbcType) {
 		super( elementJdbcType );
@@ -79,11 +82,11 @@ public class JsonArrayJdbcType extends ArrayJdbcType {
 			final StringJsonDocumentWriter writer = new StringJsonDocumentWriter();
 			if ( elementJdbcType instanceof JsonJdbcType jsonElementJdbcType ) {
 				final EmbeddableMappingType embeddableMappingType = jsonElementJdbcType.getEmbeddableMappingType();
-				JsonHelper.serializeArray( embeddableMappingType, domainObjects, options, writer );
+				JSON_VISITOR.visitArray( embeddableMappingType, domainObjects, options, writer );
 			}
 			else {
 				assert !(elementJdbcType instanceof AggregateJdbcType);
-				JsonHelper.serializeArray( elementJavaType, elementJdbcType, domainObjects, options, writer );
+				JSON_VISITOR.serializeArray( elementJavaType, elementJdbcType, domainObjects, options, writer );
 			}
 			return writer.getJson();
 		}

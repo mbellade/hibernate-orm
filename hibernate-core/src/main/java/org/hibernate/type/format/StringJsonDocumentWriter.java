@@ -4,8 +4,6 @@
  */
 package org.hibernate.type.format;
 
-import org.hibernate.internal.util.collections.IdentitySet;
-import org.hibernate.metamodel.mapping.EntityMappingType;
 import org.hibernate.sql.ast.spi.SqlAppender;
 import org.hibernate.type.SqlTypes;
 import org.hibernate.type.descriptor.WrapperOptions;
@@ -19,9 +17,6 @@ import org.hibernate.type.descriptor.jdbc.JdbcType;
 import java.io.OutputStream;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.function.Consumer;
 
 
 /**
@@ -34,32 +29,21 @@ public class StringJsonDocumentWriter extends StringJsonDocument implements Json
 
 	private final JsonAppender appender;
 
-	private final boolean expandProperties;
-
-	private Map<String, IdentitySet<Object>> circularityTracker;
-
 	/**
 	 * Creates a new StringJsonDocumentWriter.
 	 */
 	public StringJsonDocumentWriter() {
-		this( new StringBuilder(), false );
+		this( new StringBuilder() );
 	}
 
 	/**
 	 * Creates a new StringJsonDocumentWriter.
 	 *
 	 * @param sb the StringBuilder to receive the serialized JSON
-	 * @param expandProperties see {@link #expandProperties()}
 	 */
-	public StringJsonDocumentWriter(StringBuilder sb, boolean expandProperties) {
+	public StringJsonDocumentWriter(StringBuilder sb) {
 		this.processingStates.push( JsonProcessingState.NONE );
 		this.appender = new JsonAppender( sb );
-		this.expandProperties = expandProperties;
-	}
-
-	@Override
-	public boolean expandProperties() {
-		return expandProperties;
 	}
 
 	/**
@@ -398,22 +382,6 @@ public class StringJsonDocumentWriter extends StringJsonDocument implements Json
 	@Override
 	public String toString() {
 		return appender.toString();
-	}
-
-	@Override
-	public void trackingEntity(Object entity, EntityMappingType entityType, Consumer<Boolean> action) {
-		if ( circularityTracker == null ) {
-			circularityTracker = new HashMap<>();
-		}
-		final IdentitySet<Object> entities = circularityTracker.computeIfAbsent(
-				entityType.getEntityName(),
-				k -> new IdentitySet<>()
-		);
-		final boolean added = entities.add( entity );
-		action.accept( added );
-		if ( added ) {
-			entities.remove( entity );
-		}
 	}
 
 	private static class JsonAppender extends OutputStream implements SqlAppender {

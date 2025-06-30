@@ -80,11 +80,11 @@ public class OracleOsonArrayJdbcType extends OracleJsonArrayJdbcType {
 						final OsonDocumentWriter writer = new OsonDocumentWriter( generator );
 						if ( getElementJdbcType() instanceof JsonJdbcType jsonElementJdbcType ) {
 							final EmbeddableMappingType embeddableMappingType = jsonElementJdbcType.getEmbeddableMappingType();
-							JsonHelper.serializeArray( embeddableMappingType, domainObjects, options, writer );
+							JSON_VISITOR.visitArray( embeddableMappingType, domainObjects, options, writer );
 						}
 						else {
 							assert !(getElementJdbcType() instanceof AggregateJdbcType);
-							JsonHelper.serializeArray(
+							JSON_VISITOR.serializeArray(
 									elementJavaType,
 									getElementJdbcType(),
 									domainObjects,
