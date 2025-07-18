@@ -348,7 +348,6 @@ class CodeTemplates {
 			if ( field != null ) {
 				asCompositeTracker( field ).$$_hibernate_setOwner( fieldName, self );
 			}
-			self.$$_hibernate_trackChange( fieldName );
 		}
 	}
 
