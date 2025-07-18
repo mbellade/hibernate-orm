@@ -127,7 +127,7 @@ public class DirtyCheckingWithEmbeddableAndNonVisibleGenericMappedSuperclassTest
 
 		assertThat( entity ).extracting( resultOf( TRACKER_HAS_CHANGED_NAME ) ).isEqualTo( true );
 		assertThat( entity ).extracting( resultOf( TRACKER_GET_NAME ) )
-				.isEqualTo( new String[] { "embedded" } );
+				.isEqualTo( new String[] { "embedded.text" } );
 
 		trackerClearMethod.invoke( entity );
 

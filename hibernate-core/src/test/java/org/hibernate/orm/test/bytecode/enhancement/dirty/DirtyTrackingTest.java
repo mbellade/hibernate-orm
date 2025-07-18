@@ -79,7 +79,7 @@ public class DirtyTrackingTest {
 		Address address = new Address();
 		entity.address = address;
 		address.city = "Arendal";
-		EnhancerTestUtils.checkDirtyTracking( entity, "address" );
+		EnhancerTestUtils.checkDirtyTracking( entity, "address", "address.city" );
 		EnhancerTestUtils.clearDirtyTracking( entity );
 
 		// make sure that new composite instances are cleared
@@ -87,11 +87,12 @@ public class DirtyTrackingTest {
 		entity.address = address2;
 		address.street1 = "Heggedalveien";
 		EnhancerTestUtils.checkDirtyTracking( entity, "address" );
+		EnhancerTestUtils.clearDirtyTracking( entity );
 
 		Country country = new Country();
 		address2.country = country;
 		country.name = "Norway";
-		EnhancerTestUtils.checkDirtyTracking( entity, "address", "address.country" );
+		EnhancerTestUtils.checkDirtyTracking( entity, "address.country", "address.country.name" );
 
 		address.country = null;
 		entity.address = null;

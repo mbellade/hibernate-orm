@@ -288,12 +288,13 @@ final class PersistentAttributeTransformer implements AsmVisitorWrapper.ForDecla
 
 		if ( compositeOwner ) {
 			builder = builder.implement( CompositeOwner.class );
+		}
 
-			if ( enhancementContext.isCompositeClass( managedCtClass ) ) {
-				builder = builder.defineMethod( EnhancerConstants.TRACKER_CHANGER_NAME, void.class, Visibility.PUBLIC )
-						.withParameters( String.class )
-						.intercept( Advice.to( CodeTemplates.CompositeOwnerDirtyCheckingHandler.class ).wrap( StubMethod.INSTANCE ) );
-			}
+		if ( enhancementContext.isCompositeClass( managedCtClass )
+			&& enhancementContext.doDirtyCheckingInline( managedCtClass ) ) {
+			builder = builder.defineMethod( EnhancerConstants.TRACKER_CHANGER_NAME, void.class, Visibility.PUBLIC )
+					.withParameters( String.class )
+					.intercept( Advice.to( CodeTemplates.CompositeOwnerDirtyCheckingHandler.class ).wrap( StubMethod.INSTANCE ) );
 		}
 
 		if ( enhancementContext.doExtendedEnhancement( managedCtClass ) ) {

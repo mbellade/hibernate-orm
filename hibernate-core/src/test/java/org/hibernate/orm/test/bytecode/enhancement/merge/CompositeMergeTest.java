@@ -74,24 +74,24 @@ public class CompositeMergeTest {
 
 		parent[0].address.country.name = "Paraguai";
 
-		checkDirtyTracking( parent[0], "address.country" );
+		checkDirtyTracking( parent[0], "address.country.name" );
 
 		scope.inTransaction( s -> {
 			parent[1] = (ParentEntity) s.merge( parent[0] );
-			checkDirtyTracking( parent[0], "address.country" );
-			checkDirtyTracking( parent[1], "address.country" );
+			checkDirtyTracking( parent[0], "address.country.name" );
+			checkDirtyTracking( parent[1], "address.country.name" );
 		} );
 
-		checkDirtyTracking( parent[0], "address.country" );
+		checkDirtyTracking( parent[0], "address.country.name" );
 		checkDirtyTracking( parent[1] );
 
 		parent[1].address.country.name = "Honduras";
 
-		checkDirtyTracking( parent[1], "address.country" );
+		checkDirtyTracking( parent[1], "address.country.name" );
 
 		scope.inTransaction( s -> {
 			s.merge( parent[1] );
-			checkDirtyTracking( parent[1], "address.country" );
+			checkDirtyTracking( parent[1], "address.country.name" );
 		} );
 
 		scope.inTransaction( s -> {
