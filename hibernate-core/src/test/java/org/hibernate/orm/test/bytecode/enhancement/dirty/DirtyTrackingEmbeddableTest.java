@@ -4,6 +4,7 @@
  */
 package org.hibernate.orm.test.bytecode.enhancement.dirty;
 
+import org.hibernate.testing.bytecode.enhancement.EnhancementOptions;
 import org.hibernate.testing.bytecode.enhancement.EnhancerTestUtils;
 import org.hibernate.testing.bytecode.enhancement.extension.BytecodeEnhanced;
 import org.hibernate.testing.orm.junit.JiraKey;
@@ -14,9 +15,15 @@ import jakarta.persistence.Embedded;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 
+import java.util.Objects;
+
 @JiraKey( "HHH-16774" )
 @JiraKey( "HHH-16952" )
 @BytecodeEnhanced
+@EnhancementOptions(
+		inlineDirtyChecking = true,
+		extendedEnhancement = true
+)
 public class DirtyTrackingEmbeddableTest {
 
 	@Test
@@ -33,6 +40,48 @@ public class DirtyTrackingEmbeddableTest {
 		address2.city = "Arendal";
 		EnhancerTestUtils.checkDirtyTracking( entity, "address1", "address2" );
 		EnhancerTestUtils.clearDirtyTracking( entity );
+	}
+
+	@Test
+	public void testSettingEmbedded() {
+		SimpleEntity entity = new SimpleEntity();
+		SimpleEmbeddable embeddable1 = new SimpleEmbeddable();
+		embeddable1.value = "test";
+		entity.simpleEmbeddable = embeddable1;
+		EnhancerTestUtils.clearDirtyTracking( entity );
+
+		// same value, no dirty tracking should be triggered
+		entity.simpleEmbeddable = embeddable1;
+		EnhancerTestUtils.checkDirtyTracking( entity );
+
+		// equivalent value, no dirty tracking should be triggered
+		SimpleEmbeddable embeddable2 = new SimpleEmbeddable();
+		embeddable2.value = "test";
+		entity.simpleEmbeddable = embeddable2;
+		EnhancerTestUtils.checkDirtyTracking( entity );
+
+		// different value, dirty tracking should be triggered
+		SimpleEmbeddable embeddable3 = new SimpleEmbeddable();
+		embeddable3.value = "test2";
+		entity.simpleEmbeddable = embeddable3;
+		EnhancerTestUtils.checkDirtyTracking( entity, "simpleEmbeddable" );
+	}
+
+	@Test
+	public void testSettingValueInEmbedded() {
+		SimpleEntity entity = new SimpleEntity();
+		SimpleEmbeddable embeddable1 = new SimpleEmbeddable();
+		embeddable1.value = "test";
+		entity.simpleEmbeddable = embeddable1;
+		EnhancerTestUtils.clearDirtyTracking( entity );
+
+		// same value, no dirty tracking should be triggered
+		entity.simpleEmbeddable.value = "test";
+		EnhancerTestUtils.checkDirtyTracking( entity );
+
+		// different value, dirty tracking should be triggered
+		entity.simpleEmbeddable.value = "test2";
+		EnhancerTestUtils.checkDirtyTracking( entity, "simpleEmbeddable.value" );
 	}
 
 	// --- //
@@ -56,6 +105,25 @@ public class DirtyTrackingEmbeddableTest {
 		String phone;
 	}
 
+	private static class SimpleEmbeddable {
+		String value;
+
+		@Override
+		public boolean equals(Object o) {
+			if ( o == null || getClass() != o.getClass() ) {
+				return false;
+			}
+
+			SimpleEmbeddable that = (SimpleEmbeddable) o;
+			return Objects.equals( value, that.value );
+		}
+
+		@Override
+		public int hashCode() {
+			return Objects.hashCode( value );
+		}
+	}
+
 	@Entity
 	private static class SimpleEntity {
 
@@ -67,6 +135,7 @@ public class DirtyTrackingEmbeddableTest {
 		Address1 address1;
 		@Embedded
 		Address2 address2;
-
+		@Embedded
+		SimpleEmbeddable simpleEmbeddable;
 	}
 }
