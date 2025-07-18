@@ -11,6 +11,7 @@ import jakarta.persistence.EmbeddedId;
 import jakarta.persistence.Id;
 
 import org.hibernate.bytecode.enhance.internal.bytebuddy.EnhancerImpl.AnnotatedFieldDescription;
+import org.hibernate.bytecode.enhance.internal.tracker.CompositeOwnerTracker;
 import org.hibernate.bytecode.enhance.spi.EnhancerConstants;
 import org.hibernate.engine.spi.PersistentAttributeInterceptable;
 
@@ -40,16 +41,19 @@ final class InlineDirtyCheckingHandler implements Implementation, ByteCodeAppend
 
 	private final FieldDescription.InDefinedShape persistentField;
 	private final boolean applyLazyCheck;
+	private final boolean isCompositeClass;
 
 	private InlineDirtyCheckingHandler(
 			Implementation delegate,
 			TypeDescription managedCtClass,
 			FieldDescription.InDefinedShape persistentField,
-			boolean applyLazyCheck) {
+			boolean applyLazyCheck,
+			boolean isCompositeClass) {
 		this.delegate = delegate;
 		this.managedCtClass = managedCtClass;
 		this.persistentField = persistentField;
 		this.applyLazyCheck = applyLazyCheck;
+		this.isCompositeClass = isCompositeClass;
 	}
 
 	static Implementation wrap(
@@ -59,10 +63,7 @@ final class InlineDirtyCheckingHandler implements Implementation, ByteCodeAppend
 			Implementation implementation) {
 		if ( enhancementContext.doDirtyCheckingInline( managedCtClass ) ) {
 
-			if ( enhancementContext.isCompositeClass( managedCtClass ) ) {
-				implementation = Advice.to( CodeTemplates.CompositeDirtyCheckingHandler.class ).wrap( implementation );
-			}
-			else if ( !persistentField.hasAnnotation( Id.class )
+			if ( !persistentField.hasAnnotation( Id.class )
 					&& !persistentField.hasAnnotation( EmbeddedId.class )
 					&& !( persistentField.getType().asErasure().isAssignableTo( Collection.class )
 					&& enhancementContext.isMappedCollection( persistentField ) ) ) {
@@ -70,7 +71,8 @@ final class InlineDirtyCheckingHandler implements Implementation, ByteCodeAppend
 						implementation,
 						managedCtClass,
 						persistentField.asDefined(),
-						enhancementContext.hasLazyLoadableAttributes( managedCtClass )
+						enhancementContext.hasLazyLoadableAttributes( managedCtClass ),
+						enhancementContext.isCompositeClass( managedCtClass )
 				);
 			}
 
@@ -204,17 +206,49 @@ final class InlineDirtyCheckingHandler implements Implementation, ByteCodeAppend
 		}
 		Label skip = new Label();
 		methodVisitor.visitJumpInsn( branchCode, skip );
-		// this.$$_hibernate_trackChange(fieldName)
-		methodVisitor.visitVarInsn( Opcodes.ALOAD, 0 );
-		methodVisitor.visitLdcInsn( persistentField.getName() );
-		methodVisitor.visitMethodInsn(
-				Opcodes.INVOKEVIRTUAL,
-				managedCtClass.getInternalName(),
-				EnhancerConstants.TRACKER_CHANGER_NAME,
-				Type.getMethodDescriptor( Type.VOID_TYPE, STRING_TYPE ),
-				false
-		);
-		// }
+		if ( isCompositeClass ) {
+			// we want to render the following code:
+			// if ( $$_hibernate_compositeOwners != null ) {
+			//		$$_hibernate_compositeOwners.callOwner( "." + fieldName );
+			//	}
+			methodVisitor.visitVarInsn( Opcodes.ALOAD, 0 );
+			methodVisitor.visitFieldInsn(
+					Opcodes.GETFIELD,
+					managedCtClass.getInternalName(),
+					EnhancerConstants.TRACKER_COMPOSITE_FIELD_NAME,
+					Type.getDescriptor( CompositeOwnerTracker.class )
+			);
+			Label notNull = new Label();
+			methodVisitor.visitJumpInsn( Opcodes.IFNULL, notNull );
+			methodVisitor.visitVarInsn( Opcodes.ALOAD, 0 );
+			methodVisitor.visitFieldInsn(
+					Opcodes.GETFIELD,
+					managedCtClass.getInternalName(),
+					EnhancerConstants.TRACKER_COMPOSITE_FIELD_NAME,
+					Type.getDescriptor( CompositeOwnerTracker.class )
+			);
+			methodVisitor.visitLdcInsn( "." + persistentField.getName() );
+			methodVisitor.visitMethodInsn(
+					Opcodes.INVOKEVIRTUAL,
+					Type.getInternalName( CompositeOwnerTracker.class ),
+					"callOwner",
+					Type.getMethodDescriptor( Type.VOID_TYPE, STRING_TYPE ),
+					false
+			);
+			methodVisitor.visitLabel( notNull );
+		}
+		else {
+			// this.$$_hibernate_trackChange(fieldName)
+			methodVisitor.visitVarInsn( Opcodes.ALOAD, 0 );
+			methodVisitor.visitLdcInsn( persistentField.getName() );
+			methodVisitor.visitMethodInsn(
+					Opcodes.INVOKEVIRTUAL,
+					managedCtClass.getInternalName(),
+					EnhancerConstants.TRACKER_CHANGER_NAME,
+					Type.getMethodDescriptor( Type.VOID_TYPE, STRING_TYPE ),
+					false
+			);
+		}
 		methodVisitor.visitLabel( skip );
 		if ( implementationContext.getClassFileVersion().isAtLeast( ClassFileVersion.JAVA_V6 ) ) {
 			methodVisitor.visitFrame( Opcodes.F_SAME, 0, null, 0, null );
