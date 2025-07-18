@@ -37,8 +37,8 @@ public class DirtyTrackingEmbeddableTest {
 
 		// testing composite object
 		address1.city = "Arendal";
-		address2.city = "Arendal";
-		EnhancerTestUtils.checkDirtyTracking( entity, "address1", "address2" );
+		address2.state = "Sorlandet";
+		EnhancerTestUtils.checkDirtyTracking( entity, "address1.city", "address2.state" );
 		EnhancerTestUtils.clearDirtyTracking( entity );
 	}
 
@@ -84,6 +84,32 @@ public class DirtyTrackingEmbeddableTest {
 		EnhancerTestUtils.checkDirtyTracking( entity, "simpleEmbeddable.value" );
 	}
 
+	@Test
+	public void testSettingValueInNestedEmbedded() {
+		SimpleEntity entity = new SimpleEntity();
+		NestedEmbeddable nestedEmbeddable = new NestedEmbeddable();
+		SimpleEmbeddable simpleEmbeddable = new SimpleEmbeddable();
+		simpleEmbeddable.value = "test";
+		nestedEmbeddable.simpleEmbeddable = simpleEmbeddable;
+		nestedEmbeddable.value = "nested";
+		entity.nestedEmbeddable = nestedEmbeddable;
+		EnhancerTestUtils.clearDirtyTracking( entity );
+
+		// same value, no dirty tracking should be triggered
+		entity.nestedEmbeddable.simpleEmbeddable.value = "test";
+		entity.nestedEmbeddable.value = "nested";
+		EnhancerTestUtils.checkDirtyTracking( entity );
+
+		// different value in nested embeddable, dirty tracking should be triggered
+		entity.nestedEmbeddable.simpleEmbeddable.value = "test2";
+		EnhancerTestUtils.checkDirtyTracking( entity, "nestedEmbeddable.simpleEmbeddable.value" );
+		EnhancerTestUtils.clearDirtyTracking( entity );
+
+		// different value in nested embeddable, dirty tracking should be triggered
+		entity.nestedEmbeddable.value = "nested2";
+		EnhancerTestUtils.checkDirtyTracking( entity, "nestedEmbeddable.value" );
+	}
+
 	// --- //
 
 	@Embeddable
@@ -124,6 +150,11 @@ public class DirtyTrackingEmbeddableTest {
 		}
 	}
 
+	private static class NestedEmbeddable {
+		SimpleEmbeddable simpleEmbeddable;
+		String value;
+	}
+
 	@Entity
 	private static class SimpleEntity {
 
@@ -137,5 +168,7 @@ public class DirtyTrackingEmbeddableTest {
 		Address2 address2;
 		@Embedded
 		SimpleEmbeddable simpleEmbeddable;
+		@Embedded
+		NestedEmbeddable nestedEmbeddable;
 	}
 }
