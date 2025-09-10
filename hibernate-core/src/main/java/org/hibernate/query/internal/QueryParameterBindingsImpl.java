@@ -8,7 +8,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -24,8 +23,11 @@ import org.hibernate.engine.spi.LoadQueryInfluencers;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.hibernate.engine.spi.SharedSessionContractImplementor;
 import org.hibernate.internal.FilterImpl;
+import org.hibernate.internal.util.collections.LinkedIdentityHashMap;
 import org.hibernate.metamodel.mapping.JdbcMapping;
 import org.hibernate.metamodel.mapping.MappingModelExpressible;
+import org.hibernate.query.sqm.internal.DomainParameterXref;
+import org.hibernate.query.sqm.tree.expression.ValueBindJpaCriteriaParameter;
 import org.hibernate.type.BindableType;
 import org.hibernate.query.QueryParameter;
 import org.hibernate.query.spi.ParameterMetadataImplementor;
@@ -37,7 +39,6 @@ import org.hibernate.type.descriptor.java.JavaTypedExpressible;
 import org.hibernate.type.spi.TypeConfiguration;
 
 import static org.hibernate.engine.internal.CacheHelper.addBasicValueToCacheKey;
-import static org.hibernate.internal.util.collections.CollectionHelper.linkedMapOfSize;
 import static org.hibernate.internal.util.collections.CollectionHelper.mapOfSize;
 
 /**
@@ -52,7 +53,7 @@ public class QueryParameterBindingsImpl implements QueryParameterBindings {
 
 	private final ParameterMetadataImplementor parameterMetadata;
 
-	private final LinkedHashMap<QueryParameter<?>, QueryParameterBinding<?>> parameterBindingMap;
+	private final Map<QueryParameter<?>, QueryParameterBinding<?>> parameterBindingMap;
 	private final HashMap<Object, QueryParameterBinding<?>> parameterBindingMapByNameOrPosition;
 
 	/**
@@ -72,7 +73,7 @@ public class QueryParameterBindingsImpl implements QueryParameterBindings {
 			ParameterMetadataImplementor parameterMetadata) {
 		this.parameterMetadata = parameterMetadata;
 		final Set<? extends QueryParameter<?>> queryParameters = parameterMetadata.getRegistrations();
-		this.parameterBindingMap = linkedMapOfSize( queryParameters.size() );
+		this.parameterBindingMap = new LinkedIdentityHashMap<>( queryParameters.size() );
 		this.parameterBindingMapByNameOrPosition = mapOfSize( queryParameters.size() );
 		for ( QueryParameter<?> queryParameter : queryParameters ) {
 			parameterBindingMap.put( queryParameter, createBinding( sessionFactory, parameterMetadata, queryParameter ) );
@@ -96,7 +97,7 @@ public class QueryParameterBindingsImpl implements QueryParameterBindings {
 
 	private QueryParameterBindingsImpl(QueryParameterBindingsImpl original, SessionFactoryImplementor sessionFactory) {
 		this.parameterMetadata = original.parameterMetadata;
-		this.parameterBindingMap = linkedMapOfSize( original.parameterBindingMap.size() );
+		this.parameterBindingMap = new LinkedIdentityHashMap<>( original.parameterBindingMap.size() );
 		this.parameterBindingMapByNameOrPosition = mapOfSize( original.parameterBindingMapByNameOrPosition.size() );
 		for ( Map.Entry<QueryParameter<?>, QueryParameterBinding<?>> entry : original.parameterBindingMap.entrySet() ) {
 			parameterBindingMap.put( entry.getKey(), createBinding( sessionFactory, entry.getValue() ) );
@@ -119,6 +120,19 @@ public class QueryParameterBindingsImpl implements QueryParameterBindings {
 
 	public QueryParameterBindingsImpl copyWithoutValues(SessionFactoryImplementor sessionFactory) {
 		return new QueryParameterBindingsImpl( this, sessionFactory );
+	}
+
+	public void replaceCriteriaParams(DomainParameterXref domainParameterXref) {
+		final var newParameters = domainParameterXref.getQueryParameters().keySet().toArray( new QueryParameter<?>[0] );
+		int i = 0;
+		for( var it = parameterBindingMap.entrySet().iterator(); it.hasNext(); ) {
+			var entry = it.next();
+			if ( entry.getKey() instanceof ValueBindJpaCriteriaParameter<?> ) {
+				parameterBindingMap.put( newParameters[i], entry.getValue() );
+				it.remove();
+			}
+			i++;
+		}
 	}
 
 	@Override

@@ -22,8 +22,10 @@ import org.hibernate.internal.util.MutableObject;
 import org.hibernate.metamodel.mapping.MappingModelExpressible;
 import org.hibernate.query.QueryTypeMismatchException;
 import org.hibernate.query.TupleTransformer;
+import org.hibernate.query.internal.QueryParameterBindingsImpl;
 import org.hibernate.query.spi.DomainQueryExecutionContext;
 import org.hibernate.query.spi.QueryOptions;
+import org.hibernate.query.spi.QueryParameterBindings;
 import org.hibernate.query.spi.ScrollableResultsImplementor;
 import org.hibernate.query.spi.SelectQueryPlan;
 import org.hibernate.query.sqm.spi.SqmParameterMappingModelResolutionAccess;
@@ -458,7 +460,7 @@ public class ConcreteSqmSelectQueryPlan<R> implements SelectQueryPlan<R> {
 	// For Hibernate Reactive
 	protected JdbcParameterBindings createJdbcParameterBindings(CacheableSqmInterpretation<SelectStatement, JdbcOperationQuerySelect> sqmInterpretation, DomainQueryExecutionContext executionContext) {
 		return SqmUtil.createJdbcParameterBindings(
-				executionContext.getQueryParameterBindings(),
+				replaceCriteriaParams( executionContext.getQueryParameterBindings(), domainParameterXref ),
 				domainParameterXref,
 				sqmInterpretation.jdbcParamsXref(),
 				new SqmParameterMappingModelResolutionAccess() {
@@ -470,6 +472,17 @@ public class ConcreteSqmSelectQueryPlan<R> implements SelectQueryPlan<R> {
 				},
 				executionContext.getSession()
 		);
+	}
+
+	private static QueryParameterBindings replaceCriteriaParams(
+			QueryParameterBindings bindings,
+			DomainParameterXref domainParameterXref) {
+		// We need to do this as criteria parameters are tracked using instance identity
+		// and the bindings do not contain the original instances of such parameters.
+		if ( domainParameterXref.hasParameters() && bindings instanceof QueryParameterBindingsImpl impl ) {
+			impl.replaceCriteriaParams( domainParameterXref );
+		}
+		return bindings;
 	}
 
 	// For Hibernate Reactive
