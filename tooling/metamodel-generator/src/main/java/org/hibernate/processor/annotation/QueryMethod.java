@@ -97,9 +97,11 @@ public class QueryMethod extends AbstractQueryMethod {
 		handleRestrictionParameters( declaration, paramTypes );
 		collectOrdering( declaration, paramTypes, containerType );
 		chainSession( declaration );
-		tryReturn( declaration, paramTypes, containerType );
+		inTry( declaration );
+		createQuery( declaration, true );
+		results( declaration, paramTypes, containerType );
 		castResult( declaration );
-		createQuery( declaration );
+		select( declaration );
 		setParameters( declaration, paramTypes, "");
 		handlePageParameters( declaration, paramTypes, containerType );
 		execute( declaration, initiallyUnwrapped() );
@@ -116,7 +118,16 @@ public class QueryMethod extends AbstractQueryMethod {
 	}
 
 	@Override
-	void createQuery(StringBuilder declaration) {
+	void createQuery(StringBuilder declaration, boolean declareVariable) {
+		if ( declareVariable ) {
+			if ( dataRepository && !isReactive() ) {
+				declaration
+						.append('\t');
+			}
+			declaration
+					.append('\t');
+			declaration.append("var _select = ");
+		}
 		if ( isUsingSpecification() ) {
 			if ( isReactive() ) {
 				declaration
@@ -130,7 +141,7 @@ public class QueryMethod extends AbstractQueryMethod {
 						.append("_spec.createQuery(")
 						.append(localSessionName())
 						.append(getObjectCall())
-						.append(")\n");
+						.append(")");
 			}
 		}
 		else {
@@ -147,8 +158,9 @@ public class QueryMethod extends AbstractQueryMethod {
 						.append(annotationMetaEntity.importType(returnTypeClass))
 						.append(".class");
 			}
-			declaration.append(")\n");
+			declaration.append(")");
 		}
+		declaration.append( declareVariable ? ";" : "" ).append( "\n" );
 	}
 
 	@Override

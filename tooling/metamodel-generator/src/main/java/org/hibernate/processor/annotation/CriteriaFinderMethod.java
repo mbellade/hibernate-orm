@@ -57,9 +57,11 @@ public class CriteriaFinderMethod extends AbstractCriteriaMethod {
 		createSpecification( declaration );
 		handleRestrictionParameters( declaration, paramTypes );
 		collectOrdering( declaration, paramTypes, containerType );
-		tryReturn( declaration, paramTypes, containerType );
+		inTry( declaration );
+		createQuery( declaration, true );
+		results( declaration, paramTypes, containerType );
 		castResult( declaration );
-		createQuery( declaration );
+		select( declaration );
 		handlePageParameters( declaration, paramTypes, containerType );
 		boolean unwrapped = initiallyUnwrapped();
 		unwrapped = enableFetchProfile( declaration, unwrapped );

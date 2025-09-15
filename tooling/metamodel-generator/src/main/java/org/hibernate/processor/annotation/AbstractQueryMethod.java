@@ -468,22 +468,25 @@ public abstract class AbstractQueryMethod extends AbstractAnnotatedMethod {
 			"\t\t\t\t\t\t};\n" +
 			"\t\t\t\t\t}).orElse(_unkeyedPage);";
 
-	void createQuery(StringBuilder declaration) {}
+	void createQuery(StringBuilder declaration, boolean declareVariable) {}
 
 	void createSpecification(StringBuilder declaration) {}
 
 	void setParameters(StringBuilder declaration, List<String> paramTypes, String indent) {}
 
-	void tryReturn(StringBuilder declaration, List<String> paramTypes, @Nullable String containerType) {
-		if ( isJakartaCursoredPage(containerType) ) {
-			makeKeyedPage( declaration, paramTypes );
-		}
+	void inTry(StringBuilder declaration) {
 		if ( dataRepository && !isReactive() ) {
 			declaration
 					.append("\ttry {\n");
 		}
-		if ( JD_CURSORED_PAGE.equals(containerType)
-				|| JD_PAGE.equals(containerType) ) {
+	}
+
+	void results(StringBuilder declaration, List<String> paramTypes, @Nullable String containerType) {
+		if ( isJakartaCursoredPage(containerType) ) {
+			makeKeyedPage( declaration, paramTypes );
+		}
+		if ( isJakartaCursoredPage(containerType)
+				|| isJakartaPage(containerType) ) {
 			if ( dataRepository ) {
 				declaration
 						.append('\t');
@@ -522,6 +525,11 @@ public abstract class AbstractQueryMethod extends AbstractAnnotatedMethod {
 		}
 	}
 
+	void select(StringBuilder declaration) {
+		declaration
+				.append("_select\n");
+	}
+
 	private void totalResults(StringBuilder declaration, List<String> paramTypes) {
 		declaration
 				.append("\tlong _totalResults = \n\t\t\t\t");
@@ -532,7 +540,7 @@ public abstract class AbstractQueryMethod extends AbstractAnnotatedMethod {
 			declaration
 					.append(parameterName(JD_PAGE_REQUEST, paramTypes, paramNames))
 					.append(".requestTotal()\n\t\t\t\t\t\t? ");
-			createQuery( declaration );
+			declaration.append( "_select" );
 			setParameters( declaration, paramTypes, "\t\t\t\t\t");
 			if ( isUsingEntityManager() ) {
 				declaration

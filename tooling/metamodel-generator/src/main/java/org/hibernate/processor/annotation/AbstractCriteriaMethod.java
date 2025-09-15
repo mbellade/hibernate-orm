@@ -80,14 +80,24 @@ public abstract class AbstractCriteriaMethod extends AbstractFinderMethod {
 	}
 
 	@Override
-	void createQuery(StringBuilder declaration) {
+	void createQuery(StringBuilder declaration, boolean declareVariable) {
+		if ( declareVariable ) {
+			if ( dataRepository && !isReactive() ) {
+				declaration
+						.append('\t');
+			}
+			declaration
+					.append('\t');
+			declaration
+					.append("var _select = ");
+		}
 		final boolean specification = isUsingSpecification();
 		if ( specification && !isReactive() ) {
 			declaration
 					.append("_spec.createQuery(")
 					.append(localSessionName())
 					.append(getObjectCall())
-					.append(")\n");
+					.append(")");
 		}
 		else {
 			declaration
@@ -103,8 +113,9 @@ public abstract class AbstractCriteriaMethod extends AbstractFinderMethod {
 			else {
 				declaration.append("_query");
 			}
-			declaration.append(")\n");
+			declaration.append( ")" );
 		}
+		declaration.append( declareVariable ? ";" : "" ).append( "\n" );
 	}
 
 	@Override
