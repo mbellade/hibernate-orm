@@ -540,7 +540,7 @@ public abstract class AbstractQueryMethod extends AbstractAnnotatedMethod {
 			declaration
 					.append(parameterName(JD_PAGE_REQUEST, paramTypes, paramNames))
 					.append(".requestTotal()\n\t\t\t\t\t\t? ");
-			declaration.append( "_select" );
+			select( declaration );
 			setParameters( declaration, paramTypes, "\t\t\t\t\t");
 			if ( isUsingEntityManager() ) {
 				declaration
