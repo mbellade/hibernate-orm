@@ -166,7 +166,7 @@ public class SelectionSpecificationImpl<T> implements SelectionSpecification<T>,
 	public SelectionQuery<T> createQuery(SharedSessionContract session) {
 		final var sessionImpl = session.unwrap(SharedSessionContractImplementor.class);
 		final SqmSelectStatement<T> sqmStatement = build( sessionImpl.getFactory().getQueryEngine() );
-		return new SqmSelectionQueryImpl<>( sqmStatement, true, resultType, sessionImpl );
+		return new SqmSelectionQueryImpl<>( sqmStatement, false, resultType, sessionImpl );
 	}
 
 	private SqmSelectStatement<T> build(QueryEngine queryEngine) {
@@ -177,7 +177,7 @@ public class SelectionSpecificationImpl<T> implements SelectionSpecification<T>,
 			sqmRoot = extractRoot( sqmStatement, resultType, hql );
 		}
 		else if ( criteriaQuery != null ) {
-			sqmStatement = (SqmSelectStatement<T>) criteriaQuery;
+			sqmStatement = ((SqmSelectStatement<T>) criteriaQuery).copy( noParamCopyContext( SqmQuerySource.CRITERIA ) );
 			sqmRoot = extractRoot( sqmStatement, resultType, "criteria query" );
 		}
 		else {
