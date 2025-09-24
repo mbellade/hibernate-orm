@@ -244,6 +244,14 @@ public class EnhancerImpl implements Enhancer {
 					constants.TypeIntegerPrimitive
 			);
 
+			builder = addGetEntityEntryCorssRefMethod(
+					builder,
+					constants.TypeEntityEntryCrossRef,
+					EnhancerConstants.ENTITY_ENTRY_FIELD_NAME,
+					EnhancerConstants.ENTITY_ENTRY_GETTER_NAME,
+					EnhancerConstants.ENTITY_ENTRY_SETTER_NAME
+			);
+
 			builder = addInterceptorHandling( builder, managedCtClass );
 
 			if ( enhancementContext.doDirtyCheckingInline() ) {
@@ -705,6 +713,18 @@ public class EnhancerImpl implements Enhancer {
 				// previous, next, instance-id
 				.withParameters( entityEntryType, managedEntityType, managedEntityType, intType )
 				.intercept( constants.implementationSetPersistenceInfo );
+	}
+
+	private DynamicType.Builder<?> addGetEntityEntryCorssRefMethod(
+			DynamicType.Builder<?> builder,
+			TypeDefinition entityEntryCrossRefType,
+			TypeDefinition managedEntityType,
+			TypeDefinition intType) {
+		return builder
+				// returns previous entity entry
+				.defineMethod( EnhancerConstants.ENTITY_ENTRY_CROSSREF_GETTER_NAME, entityEntryCrossRefType, constants.modifierPUBLIC )
+				// previous, next, instance-id
+				.intercept( constants.implementationGetEntityEntryCrossRef );
 	}
 
 	private List<AnnotatedFieldDescription> collectCollectionFields(TypeDescription managedCtClass) {

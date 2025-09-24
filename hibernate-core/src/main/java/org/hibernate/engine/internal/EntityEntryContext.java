@@ -337,15 +337,13 @@ public class EntityEntryContext {
 	 */
 	public Map.Entry<Object, EntityEntry>[] reentrantSafeEntityEntries() {
 		if ( dirty ) {
-			reentrantSafeEntries = new EntityEntryCrossRefImpl[count];
+			reentrantSafeEntries = new org.hibernate.engine.internal.EntityEntryCrossRef[count];
 			int i = 0;
 			var managedEntity = head;
 			while ( managedEntity != null ) {
-				reentrantSafeEntries[i++] = new EntityEntryCrossRefImpl(
-						managedEntity.$$_hibernate_getEntityInstance(),
-						managedEntity.$$_hibernate_getEntityEntry()
-				);
-				managedEntity = managedEntity.$$_hibernate_getNextManagedEntity();
+				final var crossRef = managedEntity.$$_hibernate_getEntityEntryCrossRef();
+				reentrantSafeEntries[i++] = crossRef;
+				managedEntity = crossRef.getNext();
 			}
 			dirty = false;
 		}
@@ -366,13 +364,12 @@ public class EntityEntryContext {
 	// Also: we perform two operations at once, so to not iterate on the list twice;
 	// being a linked list, multiple iterations are not cache friendly at all.
 	private void clearAllReferencesFromManagedEntities() {
-		var nextManagedEntity = head;
-		while ( nextManagedEntity != null ) {
-			final var current = nextManagedEntity;
-			nextManagedEntity = current.$$_hibernate_getNextManagedEntity();
-			Object toProcess = current.$$_hibernate_getEntityInstance();
-			unsetSession( asPersistentAttributeInterceptableOrNull( toProcess ) );
-			clearManagedEntity( current ); //careful this also unlinks from the "next" entry in the list
+		var managedEntity = head;
+		while ( managedEntity != null ) {
+			final var crossRef = managedEntity.$$_hibernate_getEntityEntryCrossRef();
+			unsetSession( asPersistentAttributeInterceptableOrNull( crossRef.getEntity() ) );
+			clearManagedEntity( managedEntity ); //careful this also unlinks from the "next" entry in the list
+			managedEntity = crossRef.getNext();
 		}
 	}
 
@@ -448,14 +445,17 @@ public class EntityEntryContext {
 
 		var managedEntity = head;
 		while ( managedEntity != null ) {
-			// so we know whether or not to build a ManagedEntityImpl on deserialize
-			oos.writeBoolean( managedEntity == managedEntity.$$_hibernate_getEntityInstance() );
-			oos.writeObject( managedEntity.$$_hibernate_getEntityInstance() );
+			final var crossRef = managedEntity.$$_hibernate_getEntityEntryCrossRef();
+			final var entity = crossRef.getEntity();
+			// so we know whether to build a ManagedEntityImpl on deserialize
+			oos.writeBoolean( managedEntity == entity );
+			oos.writeObject( entity );
+			final var entityEntry = crossRef.getEntityEntry();
 			// we need to know which implementation of EntityEntry is being serialized
-			oos.writeInt( managedEntity.$$_hibernate_getEntityEntry().getClass().getName().length() );
-			oos.writeChars( managedEntity.$$_hibernate_getEntityEntry().getClass().getName() );
-			managedEntity.$$_hibernate_getEntityEntry().serialize( oos );
-			managedEntity = managedEntity.$$_hibernate_getNextManagedEntity();
+			oos.writeInt( entityEntry.getClass().getName().length() );
+			oos.writeChars( entityEntry.getClass().getName() );
+			entityEntry.serialize( oos );
+			managedEntity = crossRef.getNext();
 		}
 	}
 
@@ -601,6 +601,17 @@ public class EntityEntryContext {
 		}
 
 		@Override
+		public org.hibernate.engine.internal.EntityEntryCrossRef $$_hibernate_getEntityEntryCrossRef() {
+			return new EntityEntryCrossRefImpl(
+					entityInstance,
+					entityEntry,
+					previous,
+					next,
+					$$_hibernate_getInstanceId()
+			);
+		}
+
+		@Override
 		public void $$_hibernate_setUseTracker(boolean useTracker) {
 			this.useTracker = useTracker;
 		}
@@ -709,6 +720,11 @@ public class EntityEntryContext {
 		}
 
 		@Override
+		public EntityEntryCrossRef $$_hibernate_getEntityEntryCrossRef() {
+			return managedEntity.$$_hibernate_getEntityEntryCrossRef();
+		}
+
+		@Override
 		public void $$_hibernate_setUseTracker(boolean useTracker) {
 			managedEntity.$$_hibernate_setUseTracker( useTracker );
 		}
@@ -755,62 +771,4 @@ public class EntityEntryContext {
 		}
 	}
 
-	/**
-	 * Used in building the {@link #reentrantSafeEntityEntries()} entries
-	 */
-	public interface EntityEntryCrossRef extends Map.Entry<Object,EntityEntry> {
-		/**
-		 * The entity
-		 *
-		 * @return The entity
-		 */
-		Object getEntity();
-
-		/**
-		 * The associated EntityEntry
-		 *
-		 * @return The EntityEntry associated with the entity in this context
-		 */
-		EntityEntry getEntityEntry();
-	}
-
-	/**
-	 * Implementation of the EntityEntryCrossRef interface
-	 */
-	private static class EntityEntryCrossRefImpl implements EntityEntryCrossRef {
-		private final Object entity;
-		private EntityEntry entityEntry;
-
-		private EntityEntryCrossRefImpl(Object entity, EntityEntry entityEntry) {
-			this.entity = entity;
-			this.entityEntry = entityEntry;
-		}
-
-		@Override
-		public Object getEntity() {
-			return entity;
-		}
-
-		@Override
-		public EntityEntry getEntityEntry() {
-			return entityEntry;
-		}
-
-		@Override
-		public Object getKey() {
-			return getEntity();
-		}
-
-		@Override
-		public EntityEntry getValue() {
-			return getEntityEntry();
-		}
-
-		@Override
-		public EntityEntry setValue(EntityEntry entityEntry) {
-			final EntityEntry old = this.entityEntry;
-			this.entityEntry = entityEntry;
-			return old;
-		}
-	}
 }

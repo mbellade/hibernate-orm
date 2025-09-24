@@ -91,6 +91,8 @@ public final class EnhancerConstants {
 	 */
 	public static final String NEXT_SETTER_NAME = "$$_hibernate_setNextManagedEntity";
 
+	public static final String ENTITY_ENTRY_CROSSREF_GETTER_NAME = "$$_hibernate_getEntityEntryCrossRef";
+
 	/**
 	 * Name of the field used to store the {@link org.hibernate.engine.spi.PersistentAttributeInterceptable}.
 	 */

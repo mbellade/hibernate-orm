@@ -18,6 +18,8 @@ import org.hibernate.bytecode.enhance.spi.CollectionTracker;
 import org.hibernate.bytecode.enhance.spi.EnhancerConstants;
 import org.hibernate.bytecode.enhance.spi.interceptor.LazyAttributeLoadingInterceptor;
 import org.hibernate.collection.spi.PersistentCollection;
+import org.hibernate.engine.internal.EntityEntryCrossRef;
+import org.hibernate.engine.internal.EntityEntryCrossRefImpl;
 import org.hibernate.engine.spi.CompositeOwner;
 import org.hibernate.engine.spi.EntityEntry;
 import org.hibernate.engine.spi.ExtendedSelfDirtinessTracker;
@@ -37,11 +39,12 @@ import net.bytebuddy.jar.asm.Opcodes;
 
 import static org.hibernate.engine.internal.ManagedTypeHelper.asCompositeTracker;
 
+@SuppressWarnings({"unused","UnusedAssignment"})
 class CodeTemplates {
 
 	static class SetPersistenceInfo {
 		@Advice.OnMethodExit
-		static void $$_hibernate_setOwner(
+		static void $$_hibernate_setPersistenceInfo(
 				@Advice.Argument(0) EntityEntry entityEntry,
 				@Advice.Argument(1) ManagedEntity previous,
 				@Advice.Argument(2) ManagedEntity next,
@@ -56,6 +59,20 @@ class CodeTemplates {
 			previousField = previous;
 			nextField = next;
 			instanceIdField = instanceId;
+		}
+	}
+
+	@SuppressWarnings("unused")
+	static class GetEntityEntryCrossRef {
+		@Advice.OnMethodExit
+		static void $$_hibernate_getEntityEntryCrossRef(
+				@Advice.This Object self,
+				@Advice.Return(readOnly = false) EntityEntryCrossRef returned,
+				@Advice.FieldValue(value = EnhancerConstants.ENTITY_ENTRY_FIELD_NAME) EntityEntry entityEntryField,
+				@Advice.FieldValue(value = EnhancerConstants.PREVIOUS_FIELD_NAME) ManagedEntity previousField,
+				@Advice.FieldValue(value = EnhancerConstants.NEXT_FIELD_NAME) ManagedEntity nextField,
+				@Advice.FieldValue(value = EnhancerConstants.INSTANCE_ID_FIELD_NAME) int instanceIdField) {
+			returned = new EntityEntryCrossRefImpl( self, entityEntryField, previousField, nextField, instanceIdField );
 		}
 	}
 

@@ -4,6 +4,9 @@
  */
 package org.hibernate.engine.spi;
 
+import org.hibernate.engine.internal.EntityEntryCrossRef;
+import org.hibernate.engine.internal.EntityEntryCrossRefImpl;
+
 /**
  * Specialized {@link Managed} contract for entity classes.  Essentially provides access to information
  * about an instance's association to a Session/EntityManager.  Specific information includes:<ul>
@@ -149,5 +152,15 @@ public interface ManagedEntity extends Managed, InstanceIdentity {
 		$$_hibernate_setNextManagedEntity( next );
 		$$_hibernate_setInstanceId( instanceId );
 		return oldEntry;
+	}
+
+	default EntityEntryCrossRef $$_hibernate_getEntityEntryCrossRef() {
+		return new EntityEntryCrossRefImpl(
+				$$_hibernate_getEntityInstance(),
+				$$_hibernate_getEntityEntry(),
+				$$_hibernate_getPreviousManagedEntity(),
+				$$_hibernate_getNextManagedEntity(),
+				$$_hibernate_getInstanceId()
+		);
 	}
 }
