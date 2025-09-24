@@ -51,7 +51,8 @@ public class InstanceIdentityStore<V> extends AbstractPagedArray<Object> {
 		}
 
 		final int keyIndex = toKeyIndex( instanceId );
-		final Page<Object> page = getPage( keyIndex );
+		final int pageIndex = toPageIndex( keyIndex );
+		final Page<Object> page = getPage( pageIndex );
 		if ( page != null ) {
 			final int offset = toPageOffset( keyIndex );
 			final Object k = page.get( offset );
@@ -105,7 +106,8 @@ public class InstanceIdentityStore<V> extends AbstractPagedArray<Object> {
 		}
 
 		final int keyIndex = toKeyIndex( instanceId );
-		final Page<Object> page = getPage( keyIndex );
+		final int pageIndex = toPageIndex( keyIndex );
+		final Page<Object> page = getPage( pageIndex );
 		if ( page != null ) {
 			final int pageOffset = toPageOffset( keyIndex );
 			Object k = page.set( pageOffset, null );

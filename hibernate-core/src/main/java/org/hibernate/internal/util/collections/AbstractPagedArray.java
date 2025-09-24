@@ -9,6 +9,8 @@ import java.util.Arrays;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 
+import org.checkerframework.checker.nullness.qual.Nullable;
+
 /**
  * Array-like structures that organizes elements in {@link Page}s, automatically allocating
  * more as needed. Access to data via absolute index is efficient as it requires
@@ -26,7 +28,7 @@ public class AbstractPagedArray<E> {
 	 */
 	protected static final class Page<E> {
 		private final Object[] elements;
-		private int lastNotEmptyOffset;
+		int lastNotEmptyOffset;
 
 		public Page() {
 			elements = new Object[PAGE_CAPACITY];
@@ -49,7 +51,7 @@ public class AbstractPagedArray<E> {
 		 * @param element the element to set
 		 * @return the previous element at {@code offset} if one existed, or {@code null}
 		 */
-		public E set(int offset, Object element) {
+		public E set(int offset, @Nullable Object element) {
 			if ( offset >= PAGE_CAPACITY ) {
 				throw new IllegalArgumentException( "The required offset is beyond page capacity" );
 			}
@@ -90,10 +92,6 @@ public class AbstractPagedArray<E> {
 			//noinspection unchecked
 			return (E) elements[offset];
 		}
-
-		int lastNotEmptyOffset() {
-			return lastNotEmptyOffset;
-		}
 	}
 
 	protected final ArrayList<Page<E>> elementPages;
@@ -113,11 +111,10 @@ public class AbstractPagedArray<E> {
 	/**
 	 * Utility methods that retrieves an {@link Page} based on the absolute index in the array.
 	 *
-	 * @param index the absolute index of the array
+	 * @param pageIndex the relative index of the page in the array (see {@link #toPageIndex(int)})
 	 * @return the page corresponding to the provided index, or {@code null}
 	 */
-	protected Page<E> getPage(int index) {
-		final int pageIndex = toPageIndex( index );
+	protected Page<E> getPage(int pageIndex) {
 		if ( pageIndex < elementPages.size() ) {
 			return elementPages.get( pageIndex );
 		}
@@ -131,7 +128,7 @@ public class AbstractPagedArray<E> {
 	 * @return the value contained in the array at the specified position, or {@code null}
 	 */
 	protected E get(int index) {
-		final Page<E> page = getPage( index );
+		final Page<E> page = getPage( toPageIndex( index ) );
 		return page != null ? page.get( toPageOffset( index ) ) : null;
 	}
 

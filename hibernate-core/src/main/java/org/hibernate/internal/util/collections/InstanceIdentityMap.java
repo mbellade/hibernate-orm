@@ -178,7 +178,8 @@ public class InstanceIdentityMap<K extends InstanceIdentity, V> extends Abstract
 		}
 
 		final int index = instanceId - 1;
-		final Page<Map.Entry<K, V>> page = getPage( index );
+		final int pageIndex = toPageIndex( index );
+		final Page<Map.Entry<K, V>> page = getPage( pageIndex );
 		if ( page != null ) {
 			final int pageOffset = toPageOffset( index );
 			final Map.Entry<K, V> entry = page.set( pageOffset, null );
@@ -186,6 +187,10 @@ public class InstanceIdentityMap<K extends InstanceIdentity, V> extends Abstract
 			if ( entry != null ) {
 				if ( entry.getKey() == key ) {
 					size--;
+					if ( page.lastNotEmptyOffset == 0 ) {
+						// if the page is now empty, remove it from the list of pages
+						elementPages.set( pageIndex, null );
+					}
 					return entry.getValue();
 				}
 				else {
@@ -253,7 +258,7 @@ public class InstanceIdentityMap<K extends InstanceIdentity, V> extends Abstract
 	public void forEach(BiConsumer<? super K, ? super V> action) {
 		for ( final Page<Map.Entry<K, V>> page : elementPages ) {
 			if ( page != null ) {
-				for ( int j = 0; j <= page.lastNotEmptyOffset(); j++ ) {
+				for ( int j = 0; j <= page.lastNotEmptyOffset; j++ ) {
 					final Map.Entry<K, V> entry = page.get( j );
 					if ( entry != null ) {
 						action.accept( entry.getKey(), entry.getValue() );
@@ -391,7 +396,7 @@ public class InstanceIdentityMap<K extends InstanceIdentity, V> extends Abstract
 			int i = 0;
 			for ( Page<Entry<K, V>> page : elementPages ) {
 				if ( page != null ) {
-					for ( int j = 0; j <= page.lastNotEmptyOffset(); j++ ) {
+					for ( int j = 0; j <= page.lastNotEmptyOffset; j++ ) {
 						final Map.Entry<K, V> entry;
 						if ( (entry = page.get( j )) != null ) {
 							a[i++] = (T) entry;

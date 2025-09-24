@@ -11,6 +11,7 @@ import org.hibernate.engine.spi.EntityEntry;
 import org.hibernate.engine.spi.ManagedEntity;
 import org.hibernate.engine.spi.PersistenceContext;
 import org.hibernate.engine.spi.PersistentAttributeInterceptable;
+import org.hibernate.internal.util.collections.InstanceIdentityList;
 import org.hibernate.internal.util.collections.InstanceIdentityStore;
 import org.hibernate.persister.entity.EntityPersister;
 
@@ -19,7 +20,6 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.lang.reflect.InvocationTargetException;
 import java.util.IdentityHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 
@@ -27,8 +27,6 @@ import static org.hibernate.engine.internal.ManagedTypeHelper.asManagedEntity;
 import static org.hibernate.engine.internal.ManagedTypeHelper.asPersistentAttributeInterceptableOrNull;
 import static org.hibernate.engine.internal.ManagedTypeHelper.isManagedEntity;
 import static org.hibernate.internal.CoreMessageLogger.CORE_LOGGER;
-import static org.hibernate.internal.util.collections.CollectionHelper.DEFAULT_LIST_CAPACITY;
-import static org.hibernate.internal.util.collections.CollectionHelper.arrayList;
 
 /**
  * Defines a context for maintaining the relation between an entity associated with the
@@ -53,7 +51,7 @@ public class EntityEntryContext {
 	private transient InstanceIdentityStore<ImmutableManagedEntityHolder> immutableManagedEntityXref;
 	private transient int currentInstanceId = 1;
 
-	private final transient List<ManagedEntity> managedEntities = arrayList( DEFAULT_LIST_CAPACITY );
+	private final transient InstanceIdentityList<ManagedEntity> managedEntities = new InstanceIdentityList<>();
 
 	private transient IdentityHashMap<Object,ManagedEntity> nonEnhancedEntityXref;
 
@@ -93,9 +91,15 @@ public class EntityEntryContext {
 		// PersistenceContext.
 		var managedEntity = getAssociatedManagedEntity( entity );
 
-		int instanceId = nextManagedEntityInstanceId();
+		final int instanceId;
 		final boolean alreadyAssociated = managedEntity != null;
-		if ( !alreadyAssociated ) {
+		if ( alreadyAssociated ) {
+			// if the entity was already associated with the context, skip the linking step.
+			managedEntity.$$_hibernate_setEntityEntry( entityEntry );
+			return;
+		}
+		else {
+			instanceId = nextManagedEntityInstanceId();
 			if ( isManagedEntity( entity ) ) {
 				final var managed = asManagedEntity( entity );
 				assert managed.$$_hibernate_getInstanceId() == 0;
@@ -113,7 +117,8 @@ public class EntityEntryContext {
 					}
 					else {
 						// When reference caching is enabled we cannot set the instance-id on the entity instance
-						instanceId = 0;
+//						instanceId = 0;
+						// todo marco : actually, what's the problem with setting the id on the shared instance ?
 						putManagedEntity( entity, managedEntity );
 					}
 				}
@@ -124,12 +129,6 @@ public class EntityEntryContext {
 			}
 		}
 
-		if ( alreadyAssociated ) {
-			// if the entity was already associated with the context, skip the linking step.
-			managedEntity.$$_hibernate_setEntityEntry( entityEntry );
-			return;
-		}
-
 		// TODO: can dirty be set to true here?
 
 		// finally, set up linking and count
@@ -138,12 +137,14 @@ public class EntityEntryContext {
 			previous = null;
 		}
 		else {
-			final var tail = managedEntities.get( managedEntities.size() - 1 );
-			tail.$$_hibernate_setNextManagedEntity( managedEntity );
-			previous = tail;
+			// todo marco : linking won't work with instance-ids
+//			final var tail = managedEntities.get( managedEntities.size() - 1 );
+//			tail.$$_hibernate_setNextManagedEntity( managedEntity );
+//			previous = tail;
+			previous = null;
 		}
 
-		managedEntities.add( managedEntity );
+		managedEntities.add( instanceId, managedEntity );
 
 		// Protect against stale data left in the ManagedEntity nullify next reference.
 		managedEntity.$$_hibernate_setPersistenceInfo( entityEntry, previous, null, instanceId );
@@ -270,7 +271,8 @@ public class EntityEntryContext {
 
 		removeXref( entity, managedEntity );
 
-		if ( managedEntities.size() ==1 ) {
+		// todo marco : linking won't work with instance-ids, just remove all this
+		/*if ( managedEntities.size() ==1 ) {
 			assert managedEntity.$$_hibernate_getPreviousManagedEntity() == null;
 			assert managedEntity.$$_hibernate_getNextManagedEntity() == null;
 		}
@@ -290,9 +292,9 @@ public class EntityEntryContext {
 			else {
 				assert managedEntity == managedEntities.get( managedEntities.size() - 1 );
 			}
-		}
+		}*/
 
-		managedEntities.remove( managedEntity );
+		managedEntities.remove( managedEntity.$$_hibernate_getInstanceId(), managedEntity );
 
 		// finally clean out the ManagedEntity and return the associated EntityEntry
 		return clearManagedEntity( managedEntity );
@@ -328,6 +330,7 @@ public class EntityEntryContext {
 			reentrantSafeEntries = new EntityEntryCrossRefImpl[managedEntities.size()];
 			int i = 0;
 			for ( final ManagedEntity managedEntity : managedEntities ) {
+				// todo marco : still a double itable-stub call here, but not much we can do about it
 				reentrantSafeEntries[i++] = new EntityEntryCrossRefImpl(
 						managedEntity.$$_hibernate_getEntityInstance(),
 						managedEntity.$$_hibernate_getEntityEntry()
@@ -502,7 +505,7 @@ public class EntityEntryContext {
 				previous.$$_hibernate_setNextManagedEntity( managedEntity );
 			}
 
-			context.managedEntities.add( managedEntity );
+			context.managedEntities.add( instanceId, managedEntity );
 			managedEntity.$$_hibernate_setPersistenceInfo( entry, previous, null, instanceId );
 			previous = managedEntity;
 		}
@@ -541,6 +544,7 @@ public class EntityEntryContext {
 		private ManagedEntity previous;
 		private ManagedEntity next;
 		private boolean useTracker;
+		int instanceId;
 
 		public ManagedEntityImpl(Object entityInstance) {
 			this.entityInstance = entityInstance;
@@ -594,11 +598,12 @@ public class EntityEntryContext {
 
 		@Override
 		public int $$_hibernate_getInstanceId() {
-			return 0;
+			return instanceId;
 		}
 
 		@Override
 		public void $$_hibernate_setInstanceId(int id) {
+			this.instanceId = id;
 		}
 
 		@Override
@@ -607,6 +612,7 @@ public class EntityEntryContext {
 			this.entityEntry = entityEntry;
 			this.previous = previous;
 			this.next = next;
+			this.instanceId = instanceId;
 			return oldEntry;
 		}
 	}
