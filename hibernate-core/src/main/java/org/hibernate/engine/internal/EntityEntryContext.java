@@ -18,9 +18,7 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.lang.reflect.InvocationTargetException;
-import java.util.ArrayList;
 import java.util.IdentityHashMap;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
@@ -140,7 +138,7 @@ public class EntityEntryContext {
 			previous = null;
 		}
 		else {
-			final var tail = managedEntities.getLast();
+			final var tail = managedEntities.get( managedEntities.size() - 1 );
 			tail.$$_hibernate_setNextManagedEntity( managedEntity );
 			previous = tail;
 		}
@@ -272,9 +270,11 @@ public class EntityEntryContext {
 
 		removeXref( entity, managedEntity );
 
-		managedEntities.remove( managedEntity );
-
-		if ( !managedEntities.isEmpty() ) {
+		if ( managedEntities.size() ==1 ) {
+			assert managedEntity.$$_hibernate_getPreviousManagedEntity() == null;
+			assert managedEntity.$$_hibernate_getNextManagedEntity() == null;
+		}
+		else {
 			// otherwise, previous or next (or both) should be non-null
 			final var previous = managedEntity.$$_hibernate_getPreviousManagedEntity();
 			final var next = managedEntity.$$_hibernate_getNextManagedEntity();
@@ -282,20 +282,17 @@ public class EntityEntryContext {
 				previous.$$_hibernate_setNextManagedEntity( next );
 			}
 			else {
-				assert managedEntity == managedEntities.getFirst();
+				assert managedEntity == managedEntities.get( 0 );
 			}
 			if ( next != null ) {
 				next.$$_hibernate_setPreviousManagedEntity( previous );
 			}
 			else {
-				assert managedEntity == managedEntities.getLast();
+				assert managedEntity == managedEntities.get( managedEntities.size() - 1 );
 			}
 		}
-		else {
-			// handle as a special case...
-			assert managedEntity.$$_hibernate_getPreviousManagedEntity() == null;
-			assert managedEntity.$$_hibernate_getNextManagedEntity() == null;
-		}
+
+		managedEntities.remove( managedEntity );
 
 		// finally clean out the ManagedEntity and return the associated EntityEntry
 		return clearManagedEntity( managedEntity );
