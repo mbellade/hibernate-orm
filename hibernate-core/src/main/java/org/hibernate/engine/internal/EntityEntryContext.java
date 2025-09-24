@@ -18,7 +18,10 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.lang.reflect.InvocationTargetException;
+import java.util.ArrayList;
 import java.util.IdentityHashMap;
+import java.util.LinkedList;
+import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 
@@ -26,6 +29,8 @@ import static org.hibernate.engine.internal.ManagedTypeHelper.asManagedEntity;
 import static org.hibernate.engine.internal.ManagedTypeHelper.asPersistentAttributeInterceptableOrNull;
 import static org.hibernate.engine.internal.ManagedTypeHelper.isManagedEntity;
 import static org.hibernate.internal.CoreMessageLogger.CORE_LOGGER;
+import static org.hibernate.internal.util.collections.CollectionHelper.DEFAULT_LIST_CAPACITY;
+import static org.hibernate.internal.util.collections.CollectionHelper.arrayList;
 
 /**
  * Defines a context for maintaining the relation between an entity associated with the
@@ -50,9 +55,7 @@ public class EntityEntryContext {
 	private transient InstanceIdentityStore<ImmutableManagedEntityHolder> immutableManagedEntityXref;
 	private transient int currentInstanceId = 1;
 
-	private transient ManagedEntity head;
-	private transient ManagedEntity tail;
-	private transient int count;
+	private final transient List<ManagedEntity> managedEntities = arrayList( DEFAULT_LIST_CAPACITY );
 
 	private transient IdentityHashMap<Object,ManagedEntity> nonEnhancedEntityXref;
 
@@ -133,20 +136,16 @@ public class EntityEntryContext {
 
 		// finally, set up linking and count
 		final ManagedEntity previous;
-		if ( tail == null ) {
-			assert head == null;
-			// Protect against stale data in the ManagedEntity and nullify previous reference.
+		if ( managedEntities.isEmpty() ) {
 			previous = null;
-			head = managedEntity;
-			tail = head;
-			count = 1;
 		}
 		else {
+			final var tail = managedEntities.getLast();
 			tail.$$_hibernate_setNextManagedEntity( managedEntity );
 			previous = tail;
-			tail = managedEntity;
-			count++;
 		}
+
+		managedEntities.add( managedEntity );
 
 		// Protect against stale data left in the ManagedEntity nullify next reference.
 		managedEntity.$$_hibernate_setPersistenceInfo( entityEntry, previous, null, instanceId );
@@ -273,37 +272,29 @@ public class EntityEntryContext {
 
 		removeXref( entity, managedEntity );
 
-		// re-link
-		count--;
+		managedEntities.remove( managedEntity );
 
-		if ( count == 0 ) {
-			// handle as a special case...
-			head = null;
-			tail = null;
-			assert managedEntity.$$_hibernate_getPreviousManagedEntity() == null;
-			assert managedEntity.$$_hibernate_getNextManagedEntity() == null;
-		}
-		else {
+		if ( !managedEntities.isEmpty() ) {
 			// otherwise, previous or next (or both) should be non-null
 			final var previous = managedEntity.$$_hibernate_getPreviousManagedEntity();
 			final var next = managedEntity.$$_hibernate_getNextManagedEntity();
-			if ( previous == null ) {
-				// we are removing head
-				assert managedEntity == head;
-				head = next;
-			}
-			else {
+			if ( previous != null ) {
 				previous.$$_hibernate_setNextManagedEntity( next );
 			}
-
-			if ( next == null ) {
-				// we are removing tail
-				assert managedEntity == tail;
-				tail = previous;
-			}
 			else {
+				assert managedEntity == managedEntities.getFirst();
+			}
+			if ( next != null ) {
 				next.$$_hibernate_setPreviousManagedEntity( previous );
 			}
+			else {
+				assert managedEntity == managedEntities.getLast();
+			}
+		}
+		else {
+			// handle as a special case...
+			assert managedEntity.$$_hibernate_getPreviousManagedEntity() == null;
+			assert managedEntity.$$_hibernate_getNextManagedEntity() == null;
 		}
 
 		// finally clean out the ManagedEntity and return the associated EntityEntry
@@ -337,15 +328,13 @@ public class EntityEntryContext {
 	 */
 	public Map.Entry<Object, EntityEntry>[] reentrantSafeEntityEntries() {
 		if ( dirty ) {
-			reentrantSafeEntries = new EntityEntryCrossRefImpl[count];
+			reentrantSafeEntries = new EntityEntryCrossRefImpl[managedEntities.size()];
 			int i = 0;
-			var managedEntity = head;
-			while ( managedEntity != null ) {
+			for ( final ManagedEntity managedEntity : managedEntities ) {
 				reentrantSafeEntries[i++] = new EntityEntryCrossRefImpl(
 						managedEntity.$$_hibernate_getEntityInstance(),
 						managedEntity.$$_hibernate_getEntityEntry()
 				);
-				managedEntity = managedEntity.$$_hibernate_getNextManagedEntity();
 			}
 			dirty = false;
 		}
@@ -353,11 +342,8 @@ public class EntityEntryContext {
 	}
 
 	private void processEachManagedEntity(final Consumer<ManagedEntity> action) {
-		var node = head;
-		while ( node != null ) {
-			final var next = node.$$_hibernate_getNextManagedEntity();
-			action.accept( node );
-			node = next;
+		for ( final ManagedEntity managedEntity : managedEntities ) {
+			action.accept( managedEntity );
 		}
 	}
 
@@ -366,13 +352,9 @@ public class EntityEntryContext {
 	// Also: we perform two operations at once, so to not iterate on the list twice;
 	// being a linked list, multiple iterations are not cache friendly at all.
 	private void clearAllReferencesFromManagedEntities() {
-		var nextManagedEntity = head;
-		while ( nextManagedEntity != null ) {
-			final var current = nextManagedEntity;
-			nextManagedEntity = current.$$_hibernate_getNextManagedEntity();
-			Object toProcess = current.$$_hibernate_getEntityInstance();
-			unsetSession( asPersistentAttributeInterceptableOrNull( toProcess ) );
-			clearManagedEntity( current ); //careful this also unlinks from the "next" entry in the list
+		for( final ManagedEntity managedEntity : managedEntities ) {
+			unsetSession( asPersistentAttributeInterceptableOrNull( managedEntity.$$_hibernate_getEntityInstance() ) );
+			clearManagedEntity( managedEntity );
 		}
 	}
 
@@ -400,9 +382,7 @@ public class EntityEntryContext {
 			nonEnhancedEntityXref.clear();
 		}
 
-		head = null;
-		tail = null;
-		count = 0;
+		managedEntities.clear();
 
 		reentrantSafeEntries = null;
 		currentInstanceId = 1;
@@ -440,22 +420,23 @@ public class EntityEntryContext {
 	 * @throws IOException Indicates an IO exception accessing the given stream
 	 */
 	public void serialize(ObjectOutputStream oos) throws IOException {
+		final var count = getNumberOfManagedEntities();
 		CORE_LOGGER.startingEntityEntrySerialization( count );
 		oos.writeInt( count );
 		if ( count == 0 ) {
 			return;
 		}
 
-		var managedEntity = head;
-		while ( managedEntity != null ) {
-			// so we know whether or not to build a ManagedEntityImpl on deserialize
-			oos.writeBoolean( managedEntity == managedEntity.$$_hibernate_getEntityInstance() );
-			oos.writeObject( managedEntity.$$_hibernate_getEntityInstance() );
+		for ( final ManagedEntity managedEntity : managedEntities ) {
+			final var instance = managedEntity.$$_hibernate_getEntityInstance();
+			final var entityEntry = managedEntity.$$_hibernate_getEntityEntry();
+			// so we know whether to build a ManagedEntityImpl on deserialize
+			oos.writeBoolean( managedEntity == instance );
+			oos.writeObject( instance );
 			// we need to know which implementation of EntityEntry is being serialized
-			oos.writeInt( managedEntity.$$_hibernate_getEntityEntry().getClass().getName().length() );
-			oos.writeChars( managedEntity.$$_hibernate_getEntityEntry().getClass().getName() );
-			managedEntity.$$_hibernate_getEntityEntry().serialize( oos );
-			managedEntity = managedEntity.$$_hibernate_getNextManagedEntity();
+			oos.writeInt( entityEntry.getClass().getName().length() );
+			oos.writeChars( entityEntry.getClass().getName() );
+			entityEntry.serialize( oos );
 		}
 	}
 
@@ -476,7 +457,6 @@ public class EntityEntryContext {
 		CORE_LOGGER.startingEntityEntryDeserialization( count );
 
 		final var context = new EntityEntryContext( rtn );
-		context.count = count;
 		context.dirty = true;
 
 		if ( count == 0 ) {
@@ -521,19 +501,14 @@ public class EntityEntryContext {
 				context.putManagedEntity( entity, managedEntity );
 			}
 
-			if ( previous == null ) {
-				context.head = managedEntity;
-			}
-			else {
+			if ( previous != null ) {
 				previous.$$_hibernate_setNextManagedEntity( managedEntity );
 			}
 
+			context.managedEntities.add( managedEntity );
 			managedEntity.$$_hibernate_setPersistenceInfo( entry, previous, null, instanceId );
-
 			previous = managedEntity;
 		}
-
-		context.tail = previous;
 
 		return context;
 	}
@@ -557,7 +532,7 @@ public class EntityEntryContext {
 	}
 
 	public int getNumberOfManagedEntities() {
-		return count;
+		return managedEntities.size();
 	}
 
 	/**
