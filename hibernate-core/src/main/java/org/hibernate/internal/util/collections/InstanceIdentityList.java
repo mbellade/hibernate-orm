@@ -69,10 +69,7 @@ public class InstanceIdentityList<E extends InstanceIdentity> extends AbstractPa
 			final E old = page.set( offset, null );
 			if ( old == o ) {
 				size--;
-				if ( page.lastNotEmptyOffset < 0 ) {
-					// if the page is now empty, remove it from the list of pages
-					elementPages.set( pageIndex, null );
-				}
+				clearEmptyPage( pageIndex, page );
 				return old;
 			}
 			else if ( old != null ) {

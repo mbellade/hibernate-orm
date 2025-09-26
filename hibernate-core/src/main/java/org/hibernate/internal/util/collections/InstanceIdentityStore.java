@@ -114,6 +114,7 @@ public class InstanceIdentityStore<V> extends AbstractPagedArray<Object> {
 			// Check that the provided instance really matches with the key contained in the store
 			if ( k == key ) {
 				page.set( pageOffset + 1, null );
+				clearEmptyPage( pageIndex, page );
 			}
 			else {
 				throw new ConcurrentModificationException(

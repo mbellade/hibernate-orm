@@ -122,6 +122,19 @@ public class AbstractPagedArray<E> {
 	}
 
 	/**
+	 * Utility method that clears the page reference at the specified index if it is empty.
+	 *
+	 * @param pageIndex the relative index of the page in the array (see {@link #toPageIndex(int)})
+	 * @param page the page to check for emptiness
+	 */
+	protected void clearEmptyPage(int pageIndex, Page<E> page) {
+		assert pageIndex == elementPages.indexOf( page ) : "The provided page is not located at the specified index";
+		if ( page.lastNotEmptyOffset < 0 ) {
+			elementPages.set( pageIndex, null );
+		}
+	}
+
+	/**
 	 * Returns the element from the array at the specified index
 	 *
 	 * @param index the absolute index in the underlying array

@@ -187,10 +187,7 @@ public class InstanceIdentityMap<K extends InstanceIdentity, V> extends Abstract
 			if ( entry != null ) {
 				if ( entry.getKey() == key ) {
 					size--;
-					if ( page.lastNotEmptyOffset == 0 ) {
-						// if the page is now empty, remove it from the list of pages
-						elementPages.set( pageIndex, null );
-					}
+					clearEmptyPage( pageIndex, page );
 					return entry.getValue();
 				}
 				else {
