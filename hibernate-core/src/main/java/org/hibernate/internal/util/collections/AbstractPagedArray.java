@@ -18,8 +18,14 @@ import java.util.NoSuchElementException;
  */
 public class AbstractPagedArray<E> {
 	// It's important that capacity is a power of 2 to allow calculating page index and offset within the page
-	// with simple division and modulo operations; also static final so JIT can inline these operations.
+	// with simple shift and mask operations (requiring less CPU cycles than division and modulo operations).
 	private static final int PAGE_CAPACITY = 1 << 5; // 32, 16 key + value pairs
+	private static final int PAGE_SHIFT = Integer.numberOfTrailingZeros( PAGE_CAPACITY );
+	private static final int PAGE_MASK = PAGE_CAPACITY - 1;
+
+	{
+		assert Integer.bitCount( PAGE_CAPACITY ) == 1 : "PAGE_CAPACITY must be a power of 2";
+	}
 
 	/**
 	 * Represents a page of {@link #PAGE_CAPACITY} objects in the overall array.
@@ -102,12 +108,14 @@ public class AbstractPagedArray<E> {
 		elementPages = new ArrayList<>();
 	}
 
+	// equivalent of index / PAGE_CAPACITY (when PAGE_CAPACITY is a power of 2) but faster
 	protected static int toPageIndex(final int index) {
-		return index / PAGE_CAPACITY;
+		return index >> PAGE_SHIFT;
 	}
 
+	// equivalent of index % PAGE_CAPACITY (when PAGE_CAPACITY is a power of 2) but faster
 	protected static int toPageOffset(final int index) {
-		return index % PAGE_CAPACITY;
+		return index & PAGE_MASK;
 	}
 
 	/**

@@ -113,7 +113,7 @@ public class InstanceIdentityStore<V> extends AbstractPagedArray<Object> {
 			if ( k == key ) {
 				page.set( pageOffset + 1, null );
 			}
-			else {
+			else if ( k != null ) {
 				throw new ConcurrentModificationException(
 						"Found a different instance corresponding to instanceId [" + instanceId +
 						"], this might indicate a concurrent access to this persistence context."
