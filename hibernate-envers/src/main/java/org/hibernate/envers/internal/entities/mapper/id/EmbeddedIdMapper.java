@@ -58,17 +58,6 @@ public class EmbeddedIdMapper extends AbstractCompositeIdMapper implements Simpl
 
 		final Setter setter = ReflectionTools.getSetter( obj.getClass(), idPropertyData, getServiceRegistry() );
 		try {
-			if ( compositeIdClass.isRecord() ) {
-				final var subObj = mapToRecordFromMap( data );
-				if ( subObj == null ) {
-					return false;
-				}
-				else {
-					setter.set( obj, subObj );
-					return true;
-				}
-			}
-
 			final Object subObj = instantiateCompositeId();
 
 			boolean ret = true;
