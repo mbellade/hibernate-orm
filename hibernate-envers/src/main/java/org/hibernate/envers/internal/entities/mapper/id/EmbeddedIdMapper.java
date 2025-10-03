@@ -14,7 +14,6 @@ import org.hibernate.envers.internal.entities.PropertyData;
 import org.hibernate.envers.internal.tools.ReflectionTools;
 import org.hibernate.mapping.Component;
 import org.hibernate.property.access.spi.Setter;
-import org.hibernate.service.ServiceRegistry;
 
 /**
  * An identifier mapper implementation for {@link jakarta.persistence.EmbeddedId} mappings.
@@ -26,13 +25,8 @@ public class EmbeddedIdMapper extends AbstractCompositeIdMapper implements Simpl
 	private PropertyData idPropertyData;
 
 	public EmbeddedIdMapper(PropertyData propertyData, Component component) {
-		super( component.getComponentClass(), component.getServiceRegistry() );
+		super( component );
 		this.idPropertyData = propertyData;
-	}
-
-	private EmbeddedIdMapper(PropertyData idPropertyData, Class<?> compositeIdClass, ServiceRegistry serviceRegistry) {
-		super( compositeIdClass, serviceRegistry );
-		this.idPropertyData = idPropertyData;
 	}
 
 	@Override
@@ -58,11 +52,17 @@ public class EmbeddedIdMapper extends AbstractCompositeIdMapper implements Simpl
 
 		final Setter setter = ReflectionTools.getSetter( obj.getClass(), idPropertyData, getServiceRegistry() );
 		try {
-			final Object subObj = instantiateCompositeId();
-
+			final Object subObj;
 			boolean ret = true;
-			for ( IdMapper idMapper : ids.values() ) {
-				ret &= idMapper.mapToEntityFromMap( subObj, data );
+			if ( component.getType().isMutable() ) {
+				subObj = instantiateCompositeId( null );
+				for ( IdMapper idMapper : ids.values() ) {
+					ret &= idMapper.mapToEntityFromMap( subObj, data );
+				}
+			}
+			else {
+				subObj = mapToImmutableIdFromMap( data );
+				ret = subObj != null;
 			}
 
 			if ( ret ) {
@@ -78,7 +78,7 @@ public class EmbeddedIdMapper extends AbstractCompositeIdMapper implements Simpl
 
 	@Override
 	public IdMapper prefixMappedProperties(String prefix) {
-		final EmbeddedIdMapper ret = new EmbeddedIdMapper( idPropertyData, compositeIdClass, getServiceRegistry() );
+		final EmbeddedIdMapper ret = new EmbeddedIdMapper( idPropertyData, component );
 
 		for ( PropertyData propertyData : ids.keySet() ) {
 			final String propertyName = propertyData.getName();

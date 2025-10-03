@@ -9,8 +9,10 @@ import java.util.Map;
 import org.hibernate.envers.exception.AuditException;
 import org.hibernate.envers.internal.entities.PropertyData;
 import org.hibernate.envers.internal.tools.Tools;
-import org.hibernate.internal.util.ReflectHelper;
-import org.hibernate.service.ServiceRegistry;
+import org.hibernate.mapping.Component;
+import org.hibernate.metamodel.spi.ValueAccess;
+import org.hibernate.type.spi.CompositeTypeImplementor;
+
 
 /**
  * An abstract identifier mapper implementation specific for composite identifiers.
@@ -20,13 +22,13 @@ import org.hibernate.service.ServiceRegistry;
  * @author Chris Cranford
  */
 public abstract class AbstractCompositeIdMapper extends AbstractIdMapper implements SimpleIdMapperBuilder {
-	protected final Class<?> compositeIdClass;
+	protected final Component component;
 
 	protected Map<PropertyData, AbstractIdMapper> ids;
 
-	protected AbstractCompositeIdMapper(Class<?> compositeIdClass, ServiceRegistry serviceRegistry) {
-		super( serviceRegistry );
-		this.compositeIdClass = compositeIdClass;
+	protected AbstractCompositeIdMapper(Component component) {
+		super( component.getServiceRegistry() );
+		this.component = component;
 		ids = Tools.newLinkedHashMap();
 	}
 
@@ -46,14 +48,31 @@ public abstract class AbstractCompositeIdMapper extends AbstractIdMapper impleme
 			return null;
 		}
 
-		final Object compositeId = instantiateCompositeId();
-		for ( AbstractIdMapper mapper : ids.values() ) {
-			if ( !mapper.mapToEntityFromMap( compositeId, data ) ) {
-				return null;
+		if ( !component.getType().isMutable() ) {
+			return mapToImmutableIdFromMap( data );
+		}
+
+		final Object compositeId = instantiateCompositeId( null );
+
+		if ( component.getType().isMutable() ) {
+			for ( AbstractIdMapper mapper : ids.values() ) {
+				if ( !mapper.mapToEntityFromMap( compositeId, data ) ) {
+					return null;
+				}
 			}
 		}
 
 		return compositeId;
+	}
+
+	protected Object mapToImmutableIdFromMap(Map data) {
+		assert !getComponentType().isMutable();
+		final var propertyNames = component.getPropertyNames();
+		final var values = new Object[propertyNames.length];
+		for ( int i = 0; i < propertyNames.length; i++ ) {
+			values[i] = data.get( propertyNames[i] );
+		}
+		return instantiateCompositeId( () -> values );
 	}
 
 	@Override
@@ -61,12 +80,20 @@ public abstract class AbstractCompositeIdMapper extends AbstractIdMapper impleme
 		// no-op; does nothing
 	}
 
-	protected Object instantiateCompositeId() {
+	protected Object instantiateCompositeId(ValueAccess valueAccess) {
 		try {
-			return ReflectHelper.getDefaultConstructor( compositeIdClass ).newInstance();
+			return getComponentType().getMappingModelPart()
+					.getEmbeddableTypeDescriptor()
+					.getRepresentationStrategy()
+					.getInstantiator()
+					.instantiate( valueAccess );
 		}
 		catch ( Exception e ) {
 			throw new AuditException( e );
 		}
+	}
+
+	protected CompositeTypeImplementor getComponentType() {
+		return (CompositeTypeImplementor) component.getType();
 	}
 }
