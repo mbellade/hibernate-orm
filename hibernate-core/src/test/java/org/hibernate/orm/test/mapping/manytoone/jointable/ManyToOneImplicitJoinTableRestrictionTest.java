@@ -9,11 +9,12 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinTable;
 import jakarta.persistence.ManyToOne;
 import org.hibernate.annotations.SQLRestriction;
-import org.hibernate.dialect.SybaseDialect;
+
+import org.hibernate.testing.orm.junit.DialectFeatureChecks;
 import org.hibernate.testing.orm.junit.EntityManagerFactoryScope;
 import org.hibernate.testing.orm.junit.JiraKey;
 import org.hibernate.testing.orm.junit.Jpa;
-import org.hibernate.testing.orm.junit.SkipForDialect;
+import org.hibernate.testing.orm.junit.RequiresDialectFeature;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -23,8 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 @Jpa(annotatedClasses =
 		{ManyToOneImplicitJoinTableRestrictionTest.X.class,
 		ManyToOneImplicitJoinTableRestrictionTest.Y.class})
-@SkipForDialect(dialectClass = SybaseDialect.class, matchSubTypes = true,
-		reason = "Sybase doesn't have support for upserts")
+@RequiresDialectFeature( feature = DialectFeatureChecks.SupportsUpsertOrMerge.class )
 class ManyToOneImplicitJoinTableRestrictionTest {
 	@JiraKey("HHH-19555") @Test
 	void test(EntityManagerFactoryScope scope) {

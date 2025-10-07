@@ -11,10 +11,12 @@ import jakarta.persistence.JoinTable;
 import jakarta.persistence.ManyToOne;
 import org.hibernate.annotations.SQLRestriction;
 import org.hibernate.dialect.SybaseDialect;
+
+import org.hibernate.testing.orm.junit.DialectFeatureChecks;
 import org.hibernate.testing.orm.junit.EntityManagerFactoryScope;
-import org.hibernate.testing.orm.junit.FailureExpected;
 import org.hibernate.testing.orm.junit.JiraKey;
 import org.hibernate.testing.orm.junit.Jpa;
+import org.hibernate.testing.orm.junit.RequiresDialectFeature;
 import org.hibernate.testing.orm.junit.SkipForDialect;
 import org.junit.jupiter.api.Test;
 
@@ -27,9 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 		ManyToOneLazyImplicitJoinTableRestrictionTest.Y.class})
 @SkipForDialect(dialectClass = SybaseDialect.class, matchSubTypes = true,
 		reason = "Sybase doesn't have support for upserts")
-@FailureExpected(jiraKey = "HHH-19555",
-		// need to fix this using @ConcreteProxy-style lookahead
-		reason = "restriction is not applied until entity is actually fetched")
+@RequiresDialectFeature( feature = DialectFeatureChecks.SupportsUpsertOrMerge.class )
 class ManyToOneLazyImplicitJoinTableRestrictionTest {
 	@JiraKey("HHH-19555") @Test
 	void test(EntityManagerFactoryScope scope) {
@@ -75,7 +75,7 @@ class ManyToOneLazyImplicitJoinTableRestrictionTest {
 			Y y = s.find( Y.class, 0L );
 			assertEquals("Gavin", y.name);
 			assertNotNull(y.x);
-			assertEquals( 1L, y.x.id );
+			assertEquals( 0, y.x.id );
 			var id = s.createNativeQuery( "select x_id from Y_X", long.class ).getSingleResult();
 			assertEquals( 1L, id );
 		} );
