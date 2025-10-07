@@ -1563,9 +1563,15 @@ public class ToOneAttributeMapping
 			// So if the lhs of this association is the target of the FK, we have to use the KEY part to avoid a join
 			side = ForeignKeyDescriptor.Nature.KEY;
 		}
+		else if ( getEntityMappingType().hasWhereRestrictions() && this.sideNature == ForeignKeyDescriptor.Nature.KEY ) {
+			// If the target entity has a sql restriction, we must select the target side to ensure that the additional
+			// where clause condition is applied; note this will result in an additional join if using a join table
+			side = ForeignKeyDescriptor.Nature.TARGET;
+		}
 		else {
 			side = this.sideNature;
 		}
+
 		if ( fetchTiming == FetchTiming.IMMEDIATE && selected
 			|| !creationState.getSqlAstCreationState().isProcedureOrNativeQuery() && needsJoinFetch( side ) ) {
 			final var tableGroup = determineTableGroupForFetch(
