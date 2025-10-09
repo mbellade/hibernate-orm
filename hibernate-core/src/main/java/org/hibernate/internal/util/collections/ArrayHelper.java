@@ -7,6 +7,7 @@ package org.hibernate.internal.util.collections;
 import java.lang.reflect.Array;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.BitSet;
 import java.util.Collection;
 import java.util.List;
 import java.util.function.Consumer;
@@ -101,6 +102,17 @@ public final class ArrayHelper {
 			arr[i++] = iter.next();
 		}
 		return arr;
+	}
+
+	public static int[] toIntArray(BitSet bs) {
+		final int[] result = new int[bs.cardinality()];
+		for ( int index = 0, i = bs.nextSetBit( 0 ); i >= 0; i = bs.nextSetBit( i + 1 ) ) {
+			result[index++] = i;
+			if ( i == Integer.MAX_VALUE ) {
+				break; // or (i+1) would overflow
+			}
+		}
+		return result;
 	}
 
 	public static boolean[] toBooleanArray(Collection<Boolean> coll) {

@@ -2434,19 +2434,20 @@ public abstract class AbstractEntityPersister
 				attributeNames == null
 						? 0
 						: attributeNames.length + mutablePropertiesIndexes.cardinality();
-		final List<Integer> fields = new ArrayList<>( estimatedSize );
 		if ( estimatedSize == 0 ) {
 			return EMPTY_INT_ARRAY;
 		}
+
+		final BitSet dirtyIndexes = new BitSet( estimatedSize );
 		if ( !mutablePropertiesIndexes.isEmpty() ) {
 			// We have to check the state for "mutable" properties as dirty tracking isn't aware of mutable types
 			final Type[] propertyTypes = getPropertyTypes();
 			final boolean[] propertyCheckability = getPropertyCheckability();
 			for ( int i = mutablePropertiesIndexes.nextSetBit(0); i >= 0;
-					i = mutablePropertiesIndexes.nextSetBit(i + 1) ) {
+				i = mutablePropertiesIndexes.nextSetBit(i + 1) ) {
 				// This is kindly borrowed from org.hibernate.type.TypeHelper.findDirty
 				if ( isDirty( currentState, previousState, propertyTypes, propertyCheckability, i, session ) ) {
-					fields.add( i );
+					dirtyIndexes.set( i );
 				}
 			}
 		}
@@ -2476,41 +2477,35 @@ public abstract class AbstractEntityPersister
 				int index = 0;
 				for ( int i = 0; i < attributeMappings.size(); i++ ) {
 					final var attributeMapping = attributeMappings.get( i );
-					final String attributeName = attributeMapping.getAttributeName();
+					final var attributeName = attributeMapping.getAttributeName();
 					if ( isPrefix( attributeMapping, attributeNames[index] ) ) {
-						final int position = attributeMapping.getStateArrayPosition();
-						if ( propertyUpdateability[position] && !fields.contains( position ) ) {
-							fields.add( position );
+						final var position = attributeMapping.getStateArrayPosition();
+						if ( propertyUpdateability[position] ) {
+							dirtyIndexes.set( position );
 						}
-						index++;
-						if ( index < attributeNames.length ) {
-							// Skip duplicates
-							do {
-								if ( attributeNames[index].equals( attributeName ) ) {
-									index++;
-								}
-								else {
-									break;
-								}
-							} while ( index < attributeNames.length );
-						}
-						else {
+
+						do {
+							// Skip duplicate attribute names
+							index++;
+						} while ( index < attributeNames.length && attributeNames[index].equals( attributeName ) );
+
+						if ( index >= attributeNames.length ) {
 							break;
 						}
 					}
 				}
 			}
 			else {
-				for ( String attributeName : attributeNames ) {
+				for ( final String attributeName : attributeNames ) {
 					final Integer index = getPropertyIndexOrNull( attributeName );
-					if ( index != null && propertyUpdateability[index] && !fields.contains( index ) ) {
-						fields.add( index );
+					if ( index != null && propertyUpdateability[index] ) {
+						dirtyIndexes.set( index );
 					}
 				}
 			}
 		}
 
-		return toIntArray( fields );
+		return toIntArray( dirtyIndexes );
 	}
 
 	private boolean isDirty(
