@@ -1605,9 +1605,7 @@ public abstract class AbstractEntityPersister
 
 		final var interceptor = asPersistentAttributeInterceptable( entity ).$$_hibernate_getInterceptor();
 		assert interceptor != null : "Expecting bytecode interceptor to be non-null";
-		// Create a copy of init attrs, since lazySelectLoadPlan.load may update the set inside the interceptor,
-		// and we end up with the modified one here:
-		final Set<String> initializedLazyAttributeNames = new HashSet<>( interceptor.getInitializedLazyAttributeNames() );
+		final Set<String> initializedLazyAttributeNames = interceptor.getInitializedLazyAttributeNames();
 
 		final var lazyAttributesMetadata = getBytecodeEnhancementMetadata().getLazyAttributesMetadata();
 		final String fetchGroup = lazyAttributesMetadata.getFetchGroupName( fieldName );
@@ -1616,7 +1614,7 @@ public abstract class AbstractEntityPersister
 		final var lazySelectLoadPlan = getSQLLazySelectLoadPlan( fetchGroup );
 		try {
 			Object finalResult = null;
-			final Object[] results = lazySelectLoadPlan.load( id, session );
+			final LazyLoadPlanResults results = new LazyLoadPlanResults( lazySelectLoadPlan, id, session );
 			int i = 0;
 			for ( var fetchGroupAttributeDescriptor : fetchGroupAttributeDescriptors ) {
 				final String attributeName = fetchGroupAttributeDescriptor.getName();
@@ -1634,7 +1632,7 @@ public abstract class AbstractEntityPersister
 					// - of course that would mean a new method on SelfDirtinessTracker to allow un-marking
 				}
 				else {
-					final Object result = results[i++];
+					final Object result = results.getResults()[i++];
 					if ( initializeLazyProperty( fieldName, entity, entry, fetchGroupAttributeDescriptor, result ) ) {
 						finalResult = result;
 						interceptor.attributeInitialized( attributeName );
@@ -1651,6 +1649,30 @@ public abstract class AbstractEntityPersister
 							+ infoString( this, id, getFactory() ),
 					ex.getSQL()
 			);
+		}
+	}
+
+	static class LazyLoadPlanResults {
+		final SingleIdArrayLoadPlan loadPlan;
+		final Object id;
+		final SharedSessionContractImplementor session;
+
+		Object[] results;
+
+		public LazyLoadPlanResults(SingleIdArrayLoadPlan loadPlan, Object id, SharedSessionContractImplementor session) {
+			this.loadPlan = loadPlan;
+			this.id = id;
+			this.session = session;
+		}
+
+		public Object[] getResults() {
+			Object[] results;
+			if (( results = this.results ) != null) {
+				return results;
+			}
+			else {
+				return this.results = loadPlan.load( id, session );
+			}
 		}
 	}
 
