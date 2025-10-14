@@ -1618,26 +1618,28 @@ public abstract class AbstractEntityPersister
 			int i = 0;
 			for ( var fetchGroupAttributeDescriptor : fetchGroupAttributeDescriptors ) {
 				final String attributeName = fetchGroupAttributeDescriptor.getName();
-				final boolean previousInitialized = initializedLazyAttributeNames.contains( attributeName );
-				if ( previousInitialized ) {
-					// it's already been initialized (e.g. by a write) so we don't want to overwrite
-					i++;
-					// TODO: we should consider un-marking an attribute as dirty based on the selected value
-					// - we know the current value:
-					//   getPropertyValue( entity, fetchGroupAttributeDescriptor.getAttributeIndex() );
-					// - we know the selected value (see selectedValue below)
-					// - we can use the attribute Type to tell us if they are the same
-					// - assuming entity is a SelfDirtinessTracker we can also know if the attribute is currently
-					//   considered dirty, and if really not dirty we would do the un-marking
-					// - of course that would mean a new method on SelfDirtinessTracker to allow un-marking
+				final Object result = results[i++];
+				if ( fieldName.equals( attributeName ) ) {
+					finalResult = result;
 				}
-				else {
-					final Object result = results[i++];
-					if ( initializeLazyProperty( fieldName, entity, entry, fetchGroupAttributeDescriptor, result ) ) {
-						finalResult = result;
-						interceptor.attributeInitialized( attributeName );
-					}
+				if ( !initializedLazyAttributeNames.contains( attributeName ) ) {
+					initializeLazyProperty(
+							entity,
+							entry,
+							result,
+							getPropertyIndex( attributeName ),
+							fetchGroupAttributeDescriptor.getType()
+					);
 				}
+				// if the attribute has already been initialized (e.g. by a write) we don't want to overwrite
+				// TODO: we should consider un-marking an attribute as dirty based on the selected value
+				// - we know the current value:
+				//   getPropertyValue( entity, fetchGroupAttributeDescriptor.getAttributeIndex() );
+				// - we know the selected value (see selectedValue below)
+				// - we can use the attribute Type to tell us if they are the same
+				// - assuming entity is a SelfDirtinessTracker we can also know if the attribute is currently
+				//   considered dirty, and if really not dirty we would do the un-marking
+				// - of course that would mean a new method on SelfDirtinessTracker to allow un-marking
 			}
 			CORE_LOGGER.doneInitializingLazyProperties();
 			return finalResult;
@@ -1755,7 +1757,12 @@ public abstract class AbstractEntityPersister
 		return lazyPropertyTypes[index].deepCopy( propValue, factory );
 	}
 
-	// Used by Hibernate Reactive
+	/**
+	 * Used by Hibernate Reactive
+	 *
+	 * @deprecated Use {@link #initializeLazyProperty(String, Object, EntityEntry, int, Object)} instead.
+	 */
+	@Deprecated(since = "7.2", forRemoval = true)
 	protected boolean initializeLazyProperty(
 			final String fieldName,
 			final Object entity,
