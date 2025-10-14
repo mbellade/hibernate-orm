@@ -1613,13 +1613,18 @@ public abstract class AbstractEntityPersister
 				lazyAttributesMetadata.getFetchGroupAttributeDescriptors( fetchGroup );
 		final var lazySelectLoadPlan = getSQLLazySelectLoadPlan( fetchGroup );
 		try {
+			final Object[] results = lazySelectLoadPlan.load( id, session );
 			Object finalResult = null;
-			final LazyLoadPlanResults results = new LazyLoadPlanResults( lazySelectLoadPlan, id, session );
 			int i = 0;
 			for ( var fetchGroupAttributeDescriptor : fetchGroupAttributeDescriptors ) {
 				final String attributeName = fetchGroupAttributeDescriptor.getName();
-				final boolean previousInitialized = initializedLazyAttributeNames.contains( attributeName );
-				if ( previousInitialized ) {
+				final Object result = results[i++];
+				if ( initializeLazyProperty( fieldName, entity, entry, fetchGroupAttributeDescriptor, result ) ) {
+					finalResult = result;
+					interceptor.attributeInitialized( attributeName );
+					break; // we only need to return one result
+				}
+				else if ( initializedLazyAttributeNames.contains( attributeName ) ) {
 					// it's already been initialized (e.g. by a write) so we don't want to overwrite
 					i++;
 					// TODO: we should consider un-marking an attribute as dirty based on the selected value
@@ -1630,13 +1635,6 @@ public abstract class AbstractEntityPersister
 					// - assuming entity is a SelfDirtinessTracker we can also know if the attribute is currently
 					//   considered dirty, and if really not dirty we would do the un-marking
 					// - of course that would mean a new method on SelfDirtinessTracker to allow un-marking
-				}
-				else {
-					final Object result = results.getResults()[i++];
-					if ( initializeLazyProperty( fieldName, entity, entry, fetchGroupAttributeDescriptor, result ) ) {
-						finalResult = result;
-						interceptor.attributeInitialized( attributeName );
-					}
 				}
 			}
 			CORE_LOGGER.doneInitializingLazyProperties();
@@ -1649,30 +1647,6 @@ public abstract class AbstractEntityPersister
 							+ infoString( this, id, getFactory() ),
 					ex.getSQL()
 			);
-		}
-	}
-
-	static class LazyLoadPlanResults {
-		final SingleIdArrayLoadPlan loadPlan;
-		final Object id;
-		final SharedSessionContractImplementor session;
-
-		Object[] results;
-
-		public LazyLoadPlanResults(SingleIdArrayLoadPlan loadPlan, Object id, SharedSessionContractImplementor session) {
-			this.loadPlan = loadPlan;
-			this.id = id;
-			this.session = session;
-		}
-
-		public Object[] getResults() {
-			Object[] results;
-			if (( results = this.results ) != null) {
-				return results;
-			}
-			else {
-				return this.results = loadPlan.load( id, session );
-			}
 		}
 	}
 
