@@ -1618,20 +1618,20 @@ public abstract class AbstractEntityPersister
 			int i = 0;
 			for ( var fetchGroupAttributeDescriptor : fetchGroupAttributeDescriptors ) {
 				final String attributeName = fetchGroupAttributeDescriptor.getName();
-				final Object result = results[i++];
 				if ( fieldName.equals( attributeName ) ) {
-					finalResult = result;
+					finalResult = results[i];
 				}
 				if ( !initializedLazyAttributeNames.contains( attributeName ) ) {
 					initializeLazyProperty(
 							entity,
 							entry,
-							result,
+							results[i],
 							getPropertyIndex( attributeName ),
 							fetchGroupAttributeDescriptor.getType()
 					);
 				}
 				// if the attribute has already been initialized (e.g. by a write) we don't want to overwrite
+				i++;
 				// TODO: we should consider un-marking an attribute as dirty based on the selected value
 				// - we know the current value:
 				//   getPropertyValue( entity, fetchGroupAttributeDescriptor.getAttributeIndex() );
@@ -1759,8 +1759,7 @@ public abstract class AbstractEntityPersister
 
 	/**
 	 * Used by Hibernate Reactive
-	 *
-	 * @deprecated Use {@link #initializeLazyProperty(String, Object, EntityEntry, int, Object)} instead.
+	 * @deprecated
 	 */
 	@Deprecated(since = "7.2", forRemoval = true)
 	protected boolean initializeLazyProperty(
