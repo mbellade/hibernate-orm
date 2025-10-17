@@ -4,6 +4,7 @@
  */
 package org.hibernate.testing.orm.junit;
 
+import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -63,4 +64,7 @@ public interface ServiceRegistryScope {
 		return configuration;
 	}
 
+	default Map<String, Object> getAdditionalSettings() {
+		throw new UnsupportedOperationException( "This service registry scope doesn't support additional settings." );
+	}
 }

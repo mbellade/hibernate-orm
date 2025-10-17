@@ -50,8 +50,8 @@ public class EntityManagerFactoryExtension
 		implements TestInstancePostProcessor, BeforeEachCallback, TestExecutionExceptionHandler {
 
 	private static final Logger log = Logger.getLogger( EntityManagerFactoryExtension.class );
-	public static final String EMF_KEY = EntityManagerFactoryScope.class.getName();
-	public static final String INTEGRATION_SETTINGS_KEY = "integration_settings";
+	private static final String EMF_KEY = EntityManagerFactoryScope.class.getName();
+	private static final String INTEGRATION_SETTINGS_KEY = EntityManagerFactoryScope.class.getName() + "#INTEGRATION_SETTINGS";
 
 	private static ExtensionContext.Store locateExtensionStore(Object testScope, ExtensionContext context) {
 		return JUnitHelper.locateExtensionStore( EntityManagerFactoryExtension.class, context, testScope );
@@ -59,7 +59,6 @@ public class EntityManagerFactoryExtension
 
 	public static EntityManagerFactoryScope findEntityManagerFactoryScope(
 			Object testScope, Optional<Jpa> optionalJpa, ExtensionContext context) {
-
 		if ( optionalJpa.isEmpty() ) {
 			// No annotation on the test class, should be on the test methods
 			return null;
@@ -89,6 +88,12 @@ public class EntityManagerFactoryExtension
 				new EntityManagerFactoryScopeImpl( pui, integrationSettings );
 		store.put( EMF_KEY, scope );
 		return scope;
+	}
+
+	public static Map<String, Object> getIntegrationSettings(Object testScope, ExtensionContext context) {
+		final ExtensionContext.Store store = locateExtensionStore( testScope, context );
+		//noinspection unchecked
+		return (Map<String, Object>) store.get( INTEGRATION_SETTINGS_KEY, Map.class );
 	}
 
 	private static void collectProperties(PersistenceUnitInfoImpl pui, Jpa jpa) {

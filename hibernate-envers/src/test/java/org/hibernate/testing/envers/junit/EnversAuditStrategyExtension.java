@@ -7,8 +7,11 @@ package org.hibernate.testing.envers.junit;
 import org.hibernate.envers.configuration.EnversSettings;
 import org.hibernate.envers.strategy.internal.DefaultAuditStrategy;
 import org.hibernate.envers.strategy.spi.AuditStrategy;
+import org.hibernate.testing.orm.junit.ClassTemplateInvocationListenersExtension;
 import org.hibernate.testing.orm.junit.EntityManagerFactoryExtension;
-import org.hibernate.testing.orm.junit.EntityManagerFactoryScope;
+import org.hibernate.testing.orm.junit.Jpa;
+import org.hibernate.testing.orm.junit.ServiceRegistryExtension;
+import org.hibernate.testing.orm.junit.SessionFactoryExtension;
 import org.junit.jupiter.api.extension.ClassTemplateInvocationContext;
 import org.junit.jupiter.api.extension.ClassTemplateInvocationContextProvider;
 import org.junit.jupiter.api.extension.Extension;
@@ -22,6 +25,7 @@ import java.util.Optional;
 import java.util.stream.Stream;
 
 import static org.hibernate.internal.util.NullnessUtil.castNonNull;
+import static org.junit.platform.commons.support.AnnotationSupport.findAnnotation;
 
 public class EnversAuditStrategyExtension implements ClassTemplateInvocationContextProvider {
 	@Override
@@ -66,38 +70,42 @@ public class EnversAuditStrategyExtension implements ClassTemplateInvocationCont
 
 		@Override
 		public List<Extension> getAdditionalExtensions() {
-			return List.of( new AuditStrategyConditionExtension( auditStrategy ) );
+			return List.of(
+					new ClassTemplateInvocationListenersExtension(),
+					new AuditStrategyConditionExtension( auditStrategy )
+			);
 		}
-
 
 		@Override
 		public void prepareInvocation(ExtensionContext context) {
-			final var store = getStore( context );
-			// reset the entity manager factory
-			final EntityManagerFactoryScope scope = getParameter( store, EntityManagerFactoryExtension.EMF_KEY );
-			scope.releaseEntityManagerFactory();
-			// integrate settings with envers-specific configuration
-			final Map<String, Object> integrationSettings = getParameter( store, EntityManagerFactoryExtension.INTEGRATION_SETTINGS_KEY );
-			if ( auditStrategy != null ) {
-				integrationSettings.put( EnversSettings.AUDIT_STRATEGY, auditStrategy );
-			}
-			integrationSettings.putIfAbsent( EnversSettings.USE_REVISION_ENTITY_WITH_NATIVE_ID, "false" );
-			// Envers tests expect sequences to not skip values...
-			integrationSettings.putIfAbsent( EnversSettings.REVISION_SEQUENCE_NOCACHE, "true" );
-		}
-
-		<T> T getParameter(ExtensionContext.Store store, String key) {
-			final var o = store.get( key );
-			if ( o == null ) {
-				throw new IllegalStateException( "Could not find required in extension store: '" + key + "'");
-			}
-			//noinspection unchecked
-			return (T) o;
-		}
-
-		ExtensionContext.Store getStore(ExtensionContext context) {
 			final var testInstance = context.getRequiredTestInstance();
-			return context.getStore( ExtensionContext.Namespace.create( EntityManagerFactoryExtension.class.getName(), testInstance ) );
+			final Map<String, Object> settings;
+			// release the existing EMF/SF so that a new one is built with the proper audit strategy
+			final var emScope = EntityManagerFactoryExtension.findEntityManagerFactoryScope(
+					testInstance,
+					findAnnotation( context.getRequiredTestClass(), Jpa.class ),
+					context
+			);
+			if ( emScope != null ) {
+				settings = EntityManagerFactoryExtension.getIntegrationSettings( testInstance, context );
+				emScope.releaseEntityManagerFactory();
+			}
+			else {
+				final var sfScope = SessionFactoryExtension.findSessionFactoryScope(
+						testInstance,
+						context
+				);
+				final var registryScope = ServiceRegistryExtension.findServiceRegistryScope( testInstance, context );
+				settings = registryScope.getAdditionalSettings();
+				sfScope.releaseSessionFactory();
+			}
+			// integrate settings with envers-specific configuration
+			if ( auditStrategy != null ) {
+				settings.put( EnversSettings.AUDIT_STRATEGY, auditStrategy );
+			}
+			settings.putIfAbsent( EnversSettings.USE_REVISION_ENTITY_WITH_NATIVE_ID, "false" );
+			// Envers tests expect sequences to not skip values...
+			settings.putIfAbsent( EnversSettings.REVISION_SEQUENCE_NOCACHE, "true" );
 		}
 	}
 }

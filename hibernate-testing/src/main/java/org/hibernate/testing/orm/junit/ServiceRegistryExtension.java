@@ -8,6 +8,7 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import org.hibernate.boot.registry.BootstrapServiceRegistryBuilder;
@@ -43,6 +44,7 @@ public class ServiceRegistryExtension
 		implements TestInstancePostProcessor, BeforeEachCallback, TestExecutionExceptionHandler {
 	private static final Logger log = Logger.getLogger( ServiceRegistryExtension.class );
 	private static final String REGISTRY_KEY = ServiceRegistryScope.class.getName();
+	private static final String ADDITIONAL_SETTINGS_KEY = ServiceRegistryExtension.class.getName() + "#ADDITIONAL_SETTINGS";
 
 	@Override
 	public void postProcessTestInstance(Object testInstance, ExtensionContext context) {
@@ -332,8 +334,9 @@ public class ServiceRegistryExtension
 	}
 
 	private static class ServiceRegistryScopeImpl implements ServiceRegistryScope, AutoCloseable {
-		private BootstrapServiceRegistryProducer bsrProducer;
-		private ServiceRegistryProducer ssrProducer;
+		private final BootstrapServiceRegistryProducer bsrProducer;
+		private final ServiceRegistryProducer ssrProducer;
+		private Map<String, Object> addionalSettings;
 
 		private StandardServiceRegistry registry;
 		private boolean active = true;
@@ -353,6 +356,10 @@ public class ServiceRegistryExtension
 				final StandardServiceRegistryBuilder ssrb = ServiceRegistryUtil.serviceRegistryBuilder( bsr );
 				// we will close it ourselves explicitly.
 				ssrb.disableAutoClose();
+
+				if ( addionalSettings != null ) {
+					ssrb.applySettings( addionalSettings );
+				}
 
 				return registry = ssrProducer.produceServiceRegistry( ssrb );
 			}
