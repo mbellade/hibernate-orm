@@ -15,10 +15,11 @@ import org.hibernate.envers.AuditReaderFactory;
 import org.hibernate.envers.Audited;
 import org.hibernate.envers.query.AuditEntity;
 import org.hibernate.testing.envers.junit.EnversTest;
+import org.hibernate.testing.orm.junit.BeforeClassTemplate;
 import org.hibernate.testing.orm.junit.EntityManagerFactoryScope;
 import org.hibernate.testing.orm.junit.JiraKey;
 import org.hibernate.testing.orm.junit.Jpa;
-import org.junit.jupiter.api.Order;
+import org.hibernate.testing.orm.junit.BeforeClassTemplate;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -110,8 +111,7 @@ public class AssociationEntitiesModifiedQueryTest {
 		}
 	}
 
-	@Test
-	@Order(0)
+	@BeforeClassTemplate
 	public void initData(EntityManagerFactoryScope scope) {
 		// Revision 1
 		scope.inTransaction( entityManager -> {

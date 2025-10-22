@@ -7,7 +7,6 @@ package org.hibernate.testing.envers.junit;
 import org.hibernate.envers.configuration.EnversSettings;
 import org.hibernate.envers.strategy.internal.DefaultAuditStrategy;
 import org.hibernate.envers.strategy.spi.AuditStrategy;
-import org.hibernate.testing.orm.junit.ClassTemplateInvocationListenersExtension;
 import org.hibernate.testing.orm.junit.EntityManagerFactoryExtension;
 import org.hibernate.testing.orm.junit.Jpa;
 import org.hibernate.testing.orm.junit.ServiceRegistryExtension;
@@ -70,10 +69,7 @@ public class EnversAuditStrategyExtension implements ClassTemplateInvocationCont
 
 		@Override
 		public List<Extension> getAdditionalExtensions() {
-			return List.of(
-					new ClassTemplateInvocationListenersExtension(),
-					new AuditStrategyConditionExtension( auditStrategy )
-			);
+			return List.of( new AuditStrategyConditionExtension( auditStrategy ) );
 		}
 
 		@Override

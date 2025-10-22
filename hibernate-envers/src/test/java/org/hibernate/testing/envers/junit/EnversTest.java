@@ -7,11 +7,10 @@ package org.hibernate.testing.envers.junit;
 import org.hibernate.envers.strategy.internal.DefaultAuditStrategy;
 import org.hibernate.envers.strategy.internal.ValidityAuditStrategy;
 import org.hibernate.envers.strategy.spi.AuditStrategy;
+import org.hibernate.testing.orm.junit.ClassTemplateInvocationListenersExtension;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.ClassTemplate;
-import org.junit.jupiter.api.MethodOrderer;
-import org.junit.jupiter.api.TestMethodOrder;
 import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.lang.annotation.ElementType;
@@ -27,18 +26,18 @@ import java.lang.annotation.Target;
  * <p>
  * Note since this is taking advantage of {@link ClassTemplate} to run all
  * tests with different {@link AuditStrategy audit strategies}, the test class
- * must not define {@link BeforeAll} or {@link AfterAll} methods, or they will
- * only be run once (either before the first class template or after the latest one)
- * Instead, use a regular {@link org.junit.jupiter.api.Order}-annotated method
- * to perform any initialization / teardown logic.
+ * must not use {@link BeforeAll} or {@link AfterAll} methods to set up / tear-down
+ * test data, as they will only be run once for all class template invocations.
+ * Instead, use {@link org.hibernate.testing.orm.junit.BeforeClassTemplate}
+ * and {@link org.hibernate.testing.orm.junit.AfterClassTemplate} to have
+ * methods called before and after each invocation.
  */
 @Inherited
 @Target({ElementType.TYPE, ElementType.METHOD})
 @Retention(RetentionPolicy.RUNTIME)
-// init methods must be run first, cannot use @BeforeAll
-@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 @ClassTemplate
 @ExtendWith(EnversAuditStrategyExtension.class)
+@ExtendWith(ClassTemplateInvocationListenersExtension.class)
 public @interface EnversTest {
 	Class<? extends AuditStrategy>[] auditStrategies() default {
 			DefaultAuditStrategy.class,

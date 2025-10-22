@@ -16,7 +16,7 @@ import org.hibernate.testing.envers.junit.EnversTest;
 import org.hibernate.testing.orm.junit.EntityManagerFactoryScope;
 import org.hibernate.testing.orm.junit.JiraKey;
 import org.hibernate.testing.orm.junit.Jpa;
-import org.junit.jupiter.api.Order;
+import org.hibernate.testing.orm.junit.BeforeClassTemplate;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -198,8 +198,7 @@ public class OrderByThreeEntityTest {
 
 	private Integer containerId;
 
-	@Test
-	@Order(0)
+	@BeforeClassTemplate
 	public void initData(EntityManagerFactoryScope scope) {
 		// Rev 1
 		this.containerId = scope.fromTransaction( entityManager -> {

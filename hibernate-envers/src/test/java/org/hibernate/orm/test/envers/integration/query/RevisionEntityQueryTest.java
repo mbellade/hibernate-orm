@@ -19,7 +19,7 @@ import org.hibernate.orm.test.envers.entities.ids.MulIdTestEntity;
 import org.hibernate.testing.envers.junit.EnversTest;
 import org.hibernate.testing.orm.junit.EntityManagerFactoryScope;
 import org.hibernate.testing.orm.junit.Jpa;
-import org.junit.jupiter.api.Order;
+import org.hibernate.testing.orm.junit.BeforeClassTemplate;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -38,8 +38,7 @@ public class RevisionEntityQueryTest {
 	private Integer id2;
 	private Integer id3;
 
-	@Test
-	@Order(0)
+	@BeforeClassTemplate
 	public void initData(EntityManagerFactoryScope scope) {
 		// Revision 1
 		scope.inEntityManager( em -> {

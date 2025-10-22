@@ -20,9 +20,10 @@ import org.hibernate.envers.RevisionType;
 import org.hibernate.envers.configuration.EnversSettings;
 import org.hibernate.envers.query.AuditEntity;
 import org.hibernate.orm.test.envers.tools.TestTools;
+import org.hibernate.testing.orm.junit.BeforeClassTemplate;
 import org.hibernate.testing.orm.junit.EntityManagerFactoryScope;
 import org.hibernate.testing.orm.junit.JiraKey;
-import org.junit.jupiter.api.Order;
+import org.hibernate.testing.orm.junit.BeforeClassTemplate;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -34,8 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 public abstract class AbstractEntityWithChangesQueryTest {
 	private Integer simpleId;
 
-	@Test
-	@Order(0)
+	@BeforeClassTemplate
 	public void initData(EntityManagerFactoryScope scope) {
 		// Revision 1
 		simpleId = scope.fromTransaction( entityManager -> {

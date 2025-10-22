@@ -13,7 +13,7 @@ import org.hibernate.orm.test.envers.tools.TestTools;
 import org.hibernate.testing.envers.junit.EnversTest;
 import org.hibernate.testing.orm.junit.EntityManagerFactoryScope;
 import org.hibernate.testing.orm.junit.Jpa;
-import org.junit.jupiter.api.Order;
+import org.hibernate.testing.orm.junit.BeforeClassTemplate;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashSet;
@@ -38,8 +38,7 @@ public class EmbIdOneToManyQuery {
 	private EmbId id3;
 	private EmbId id4;
 
-	@Test
-	@Order(0)
+	@BeforeClassTemplate
 	public void initData(EntityManagerFactoryScope scope) {
 		id1 = new EmbId( 0, 1 );
 		id2 = new EmbId( 10, 11 );
