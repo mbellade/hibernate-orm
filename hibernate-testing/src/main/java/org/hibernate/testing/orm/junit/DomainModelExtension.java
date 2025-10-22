@@ -331,8 +331,6 @@ public class DomainModelExtension
 				DomainModelProducer producer) {
 			this.serviceRegistryScope = serviceRegistryScope;
 			this.producer = producer;
-
-			this.model = createDomainModel();
 		}
 
 		private MetadataImplementor createDomainModel() {
@@ -366,6 +364,7 @@ public class DomainModelExtension
 			releaseModel();
 		}
 
+		@Override
 		public void releaseModel() {
 			model = null;
 		}

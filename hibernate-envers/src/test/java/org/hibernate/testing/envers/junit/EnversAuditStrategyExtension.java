@@ -7,6 +7,7 @@ package org.hibernate.testing.envers.junit;
 import org.hibernate.envers.configuration.EnversSettings;
 import org.hibernate.envers.strategy.internal.DefaultAuditStrategy;
 import org.hibernate.envers.strategy.spi.AuditStrategy;
+import org.hibernate.testing.orm.junit.DomainModelExtension;
 import org.hibernate.testing.orm.junit.EntityManagerFactoryExtension;
 import org.hibernate.testing.orm.junit.Jpa;
 import org.hibernate.testing.orm.junit.ServiceRegistryExtension;
@@ -91,9 +92,12 @@ public class EnversAuditStrategyExtension implements ClassTemplateInvocationCont
 						testInstance,
 						context
 				);
+				sfScope.releaseSessionFactory();
+				final var domainModelScope = DomainModelExtension.findDomainModelScope( testInstance, context );
+				domainModelScope.releaseModel();
 				final var registryScope = ServiceRegistryExtension.findServiceRegistryScope( testInstance, context );
 				settings = registryScope.getAdditionalSettings();
-				sfScope.releaseSessionFactory();
+				registryScope.releaseRegistry();
 			}
 			// integrate settings with envers-specific configuration
 			if ( auditStrategy != null ) {
