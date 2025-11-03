@@ -126,7 +126,7 @@ public class FunctionNameAsColumnTest extends BaseCoreFunctionalTestCase {
 				s -> {
 					EntityWithFunctionAsColumnHolder holder1 = (EntityWithFunctionAsColumnHolder) s.createQuery(
 							"from EntityWithFunctionAsColumnHolder h left join fetch h.entityWithArgFunctionAsColumns " +
-									"left join fetch h.nextHolder left join fetch h.nextHolder.entityWithArgFunctionAsColumns " +
+									"join fetch h.nextHolder left join fetch h.nextHolder.entityWithArgFunctionAsColumns " +
 									"where h.nextHolder is not null" )
 							.uniqueResult();
 					assertTrue( Hibernate.isInitialized( holder1.getEntityWithArgFunctionAsColumns() ) );
@@ -228,7 +228,7 @@ public class FunctionNameAsColumnTest extends BaseCoreFunctionalTestCase {
 		try {
 			EntityWithFunctionAsColumnHolder holder1 = (EntityWithFunctionAsColumnHolder) s.createQuery(
 					"from EntityWithFunctionAsColumnHolder h left join fetch h.entityWithNoArgFunctionAsColumns " +
-							"left join fetch h.nextHolder left join fetch h.nextHolder.entityWithNoArgFunctionAsColumns " +
+							"join fetch h.nextHolder left join fetch h.nextHolder.entityWithNoArgFunctionAsColumns " +
 							"where h.nextHolder is not null" )
 					.uniqueResult();
 			assertTrue( Hibernate.isInitialized( holder1.getEntityWithNoArgFunctionAsColumns() ) );
