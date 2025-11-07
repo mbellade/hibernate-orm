@@ -169,25 +169,35 @@ public class EntityDelayedFetchInitializer
 					concreteDescriptor = entityPersister;
 				}
 
-				if ( selectByUniqueKey ) {
-					data.setInstance( instanceWithUniqueKey( data, concreteDescriptor ) );
-				}
-				else {
-					data.setInstance( instanceWithId( data, concreteDescriptor ) );
-				}
+				initialize( data, null, concreteDescriptor );
 			}
+		}
+	}
+
+	protected void initialize(
+			EntityDelayedFetchInitializerData data,
+			@Nullable EntityKey entityKey,
+			EntityPersister concreteDescriptor) {
+		if ( selectByUniqueKey ) {
+			data.setInstance( instanceWithUniqueKey( data, concreteDescriptor ) );
+		}
+		else {
+			data.setInstance( instanceWithId( data, concreteDescriptor, entityKey) );
 		}
 	}
 
 	private Object instanceWithId(
 			EntityDelayedFetchInitializerData data,
-			EntityPersister concreteDescriptor) {
+			EntityPersister concreteDescriptor,
+			EntityKey entityKey) {
 		final var rowProcessingState = data.getRowProcessingState();
 		final var session = rowProcessingState.getSession();
 		final var persistenceContext = session.getPersistenceContextInternal();
 
-		final var entityKey = new EntityKey( data.entityIdentifier, concreteDescriptor );
-		final var holder = persistenceContext.getEntityHolder( entityKey );
+		final var ek = entityKey == null ?
+				new EntityKey( data.entityIdentifier, concreteDescriptor ) :
+				entityKey;
+		final var holder = persistenceContext.getEntityHolder( ek );
 		if ( holder != null && holder.getEntity() != null ) {
 			return persistenceContext.proxyFor( holder, concreteDescriptor );
 		}
@@ -313,8 +323,25 @@ public class EntityDelayedFetchInitializer
 			data.setState( State.INITIALIZED );
 			data.setInstance( instance );
 			final var rowProcessingState = data.getRowProcessingState();
+			final var entityDescriptor = getEntityDescriptor();
+			data.entityIdentifier = entityDescriptor.getIdentifier( instance, rowProcessingState.getSession() );
+
+			final var entityKey = new EntityKey( data.entityIdentifier, entityDescriptor );
+			final var entityHolder = rowProcessingState.getSession().getPersistenceContextInternal().getEntityHolder(
+					entityKey
+			);
+
+			if ( entityHolder == null || entityHolder.getEntity() != instance && entityHolder.getProxy() != instance ) {
+				// the existing entity instance is detached or transient
+				if ( entityHolder != null ) {
+					data.setInstance( entityHolder.getManagedObject() );
+				}
+				else {
+					initialize( data, entityKey, entityDescriptor );
+				}
+			}
+
 			if ( keyIsEager ) {
-				data.entityIdentifier = getEntityDescriptor().getIdentifier( instance, rowProcessingState.getSession() );
 				final var initializer = identifierAssembler.getInitializer();
 				assert initializer != null;
 				initializer.resolveInstance( data.entityIdentifier, rowProcessingState );
