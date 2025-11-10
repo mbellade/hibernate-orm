@@ -214,29 +214,44 @@ public class DiscriminatedEntityInitializer
 			final LazyInitializer lazyInitializer = extractLazyInitializer( instance );
 			if ( lazyInitializer == null ) {
 				data.setState( State.INITIALIZED );
-				if ( keyIsEager ) {
-					final SharedSessionContractImplementor session = rowProcessingState.getSession();
-					data.concreteDescriptor = session.getEntityPersister( null, instance );
-					data.entityIdentifier = data.concreteDescriptor.getIdentifier( instance, session );
-				}
+				final SharedSessionContractImplementor session = rowProcessingState.getSession();
+				data.concreteDescriptor = session.getEntityPersister( null, instance );
+				data.entityIdentifier = data.concreteDescriptor.getIdentifier( instance, session );
 			}
 			else if ( lazyInitializer.isUninitialized() ) {
 				data.setState( eager ? State.RESOLVED : State.INITIALIZED );
-				if ( keyIsEager ) {
-					// Read the discriminator from the result set if necessary
-					final Object discriminatorValue = discriminatorValueAssembler.assemble( rowProcessingState );
-					data.concreteDescriptor = fetchedPart.resolveDiscriminatorValue( discriminatorValue ).getEntityPersister();
-					data.entityIdentifier = lazyInitializer.getInternalIdentifier();
-				}
+				// Read the discriminator from the result set if necessary
+				final Object discriminatorValue = discriminatorValueAssembler.assemble( rowProcessingState );
+				data.concreteDescriptor = fetchedPart.resolveDiscriminatorValue( discriminatorValue ).getEntityPersister();
+				data.entityIdentifier = lazyInitializer.getInternalIdentifier();
 			}
 			else {
 				data.setState( State.INITIALIZED );
-				if ( keyIsEager ) {
-					data.concreteDescriptor = rowProcessingState.getSession().getEntityPersister( null, lazyInitializer.getImplementation() );
-					data.entityIdentifier = lazyInitializer.getInternalIdentifier();
+				data.concreteDescriptor = rowProcessingState.getSession().getEntityPersister( null, lazyInitializer.getImplementation() );
+				data.entityIdentifier = lazyInitializer.getInternalIdentifier();
+			}
+
+
+			final var entityKey = new EntityKey( data.entityIdentifier, data.concreteDescriptor );
+			final var entityHolder = rowProcessingState.getSession().getPersistenceContextInternal().getEntityHolder(
+					entityKey
+			);
+
+			if ( entityHolder == null || entityHolder.getEntity() != instance && entityHolder.getProxy() != instance ) {
+				// the existing entity instance is detached or transient
+				if ( entityHolder != null ) {
+					data.setInstance( entityHolder.getManagedObject() );
+					data.setState( !eager || entityHolder.isInitialized() ? State.INITIALIZED : State.RESOLVED );
+				}
+				else {
+					data.setState( State.RESOLVED );
+					initializeInstance( data );
 				}
 			}
-			data.setInstance( instance );
+			else {
+				data.setInstance( instance );
+			}
+
 			if ( keyIsEager ) {
 				final Initializer<?> initializer = keyValueAssembler.getInitializer();
 				assert initializer != null;
