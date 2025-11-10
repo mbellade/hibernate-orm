@@ -4,26 +4,25 @@
  */
 package org.hibernate.orm.test.bytecode.enhancement.detached.initialization;
 
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
 import org.hibernate.Hibernate;
 import org.hibernate.annotations.Any;
 import org.hibernate.annotations.AnyDiscriminatorValue;
 import org.hibernate.annotations.AnyKeyJavaClass;
 import org.hibernate.engine.spi.PrimeAmongSecondarySupertypes;
 import org.hibernate.engine.spi.SessionImplementor;
-
 import org.hibernate.testing.bytecode.enhancement.extension.BytecodeEnhanced;
 import org.hibernate.testing.orm.junit.DomainModel;
+import org.hibernate.testing.orm.junit.Jira;
 import org.hibernate.testing.orm.junit.SessionFactory;
 import org.hibernate.testing.orm.junit.SessionFactoryScope;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.FetchType;
-import jakarta.persistence.Id;
-import jakarta.persistence.JoinColumn;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -33,9 +32,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 })
 @SessionFactory
 @BytecodeEnhanced(runNotEnhancedAsWell = true)
+@Jira("https://hibernate.atlassian.net/browse/HHH-19910")
 public class DetachedNestedInitializationAnyFetchTest {
 	@Test
-	public void test1(SessionFactoryScope scope) {
+	public void testDetachedAndPersistentEntity(SessionFactoryScope scope) {
 		scope.inTransaction( session -> {
 			final var entityB = session.find( EntityB.class, 1L );
 			session.clear();
@@ -48,7 +48,7 @@ public class DetachedNestedInitializationAnyFetchTest {
 	}
 
 	@Test
-	public void test2(SessionFactoryScope scope) {
+	public void testDetachedEntityAndPersistentInitializedProxy(SessionFactoryScope scope) {
 		scope.inTransaction( session -> {
 			final var entityB = session.find( EntityB.class, 1L );
 			session.clear();
@@ -62,7 +62,7 @@ public class DetachedNestedInitializationAnyFetchTest {
 	}
 
 	@Test
-	public void test3(SessionFactoryScope scope) {
+	public void testDetachedEntityAndPersistentProxy(SessionFactoryScope scope) {
 		scope.inTransaction( session -> {
 			final var entityB = session.find( EntityB.class, 1L );
 			session.clear();
@@ -75,7 +75,7 @@ public class DetachedNestedInitializationAnyFetchTest {
 	}
 
 	@Test
-	public void test4(SessionFactoryScope scope) {
+	public void testDetachedProxyAndPersistentEntity(SessionFactoryScope scope) {
 		scope.inTransaction( session -> {
 			final var entityB = session.getReference( EntityB.class, 1L );
 			session.clear();
@@ -88,7 +88,7 @@ public class DetachedNestedInitializationAnyFetchTest {
 	}
 
 	@Test
-	public void test5(SessionFactoryScope scope) {
+	public void testDetachedProxyAndPersistentInitializedProxy(SessionFactoryScope scope) {
 		scope.inTransaction( session -> {
 			final var entityB = session.getReference( EntityB.class, 1L );
 			session.clear();
@@ -102,7 +102,7 @@ public class DetachedNestedInitializationAnyFetchTest {
 	}
 
 	@Test
-	public void test6(SessionFactoryScope scope) {
+	public void testDetachedAndPersistentProxy(SessionFactoryScope scope) {
 		scope.inTransaction( session -> {
 			final var entityB = session.getReference( EntityB.class, 1L );
 			session.clear();
@@ -110,13 +110,12 @@ public class DetachedNestedInitializationAnyFetchTest {
 			// put a different instance of EntityB in the persistence context
 			final var ignored = session.getReference( EntityB.class, 1L );
 
-
 			fetchQuery( entityB, session );
 		} );
 	}
 
 	@Test
-	public void testDetachedEntityJoinFetch(SessionFactoryScope scope) {
+	public void testDetachedInitializedProxyAndPersistentEntity(SessionFactoryScope scope) {
 		scope.inTransaction( session -> {
 			final var entityB = session.getReference( EntityB.class, 1L );
 			Hibernate.initialize( entityB );
@@ -130,7 +129,7 @@ public class DetachedNestedInitializationAnyFetchTest {
 	}
 
 	@Test
-	public void testDetachedInitializedProxyJoinFetch(SessionFactoryScope scope) {
+	public void testDetachedAndPersistentInitializedProxy(SessionFactoryScope scope) {
 		scope.inTransaction( session -> {
 			final var entityB = session.getReference( EntityB.class, 1L );
 			Hibernate.initialize( entityB );
@@ -145,7 +144,7 @@ public class DetachedNestedInitializationAnyFetchTest {
 	}
 
 	@Test
-	public void testDetachedUninitializedProxyJoinFetch(SessionFactoryScope scope) {
+	public void testDetachedInitializedProxyAndPersistentProxy(SessionFactoryScope scope) {
 		scope.inTransaction( session -> {
 			final var entityB = session.getReference( EntityB.class, 1L );
 			Hibernate.initialize( entityB );
