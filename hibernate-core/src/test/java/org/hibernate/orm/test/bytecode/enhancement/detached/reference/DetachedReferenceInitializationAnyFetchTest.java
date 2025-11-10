@@ -2,9 +2,12 @@
  * SPDX-License-Identifier: LGPL-2.1-or-later
  * Copyright Red Hat Inc. and Hibernate Authors
  */
-package org.hibernate.orm.test.bytecode.enhancement.detached.initialization;
+package org.hibernate.orm.test.bytecode.enhancement.detached.reference;
 
 import org.hibernate.Hibernate;
+import org.hibernate.annotations.Any;
+import org.hibernate.annotations.AnyDiscriminatorValue;
+import org.hibernate.annotations.AnyKeyJavaClass;
 import org.hibernate.engine.spi.PrimeAmongSecondarySupertypes;
 import org.hibernate.engine.spi.SessionImplementor;
 
@@ -22,18 +25,17 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
-import jakarta.persistence.ManyToOne;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 @DomainModel(annotatedClasses = {
-		DetachedNestedInitializationEagerUniqueFetchTest.EntityA.class,
-		DetachedNestedInitializationEagerUniqueFetchTest.EntityB.class,
+		DetachedReferenceInitializationAnyFetchTest.EntityA.class,
+		DetachedReferenceInitializationAnyFetchTest.EntityB.class,
 })
 @SessionFactory
 @BytecodeEnhanced(runNotEnhancedAsWell = true)
 @Jira("https://hibernate.atlassian.net/browse/HHH-19910")
-public class DetachedNestedInitializationEagerUniqueFetchTest {
+public class DetachedReferenceInitializationAnyFetchTest {
 	@Test
 	public void testDetachedAndPersistentEntity(SessionFactoryScope scope) {
 		scope.inTransaction( session -> {
@@ -65,6 +67,46 @@ public class DetachedNestedInitializationEagerUniqueFetchTest {
 	public void testDetachedEntityAndPersistentProxy(SessionFactoryScope scope) {
 		scope.inTransaction( session -> {
 			final var entityB = session.find( EntityB.class, 1L );
+			session.clear();
+
+			// put a different instance of EntityB in the persistence context
+			final var ignored = session.getReference( EntityB.class, 1L );
+
+			fetchQuery( entityB, session );
+		} );
+	}
+
+	@Test
+	public void testDetachedProxyAndPersistentEntity(SessionFactoryScope scope) {
+		scope.inTransaction( session -> {
+			final var entityB = session.getReference( EntityB.class, 1L );
+			session.clear();
+
+			// put a different instance of EntityB in the persistence context
+			final var ignored = session.find( EntityB.class, 1L );
+
+			fetchQuery( entityB, session );
+		} );
+	}
+
+	@Test
+	public void testDetachedProxyAndPersistentInitializedProxy(SessionFactoryScope scope) {
+		scope.inTransaction( session -> {
+			final var entityB = session.getReference( EntityB.class, 1L );
+			session.clear();
+
+			// put a different instance of EntityB in the persistence context
+			final var ignored = session.getReference( EntityB.class, 1L );
+			Hibernate.initialize( ignored );
+
+			fetchQuery( entityB, session );
+		} );
+	}
+
+	@Test
+	public void testDetachedAndPersistentProxy(SessionFactoryScope scope) {
+		scope.inTransaction( session -> {
+			final var entityB = session.getReference( EntityB.class, 1L );
 			session.clear();
 
 			// put a different instance of EntityB in the persistence context
@@ -164,18 +206,18 @@ public class DetachedNestedInitializationEagerUniqueFetchTest {
 		@Id
 		private Long id;
 
-		@ManyToOne(fetch = FetchType.LAZY)
-		@JoinColumn(name = "entityB_id", referencedColumnName = "uniqueValue")
-		private EntityB b;
+		@Any(fetch = FetchType.LAZY)
+		@AnyKeyJavaClass(Long.class)
+		@JoinColumn(name = "b_id") //the foreign key column
+		@Column(name = "b_type")   //the discriminator column
+		@AnyDiscriminatorValue(discriminator = "B", entity = EntityB.class)
+		private Object b;
 	}
 
 	@Entity(name = "EntityB")
 	static class EntityB {
 		@Id
 		private Long id;
-
-		@Column(unique = true)
-		private Long uniqueValue;
 
 		private String name;
 	}

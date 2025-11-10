@@ -2,10 +2,10 @@
  * SPDX-License-Identifier: LGPL-2.1-or-later
  * Copyright Red Hat Inc. and Hibernate Authors
  */
-package org.hibernate.orm.test.bytecode.enhancement.detached.initialization;
+package org.hibernate.orm.test.bytecode.enhancement.detached.reference;
 
 import org.hibernate.Hibernate;
-import org.hibernate.annotations.BatchSize;
+import org.hibernate.engine.spi.PrimeAmongSecondarySupertypes;
 import org.hibernate.engine.spi.SessionImplementor;
 
 import org.hibernate.testing.bytecode.enhancement.extension.BytecodeEnhanced;
@@ -17,20 +17,23 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 @DomainModel(annotatedClasses = {
-		DetachedNestedInitializationBatchFetchTest.EntityA.class,
-		DetachedNestedInitializationBatchFetchTest.EntityB.class,
+		DetachedReferenceInitializationEagerUniqueFetchTest.EntityA.class,
+		DetachedReferenceInitializationEagerUniqueFetchTest.EntityB.class,
 })
 @SessionFactory
 @BytecodeEnhanced(runNotEnhancedAsWell = true)
 @Jira("https://hibernate.atlassian.net/browse/HHH-19910")
-public class DetachedNestedInitializationBatchFetchTest {
+public class DetachedReferenceInitializationEagerUniqueFetchTest {
 	@Test
 	public void testDetachedAndPersistentEntity(SessionFactoryScope scope) {
 		scope.inTransaction( session -> {
@@ -72,51 +75,10 @@ public class DetachedNestedInitializationBatchFetchTest {
 	}
 
 	@Test
-	public void testDetachedProxyAndPersistentEntity(SessionFactoryScope scope) {
-		scope.inTransaction( session -> {
-			final var entityB = session.getReference( EntityB.class, 1L );
-			session.clear();
-
-			// put a different instance of EntityB in the persistence context
-			final var ignored = session.find( EntityB.class, 1L );
-
-			fetchQuery( entityB, session );
-		} );
-	}
-
-	@Test
-	public void testDetachedProxyAndPersistentInitializedProxy(SessionFactoryScope scope) {
-		scope.inTransaction( session -> {
-			final var entityB = session.getReference( EntityB.class, 1L );
-			session.clear();
-
-			// put a different instance of EntityB in the persistence context
-			final var ignored = session.getReference( EntityB.class, 1L );
-			Hibernate.initialize( ignored );
-
-			fetchQuery( entityB, session );
-		} );
-	}
-
-	@Test
-	public void testDetachedAndPersistentProxy(SessionFactoryScope scope) {
-		scope.inTransaction( session -> {
-			final var entityB = session.getReference( EntityB.class, 1L );
-			session.clear();
-
-			// put a different instance of EntityB in the persistence context
-			final var ignored = session.getReference( EntityB.class, 1L );
-
-
-			fetchQuery( entityB, session );
-		} );
-	}
-
-	@Test
 	public void testDetachedInitializedProxyAndPersistentEntity(SessionFactoryScope scope) {
 		scope.inTransaction( session -> {
 			final var entityB = session.getReference( EntityB.class, 1L );
-			Hibernate.initialize(  entityB );
+			Hibernate.initialize( entityB );
 			session.clear();
 
 			// put a different instance of EntityB in the persistence context
@@ -130,7 +92,7 @@ public class DetachedNestedInitializationBatchFetchTest {
 	public void testDetachedAndPersistentInitializedProxy(SessionFactoryScope scope) {
 		scope.inTransaction( session -> {
 			final var entityB = session.getReference( EntityB.class, 1L );
-			Hibernate.initialize(  entityB );
+			Hibernate.initialize( entityB );
 			session.clear();
 
 			// put a different instance of EntityB in the persistence context
@@ -145,7 +107,7 @@ public class DetachedNestedInitializationBatchFetchTest {
 	public void testDetachedInitializedProxyAndPersistentProxy(SessionFactoryScope scope) {
 		scope.inTransaction( session -> {
 			final var entityB = session.getReference( EntityB.class, 1L );
-			Hibernate.initialize(  entityB );
+			Hibernate.initialize( entityB );
 			session.clear();
 
 			// put a different instance of EntityB in the persistence context
@@ -177,23 +139,23 @@ public class DetachedNestedInitializationBatchFetchTest {
 		entityA.id = 1L;
 		entityA.b = entityB;
 		session.persist( entityA );
-		final var entityA2 = new EntityA();
-		entityA2.id = 2L;
-		session.persist( entityA2 );
 
-		final var wasInitialized = Hibernate.isInitialized( entityB );
-
-		final var result = session.createQuery(
-				"from EntityA a order by a.id",
-				EntityA.class
-		).getResultList().get( 0 );
-
-		assertThat( Hibernate.isInitialized( entityB ) ).isEqualTo( wasInitialized );
-		assertThat( result.b ).isSameAs( entityB );
+		final var wasDetachedInitialized = Hibernate.isInitialized( entityB );
 
 		final var id = session.getSessionFactory().getPersistenceUnitUtil().getIdentifier( entityB );
 		final var reference = session.getReference( EntityB.class, id );
-		assertThat( Hibernate.isInitialized(  reference ) ).isTrue();
+		final var wasManagedInitialized = Hibernate.isInitialized( reference );
+
+		final var result = session.createQuery(
+				"from EntityA a",
+				EntityA.class
+		).getSingleResult();
+
+		assertThat( Hibernate.isInitialized( entityB ) ).isEqualTo( wasDetachedInitialized );
+		assertThat( result.b ).isSameAs( entityB );
+
+		// We cannot create a proxy for the non-enhanced case
+		assertThat( Hibernate.isInitialized( reference ) ).isEqualTo( wasManagedInitialized || !( reference instanceof PrimeAmongSecondarySupertypes ) );
 		assertThat( reference ).isNotSameAs( entityB );
 	}
 
@@ -202,15 +164,18 @@ public class DetachedNestedInitializationBatchFetchTest {
 		@Id
 		private Long id;
 
-		@ManyToOne
+		@ManyToOne(fetch = FetchType.LAZY)
+		@JoinColumn(name = "entityB_id", referencedColumnName = "uniqueValue")
 		private EntityB b;
 	}
 
-	@BatchSize( size = 10 )
 	@Entity(name = "EntityB")
 	static class EntityB {
 		@Id
 		private Long id;
+
+		@Column(unique = true)
+		private Long uniqueValue;
 
 		private String name;
 	}

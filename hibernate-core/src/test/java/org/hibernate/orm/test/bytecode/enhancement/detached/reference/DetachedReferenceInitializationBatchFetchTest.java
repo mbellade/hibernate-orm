@@ -2,9 +2,10 @@
  * SPDX-License-Identifier: LGPL-2.1-or-later
  * Copyright Red Hat Inc. and Hibernate Authors
  */
-package org.hibernate.orm.test.bytecode.enhancement.detached.initialization;
+package org.hibernate.orm.test.bytecode.enhancement.detached.reference;
 
 import org.hibernate.Hibernate;
+import org.hibernate.annotations.BatchSize;
 import org.hibernate.engine.spi.SessionImplementor;
 
 import org.hibernate.testing.bytecode.enhancement.extension.BytecodeEnhanced;
@@ -23,13 +24,13 @@ import jakarta.persistence.ManyToOne;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @DomainModel(annotatedClasses = {
-		DetachedNestedInitializationEagerFetchTest.EntityA.class,
-		DetachedNestedInitializationEagerFetchTest.EntityB.class,
+		DetachedReferenceInitializationBatchFetchTest.EntityA.class,
+		DetachedReferenceInitializationBatchFetchTest.EntityB.class,
 })
 @SessionFactory
 @BytecodeEnhanced(runNotEnhancedAsWell = true)
 @Jira("https://hibernate.atlassian.net/browse/HHH-19910")
-public class DetachedNestedInitializationEagerFetchTest {
+public class DetachedReferenceInitializationBatchFetchTest {
 	@Test
 	public void testDetachedAndPersistentEntity(SessionFactoryScope scope) {
 		scope.inTransaction( session -> {
@@ -115,7 +116,7 @@ public class DetachedNestedInitializationEagerFetchTest {
 	public void testDetachedInitializedProxyAndPersistentEntity(SessionFactoryScope scope) {
 		scope.inTransaction( session -> {
 			final var entityB = session.getReference( EntityB.class, 1L );
-			Hibernate.initialize( entityB );
+			Hibernate.initialize(  entityB );
 			session.clear();
 
 			// put a different instance of EntityB in the persistence context
@@ -129,7 +130,7 @@ public class DetachedNestedInitializationEagerFetchTest {
 	public void testDetachedAndPersistentInitializedProxy(SessionFactoryScope scope) {
 		scope.inTransaction( session -> {
 			final var entityB = session.getReference( EntityB.class, 1L );
-			Hibernate.initialize( entityB );
+			Hibernate.initialize(  entityB );
 			session.clear();
 
 			// put a different instance of EntityB in the persistence context
@@ -144,7 +145,7 @@ public class DetachedNestedInitializationEagerFetchTest {
 	public void testDetachedInitializedProxyAndPersistentProxy(SessionFactoryScope scope) {
 		scope.inTransaction( session -> {
 			final var entityB = session.getReference( EntityB.class, 1L );
-			Hibernate.initialize( entityB );
+			Hibernate.initialize(  entityB );
 			session.clear();
 
 			// put a different instance of EntityB in the persistence context
@@ -176,20 +177,23 @@ public class DetachedNestedInitializationEagerFetchTest {
 		entityA.id = 1L;
 		entityA.b = entityB;
 		session.persist( entityA );
+		final var entityA2 = new EntityA();
+		entityA2.id = 2L;
+		session.persist( entityA2 );
 
 		final var wasInitialized = Hibernate.isInitialized( entityB );
 
 		final var result = session.createQuery(
-				"from EntityA a",
+				"from EntityA a order by a.id",
 				EntityA.class
-		).getSingleResult();
+		).getResultList().get( 0 );
 
 		assertThat( Hibernate.isInitialized( entityB ) ).isEqualTo( wasInitialized );
 		assertThat( result.b ).isSameAs( entityB );
 
 		final var id = session.getSessionFactory().getPersistenceUnitUtil().getIdentifier( entityB );
 		final var reference = session.getReference( EntityB.class, id );
-		assertThat( Hibernate.isInitialized( reference ) ).isTrue();
+		assertThat( Hibernate.isInitialized(  reference ) ).isTrue();
 		assertThat( reference ).isNotSameAs( entityB );
 	}
 
@@ -202,6 +206,7 @@ public class DetachedNestedInitializationEagerFetchTest {
 		private EntityB b;
 	}
 
+	@BatchSize( size = 10 )
 	@Entity(name = "EntityB")
 	static class EntityB {
 		@Id

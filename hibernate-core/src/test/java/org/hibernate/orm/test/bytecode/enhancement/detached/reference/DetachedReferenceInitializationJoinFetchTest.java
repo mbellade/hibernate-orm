@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: LGPL-2.1-or-later
  * Copyright Red Hat Inc. and Hibernate Authors
  */
-package org.hibernate.orm.test.bytecode.enhancement.detached.initialization;
+package org.hibernate.orm.test.bytecode.enhancement.detached.reference;
 
 import org.hibernate.Hibernate;
 import org.hibernate.engine.spi.SessionImplementor;
@@ -24,13 +24,13 @@ import jakarta.persistence.ManyToOne;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @DomainModel(annotatedClasses = {
-		DetachedNestedInitializationJoinFetchTest.EntityA.class,
-		DetachedNestedInitializationJoinFetchTest.EntityB.class,
+		DetachedReferenceInitializationJoinFetchTest.EntityA.class,
+		DetachedReferenceInitializationJoinFetchTest.EntityB.class,
 })
 @SessionFactory
 @BytecodeEnhanced(runNotEnhancedAsWell = true)
 @Jira("https://hibernate.atlassian.net/browse/HHH-19910")
-public class DetachedNestedInitializationJoinFetchTest {
+public class DetachedReferenceInitializationJoinFetchTest {
 	@Test
 	public void testDetachedAndPersistentEntity(SessionFactoryScope scope) {
 		scope.inTransaction( session -> {

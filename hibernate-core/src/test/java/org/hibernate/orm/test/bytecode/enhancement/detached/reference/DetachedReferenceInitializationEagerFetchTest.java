@@ -2,13 +2,9 @@
  * SPDX-License-Identifier: LGPL-2.1-or-later
  * Copyright Red Hat Inc. and Hibernate Authors
  */
-package org.hibernate.orm.test.bytecode.enhancement.detached.initialization;
+package org.hibernate.orm.test.bytecode.enhancement.detached.reference;
 
 import org.hibernate.Hibernate;
-import org.hibernate.annotations.Any;
-import org.hibernate.annotations.AnyDiscriminatorValue;
-import org.hibernate.annotations.AnyKeyJavaClass;
-import org.hibernate.engine.spi.PrimeAmongSecondarySupertypes;
 import org.hibernate.engine.spi.SessionImplementor;
 
 import org.hibernate.testing.bytecode.enhancement.extension.BytecodeEnhanced;
@@ -20,22 +16,20 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
-import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
-import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
-import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 @DomainModel(annotatedClasses = {
-		DetachedNestedInitializationAnyFetchTest.EntityA.class,
-		DetachedNestedInitializationAnyFetchTest.EntityB.class,
+		DetachedReferenceInitializationEagerFetchTest.EntityA.class,
+		DetachedReferenceInitializationEagerFetchTest.EntityB.class,
 })
 @SessionFactory
 @BytecodeEnhanced(runNotEnhancedAsWell = true)
 @Jira("https://hibernate.atlassian.net/browse/HHH-19910")
-public class DetachedNestedInitializationAnyFetchTest {
+public class DetachedReferenceInitializationEagerFetchTest {
 	@Test
 	public void testDetachedAndPersistentEntity(SessionFactoryScope scope) {
 		scope.inTransaction( session -> {
@@ -112,6 +106,7 @@ public class DetachedNestedInitializationAnyFetchTest {
 			// put a different instance of EntityB in the persistence context
 			final var ignored = session.getReference( EntityB.class, 1L );
 
+
 			fetchQuery( entityB, session );
 		} );
 	}
@@ -182,22 +177,19 @@ public class DetachedNestedInitializationAnyFetchTest {
 		entityA.b = entityB;
 		session.persist( entityA );
 
-		final var wasDetachedInitialized = Hibernate.isInitialized( entityB );
-
-		final var id = session.getSessionFactory().getPersistenceUnitUtil().getIdentifier( entityB );
-		final var reference = session.getReference( EntityB.class, id );
-		final var wasManagedInitialized = Hibernate.isInitialized( reference );
+		final var wasInitialized = Hibernate.isInitialized( entityB );
 
 		final var result = session.createQuery(
 				"from EntityA a",
 				EntityA.class
 		).getSingleResult();
 
-		assertThat( Hibernate.isInitialized( entityB ) ).isEqualTo( wasDetachedInitialized );
+		assertThat( Hibernate.isInitialized( entityB ) ).isEqualTo( wasInitialized );
 		assertThat( result.b ).isSameAs( entityB );
 
-		// We cannot create a proxy for the non-enhanced case
-		assertThat( Hibernate.isInitialized( reference ) ).isEqualTo( wasManagedInitialized || !( reference instanceof PrimeAmongSecondarySupertypes ) );
+		final var id = session.getSessionFactory().getPersistenceUnitUtil().getIdentifier( entityB );
+		final var reference = session.getReference( EntityB.class, id );
+		assertThat( Hibernate.isInitialized( reference ) ).isTrue();
 		assertThat( reference ).isNotSameAs( entityB );
 	}
 
@@ -206,12 +198,8 @@ public class DetachedNestedInitializationAnyFetchTest {
 		@Id
 		private Long id;
 
-		@Any(fetch = FetchType.LAZY)
-		@AnyKeyJavaClass(Long.class)
-		@JoinColumn(name = "b_id") //the foreign key column
-		@Column(name = "b_type")   //the discriminator column
-		@AnyDiscriminatorValue(discriminator = "B", entity = EntityB.class)
-		private Object b;
+		@ManyToOne
+		private EntityB b;
 	}
 
 	@Entity(name = "EntityB")
