@@ -34,7 +34,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 		DetachedCollectionInitializationJoinFetchTest.EntityB.class,
 })
 @SessionFactory
-@BytecodeEnhanced(runNotEnhancedAsWell = true)
+@BytecodeEnhanced//(runNotEnhancedAsWell = true)
 @Jira("https://hibernate.atlassian.net/browse/HHH-19910")
 public class DetachedCollectionInitializationJoinFetchTest {
 	@Test
@@ -66,6 +66,14 @@ public class DetachedCollectionInitializationJoinFetchTest {
 			session.clear();
 
 			fetchQuery( entityA.getB(), session );
+		} );
+	}
+
+	@Test
+	public void testExistingPersistentInstance(SessionFactoryScope scope) {
+		scope.inTransaction( session -> {
+			final var entityA = session.find( EntityA.class, 1L );
+			fetchQuery( new ArrayList<>( entityA.getB() ), session );
 		} );
 	}
 
