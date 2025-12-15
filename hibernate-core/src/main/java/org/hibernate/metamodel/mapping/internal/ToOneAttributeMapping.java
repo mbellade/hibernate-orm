@@ -2115,7 +2115,7 @@ public class ToOneAttributeMapping
 					if ( associatedEntityMappingType.getEntityPersister().hasFilterForLoadByKey() ) {
 						associatedEntityMappingType.applyBaseRestrictions(
 								join::applyPredicate,
-								tableGroup,
+								lazyTableGroup,
 								true,
 								creationState.getLoadQueryInfluencers().getEnabledFilters(),
 								creationState.applyOnlyLoadByKeyFilters(),
@@ -2125,13 +2125,13 @@ public class ToOneAttributeMapping
 					}
 					associatedEntityMappingType.applyWhereRestrictions(
 							join::applyPredicate,
-							tableGroup,
+							lazyTableGroup,
 							true,
 							creationState
 					);
 					if ( associatedEntityMappingType.getSuperMappingType() != null
 							&& !creationState.supportsEntityNameUsage() ) {
-						associatedEntityMappingType.applyDiscriminator( null, null, tableGroup, creationState );
+						associatedEntityMappingType.applyDiscriminator( null, null, lazyTableGroup, creationState );
 					}
 
 					final var softDeleteMapping = associatedEntityMappingType.getSoftDeleteMapping();
