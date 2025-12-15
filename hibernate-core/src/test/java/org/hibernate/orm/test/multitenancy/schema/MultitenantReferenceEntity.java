@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  * Copyright Red Hat Inc. and Hibernate Authors
  */
-package org.hibernate.bugs.entity;
+package org.hibernate.orm.test.multitenancy.schema;
 
 
 import jakarta.persistence.Entity;
@@ -12,10 +12,10 @@ import jakarta.persistence.ManyToOne;
 
 @Entity
 public class MultitenantReferenceEntity {
-@Id
-@GeneratedValue
-Long id;
+	@Id
+	@GeneratedValue
+	Long id;
 
-@ManyToOne()
-MultitenantChildEntity child;
+	@ManyToOne
+	MultitenantChildEntity child;
 }

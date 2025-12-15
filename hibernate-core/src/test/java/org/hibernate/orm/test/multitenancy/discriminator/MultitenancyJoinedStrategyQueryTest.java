@@ -4,10 +4,10 @@
  */
 package org.hibernate.orm.test.multitenancy.discriminator;
 
-import org.hibernate.bugs.entity.MultitenantChildEntity;
-import org.hibernate.bugs.entity.MultitenantParentEntity;
-import org.hibernate.bugs.entity.MultitenantReferenceEntity;
 import org.hibernate.cfg.AvailableSettings;
+import org.hibernate.orm.test.multitenancy.schema.MultitenantChildEntity;
+import org.hibernate.orm.test.multitenancy.schema.MultitenantParentEntity;
+import org.hibernate.orm.test.multitenancy.schema.MultitenantReferenceEntity;
 import org.hibernate.testing.orm.junit.DomainModel;
 import org.hibernate.testing.orm.junit.ServiceRegistry;
 import org.hibernate.testing.orm.junit.SessionFactory;
@@ -40,7 +40,8 @@ class MultitenancyJoinedStrategyQueryTest {
 	void hhh123Test(SessionFactoryScope scope) {
 		scope.inTransaction( session -> {
 			List<MultitenantReferenceEntity> results = session.createSelectionQuery(
-							"from MultitenantReferenceEntity r where r.child.number = :number",
+							"from MultitenantReferenceEntity r where r.child.number = :number " //adlew+ " and r.child.entityType = 'CHILD'"
+							,
 							MultitenantReferenceEntity.class )
 					.setParameter( "number", 7 )
 					.getResultList();
