@@ -31,7 +31,7 @@ public class PersistentCollectionChangeWorkUnit extends AbstractAuditWorkUnit im
 			String entityName,
 			EnversService enversService,
 			PersistentCollection collection,
-			CollectionEntry collectionEntry,
+			String role,
 			Serializable snapshot,
 			Object id,
 			String referencingPropertyName) {
@@ -39,7 +39,7 @@ public class PersistentCollectionChangeWorkUnit extends AbstractAuditWorkUnit im
 				sessionImplementor,
 				entityName,
 				enversService,
-				new PersistentCollectionChangeWorkUnitId( id, collectionEntry.getRole() ),
+				new PersistentCollectionChangeWorkUnitId( id, role ),
 				RevisionType.MOD
 		);
 

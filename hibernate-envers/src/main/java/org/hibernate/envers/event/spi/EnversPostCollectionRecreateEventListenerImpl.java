@@ -4,10 +4,12 @@
  */
 package org.hibernate.envers.event.spi;
 
+import org.hibernate.collection.spi.PersistentCollection;
 import org.hibernate.engine.spi.CollectionEntry;
 import org.hibernate.envers.boot.internal.EnversService;
 import org.hibernate.event.spi.PostCollectionRecreateEvent;
 import org.hibernate.event.spi.PostCollectionRecreateEventListener;
+import org.hibernate.persister.collection.CollectionPersister;
 
 /**
  * Envers-specific collection recreation event listener
@@ -27,12 +29,14 @@ public class EnversPostCollectionRecreateEventListenerImpl
 
 	@Override
 	public void onPostRecreateCollection(PostCollectionRecreateEvent event) {
-		final CollectionEntry collectionEntry = getCollectionEntry( event );
-		if ( !collectionEntry.getLoadedPersister().isInverse() ) {
-			onCollectionAction( event, event.getCollection(), null, collectionEntry );
+		final var collection = event.getCollection();
+		final var persister = collection.getSession().getFactory().getMappingMetamodel()
+				.getCollectionDescriptor( collection.getRole() );
+		if ( !persister.isInverse() ) {
+			onCollectionAction( event, collection, null, persister );
 		}
 		else {
-			onCollectionActionInversed( event, event.getCollection(), null, collectionEntry );
+			onCollectionActionInversed( event, collection, null, persister );
 		}
 	}
 }
