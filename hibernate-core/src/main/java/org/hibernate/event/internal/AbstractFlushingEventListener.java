@@ -404,10 +404,6 @@ public abstract class AbstractFlushingEventListener {
 		final var persistenceContext = session.getPersistenceContextInternal();
 		persistenceContext.clearCollectionsByKey();
 
-		// the database has changed now, so the subselect results need to be invalidated
-		// the batch fetching queues should also be cleared - especially the collection batch fetching one
-		persistenceContext.getBatchFetchQueue().clear();
-
 		persistenceContext.forEachCollectionEntry(
 				(persistentCollection, collectionEntry) -> {
 					collectionEntry.postFlush( persistentCollection );
