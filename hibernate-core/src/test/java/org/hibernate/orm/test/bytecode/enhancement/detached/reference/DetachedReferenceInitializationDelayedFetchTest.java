@@ -4,6 +4,7 @@
  */
 package org.hibernate.orm.test.bytecode.enhancement.detached.reference;
 
+import org.hibernate.FlushMode;
 import org.hibernate.Hibernate;
 import org.hibernate.engine.spi.SessionImplementor;
 
@@ -18,6 +19,7 @@ import org.junit.jupiter.api.Test;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.Id;
 import jakarta.persistence.ManyToOne;
 
@@ -107,7 +109,6 @@ public class DetachedReferenceInitializationDelayedFetchTest {
 			// put a different instance of EntityB in the persistence context
 			final var ignored = session.getReference( EntityB.class, 1L );
 
-
 			fetchQuery( entityB, session );
 		} );
 	}
@@ -123,6 +124,16 @@ public class DetachedReferenceInitializationDelayedFetchTest {
 			final var ignored = session.find( EntityB.class, 1L );
 
 			fetchQuery( entityB, session );
+		} );
+	}
+
+	@Test
+	public void testTransientEntityAndPersistentEntity(SessionFactoryScope scope) {
+		scope.inTransaction( session -> {
+			// put a different instance of EntityB in the persistence context
+			final var ignored = session.find( EntityB.class, 1L );
+
+			fetchQuery( new EntityB(), session );
 		} );
 	}
 
@@ -155,11 +166,54 @@ public class DetachedReferenceInitializationDelayedFetchTest {
 		} );
 	}
 
+	@Test
+	public void testPersistentEntityWithTransientReference(SessionFactoryScope scope) {
+		scope.inTransaction( session -> {
+			// put EntityB in the persistence context
+			 final var persistentB = session.find( EntityB.class, 1L );
+
+			// Create transient EntityB with null id
+			final var transientB = new EntityB();
+			transientB.name = "transient";
+
+			// Create and persist EntityA
+			final var entityA = new EntityA();
+			entityA.id = 1L;
+			session.persist( entityA );
+			session.flush(); // flush before association
+
+			// Mark EntityA as read-only to prevent loaded state tracking
+			// (otherwise we use the loaded null EntityA.b state)
+			session.setReadOnly( entityA, true );
+
+			// Now associate the transient EntityB
+			entityA.b = transientB;
+
+			final var wasTransientInitialized = Hibernate.isInitialized( transientB );
+			final var wasPersistentInitialized = Hibernate.isInitialized( persistentB );
+
+			// Disable auto-flush to prevent validation when running the query
+			// session.setHibernateFlushMode( FlushMode.MANUAL );
+
+			final var result = session.createQuery(
+					"from EntityA a",
+					EntityA.class
+			).getSingleResult();
+
+			// Now inspect what happened
+			assertThat( Hibernate.isInitialized( transientB ) ).isEqualTo( wasTransientInitialized );
+			assertThat( result.b ).isSameAs( transientB );
+
+			assertThat( Hibernate.isInitialized( persistentB ) ).isEqualTo( wasPersistentInitialized );
+			assertThat( persistentB ).isNotSameAs( transientB );
+		} );
+	}
+
 	@BeforeAll
 	public void setUp(SessionFactoryScope scope) {
 		scope.inTransaction( session -> {
 			final var entityB = new EntityB();
-			entityB.id = 1L;
+//			entityB.id = 1L;
 			entityB.name = "b_1";
 			session.persist( entityB );
 		} );
@@ -175,13 +229,15 @@ public class DetachedReferenceInitializationDelayedFetchTest {
 	private void fetchQuery(EntityB entityB, SessionImplementor session) {
 		final var entityA = new EntityA();
 		entityA.id = 1L;
-		entityA.b = entityB;
+//		entityA.b = entityB;
 		session.persist( entityA );
+		session.flush();
+
+		entityA.b = entityB;
 
 		final var wasDetachedInitialized = Hibernate.isInitialized( entityB );
 
-		final var id = session.getSessionFactory().getPersistenceUnitUtil().getIdentifier( entityB );
-		final var reference = session.getReference( EntityB.class, id );
+		final var reference = session.getReference( EntityB.class, 1L );
 		final var wasManagedInitialized = Hibernate.isInitialized( reference );
 
 		final var result = session.createQuery(
@@ -209,6 +265,7 @@ public class DetachedReferenceInitializationDelayedFetchTest {
 	@Entity(name = "EntityB")
 	static class EntityB {
 		@Id
+		@GeneratedValue
 		private Long id;
 
 		private String name;

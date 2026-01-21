@@ -302,7 +302,14 @@ public class EntityDelayedFetchInitializer
 			final var rowProcessingState = data.getRowProcessingState();
 			final var session = rowProcessingState.getSession();
 			final var entityDescriptor = getEntityDescriptor();
-			data.entityIdentifier = entityDescriptor.getIdentifier( instance, session );
+			data.entityIdentifier = identifierAssembler.assemble( rowProcessingState );
+
+			if ( data.entityIdentifier == null ) {
+				data.setState( State.MISSING );
+				data.entityIdentifier = null;
+				data.setInstance( null );
+				return;
+			}
 
 			final var entityKey = new EntityKey( data.entityIdentifier, entityDescriptor );
 			final var entityHolder = session.getPersistenceContextInternal().getEntityHolder(
