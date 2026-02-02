@@ -464,7 +464,7 @@ public class DefaultMergeEventListener
 			persister.setValues( target, targetValues );
 			interceptor.postMerge( entity, target, id, targetValues, originalValues, propertyNames, propertyTypes );
 			//copyValues works by reflection, so explicitly mark the entity instance dirty
-			markInterceptorDirty( entity, target );
+			markInterceptorDirty( entity, target, persister.isVersioned() );
 			event.setResult( result );
 		}
 	}
@@ -548,17 +548,26 @@ public class DefaultMergeEventListener
 		return managed;
 	}
 
-	private static void markInterceptorDirty(final Object entity, final Object target) {
+	private static void markInterceptorDirty(final Object entity, final Object target, final boolean isVersioned) {
 		// for enhanced entities, copy over the dirty attributes
 		if ( isSelfDirtinessTracker( entity ) && isSelfDirtinessTracker( target ) ) {
 			// clear, because setting the embedded attributes dirties them
 			final var managedEntity = asManagedEntity( target );
 			final var selfDirtinessTrackerTarget = asSelfDirtinessTracker( target );
-			if ( !selfDirtinessTrackerTarget.$$_hibernate_hasDirtyAttributes()
-					&& !asManagedEntity( entity ).$$_hibernate_useTracker() ) {
+			if ( !asManagedEntity( entity ).$$_hibernate_useTracker() ) {
+				// Source is a new (never managed) instance, so its dirty tracker
+				// doesn't reflect actual changes. Force a full dirty check.
+				managedEntity.$$_hibernate_setUseTracker( false );
+			}
+			else if ( !isVersioned ) {
+				// Without a version, we have no guarantee that the source entity's state
+				// matches the current database state - the source could be stale.
+				// Force a full dirty check by comparing actual values at flush time.
 				managedEntity.$$_hibernate_setUseTracker( false );
 			}
 			else {
+				// We checked the version in targetEntity(), the source and target represent the same database state.
+				// We can trust original entity's dirty tracker.
 				managedEntity.$$_hibernate_setUseTracker( true );
 				selfDirtinessTrackerTarget.$$_hibernate_clearDirtyAttributes();
 				for ( String fieldName : asSelfDirtinessTracker( entity ).$$_hibernate_getDirtyAttributes() ) {
