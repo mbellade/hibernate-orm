@@ -34,6 +34,20 @@ public class JdbcValuesCacheHit extends AbstractJdbcValues {
 		this.valueIndexesToCacheIndexes = resolvedMapping.getValueIndexesToCacheIndexes();
 	}
 
+	/**
+	 * Returns whether the cached data has enough columns for the resolved mapping.
+	 * When {@code false}, the cache entry was populated by a different result type
+	 * (e.g. entity) that cached fewer columns and needs to be re-populated.
+	 */
+	public boolean isDataSufficient() {
+		if ( numberOfRows > 0 ) {
+			final Object firstRow = cachedResults.get( offset );
+			final int cachedRowSize = firstRow instanceof Object[] array ? array.length : 1;
+			return cachedRowSize >= resolvedMapping.getRowToCacheSize();
+		}
+		return true;
+	}
+
 	@Override
 	protected boolean processNext(RowProcessingState rowProcessingState) {
 		// NOTE: explicitly skipping limit handling because the cached state ought

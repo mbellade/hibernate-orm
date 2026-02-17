@@ -286,6 +286,7 @@ public class JdbcSelectExecutorStandardImpl implements JdbcSelectExecutor {
 
 		final QueryKey queryResultsCacheKey;
 		final List<?> cachedResults;
+		final String queryCacheRegionName;
 		if ( cacheable && cacheMode.isGetEnabled() ) {
 			SQL_EXEC_LOGGER.readingQueryResultCacheData( cacheMode.name() );
 			final Set<String> querySpaces = jdbcSelect.getAffectedTableNames();
@@ -298,6 +299,7 @@ public class JdbcSelectExecutorStandardImpl implements JdbcSelectExecutor {
 
 			final var queryCache = factory.getCache()
 					.getQueryResultsCache( queryOptions.getResultCacheRegionName() );
+			queryCacheRegionName = queryCache.getRegion().getName();
 
 			queryResultsCacheKey = QueryKey.from(
 					jdbcSelect.getSqlString(),
@@ -321,16 +323,6 @@ public class JdbcSelectExecutorStandardImpl implements JdbcSelectExecutor {
 			//
 			// todo (6.0) : if we go this route (^^), still beneficial to have an abstraction over different UpdateTimestampsCache-based
 			//		invalidation strategies - QueryCacheInvalidationStrategy
-
-			final var statistics = factory.getStatistics();
-			if ( statistics.isStatisticsEnabled() ) {
-				if ( cachedResults == null ) {
-					statistics.queryCacheMiss( queryIdentifier, queryCache.getRegion().getName() );
-				}
-				else {
-					statistics.queryCacheHit( queryIdentifier, queryCache.getRegion().getName() );
-				}
-			}
 		}
 		else {
 			SQL_EXEC_LOGGER.skippingReadingQueryResultCacheData(
@@ -338,6 +330,7 @@ public class JdbcSelectExecutorStandardImpl implements JdbcSelectExecutor {
 					cacheMode.name()
 			);
 			cachedResults = null;
+			queryCacheRegionName = null;
 			if ( cacheable && cacheMode.isPutEnabled() ) {
 				queryResultsCacheKey = QueryKey.from(
 						jdbcSelect.getSqlString(),
@@ -351,7 +344,7 @@ public class JdbcSelectExecutorStandardImpl implements JdbcSelectExecutor {
 			}
 		}
 
-		return resolveJdbcValues(
+		final var result = resolveJdbcValues(
 				queryIdentifier,
 				executionContext,
 				resultSetAccess,
@@ -361,6 +354,20 @@ public class JdbcSelectExecutorStandardImpl implements JdbcSelectExecutor {
 				session,
 				factory
 		);
+
+		if ( queryCacheRegionName != null ) {
+			final var statistics = factory.getStatistics();
+			if ( statistics.isStatisticsEnabled() ) {
+				if ( result instanceof JdbcValuesCacheHit ) {
+					statistics.queryCacheHit( queryIdentifier, queryCacheRegionName );
+				}
+				else {
+					statistics.queryCacheMiss( queryIdentifier, queryCacheRegionName );
+				}
+			}
+		}
+
+		return result;
 	}
 
 	private static AbstractJdbcValues resolveJdbcValues(
@@ -373,39 +380,44 @@ public class JdbcSelectExecutorStandardImpl implements JdbcSelectExecutor {
 			SharedSessionContractImplementor session,
 			SessionFactoryImplementor factory) {
 		final var loadQueryInfluencers = session.getLoadQueryInfluencers();
-		if ( cachedResults == null ) {
-			final CachedJdbcValuesMetadata metadataForCache;
-			final JdbcValuesMapping jdbcValuesMapping;
-			if ( queryResultsCacheKey == null ) {
-				jdbcValuesMapping = mappingProducer.resolve( resultSetAccess, loadQueryInfluencers, factory );
-				metadataForCache = null;
-			}
-			else {
-				// If we need to put the values into the cache, we need to be able to capture the JdbcValuesMetadata
-				final var capturingMetadata = new CapturingJdbcValuesMetadata( resultSetAccess );
-				jdbcValuesMapping = mappingProducer.resolve( capturingMetadata, loadQueryInfluencers, factory );
-				metadataForCache = capturingMetadata.resolveMetadataForCache();
-			}
-			return new JdbcValuesResultSetImpl(
-					resultSetAccess,
-					queryResultsCacheKey,
-					queryIdentifier,
-					executionContext.getQueryOptions(),
-					false,
-					jdbcValuesMapping,
-					metadataForCache,
-					executionContext
-			);
-		}
-		else {
+		// Try to use cached results if available
+		if ( cachedResults != null ) {
 			final var valuesMetadata =
 					!cachedResults.isEmpty()
 						&& cachedResults.get( 0 ) instanceof JdbcValuesMetadata jdbcValuesMetadata
 							? jdbcValuesMetadata
 							: resultSetAccess;
-			return new JdbcValuesCacheHit( cachedResults,
-					mappingProducer.resolve( valuesMetadata, loadQueryInfluencers, factory ) );
+			final var resolvedMapping =
+					mappingProducer.resolve( valuesMetadata, loadQueryInfluencers, factory );
+			final var cacheHit = new JdbcValuesCacheHit( cachedResults, resolvedMapping );
+			if ( cacheHit.isDataSufficient() ) {
+				return cacheHit;
+			}
+			// Cached data insufficient for the resolved mapping — fall through to re-execute
 		}
+		// Execute query (cache miss or insufficient cached data)
+		final CachedJdbcValuesMetadata metadataForCache;
+		final JdbcValuesMapping jdbcValuesMapping;
+		if ( queryResultsCacheKey == null ) {
+			jdbcValuesMapping = mappingProducer.resolve( resultSetAccess, loadQueryInfluencers, factory );
+			metadataForCache = null;
+		}
+		else {
+			// If we need to put the values into the cache, we need to be able to capture the JdbcValuesMetadata
+			final var capturingMetadata = new CapturingJdbcValuesMetadata( resultSetAccess );
+			jdbcValuesMapping = mappingProducer.resolve( capturingMetadata, loadQueryInfluencers, factory );
+			metadataForCache = capturingMetadata.resolveMetadataForCache( factory.getTypeConfiguration() );
+		}
+		return new JdbcValuesResultSetImpl(
+				resultSetAccess,
+				queryResultsCacheKey,
+				queryIdentifier,
+				executionContext.getQueryOptions(),
+				false,
+				jdbcValuesMapping,
+				metadataForCache,
+				executionContext
+		);
 	}
 
 	private static CacheMode resolveCacheMode(ExecutionContext executionContext) {
@@ -488,8 +500,18 @@ public class JdbcSelectExecutorStandardImpl implements JdbcSelectExecutor {
 			return basicType;
 		}
 
-		public CachedJdbcValuesMetadata resolveMetadataForCache() {
-			return columnNames == null ? null : new CachedJdbcValuesMetadata( columnNames, types );
+		public CachedJdbcValuesMetadata resolveMetadataForCache(TypeConfiguration typeConfiguration) {
+			if ( columnNames == null ) {
+				return null;
+			}
+			// Resolve any types that were not captured during mapping resolution,
+			// e.g. when an entity result mapping does not call resolveType()
+			for ( int i = 0; i < types.length; i++ ) {
+				if ( types[i] == null ) {
+					types[i] = resultSetAccess.resolveType( i + 1, null, typeConfiguration );
+				}
+			}
+			return new CachedJdbcValuesMetadata( columnNames, types );
 		}
 	}
 
