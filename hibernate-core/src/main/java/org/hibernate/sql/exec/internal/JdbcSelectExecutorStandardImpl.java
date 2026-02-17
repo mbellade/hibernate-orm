@@ -28,6 +28,7 @@ import org.hibernate.sql.results.internal.ResultsHelper;
 import org.hibernate.sql.results.internal.RowProcessingStateStandardImpl;
 import org.hibernate.sql.results.internal.RowTransformerStandardImpl;
 import org.hibernate.sql.results.internal.RowTransformerTupleTransformerAdapter;
+import org.hibernate.sql.results.jdbc.internal.AbstractJdbcValues;
 import org.hibernate.sql.results.jdbc.internal.CachedJdbcValuesMetadata;
 import org.hibernate.sql.results.jdbc.internal.DeferredResultSetAccess;
 import org.hibernate.sql.results.jdbc.internal.JdbcValuesCacheHit;
@@ -267,7 +268,8 @@ public class JdbcSelectExecutorStandardImpl implements JdbcSelectExecutor {
 		final boolean cacheable = queryCacheEnabled && canBeCached
 				&& executionContext.getQueryOptions().isResultCachingEnabled() == Boolean.TRUE;
 		final QueryKey queryResultsCacheKey;
-
+		final List<?> cachedResults;
+		final String queryCacheRegionName;
 		if ( cacheable && cacheMode.isGetEnabled() ) {
 			SqlExecLogger.SQL_EXEC_LOGGER.debugf( "Reading Query result cache data per CacheMode#isGetEnabled [%s]", cacheMode.name() );
 			final Set<String> querySpaces = jdbcSelect.getAffectedTableNames();
@@ -280,6 +282,7 @@ public class JdbcSelectExecutorStandardImpl implements JdbcSelectExecutor {
 
 			final QueryResultsCache queryCache = factory.getCache()
 					.getQueryResultsCache( executionContext.getQueryOptions().getResultCacheRegionName() );
+			queryCacheRegionName = queryCache.getRegion().getName();
 
 			queryResultsCacheKey = QueryKey.from(
 					jdbcSelect.getSqlString(),
@@ -303,16 +306,6 @@ public class JdbcSelectExecutorStandardImpl implements JdbcSelectExecutor {
 			//
 			// todo (6.0) : if we go this route (^^), still beneficial to have an abstraction over different UpdateTimestampsCache-based
 			//		invalidation strategies - QueryCacheInvalidationStrategy
-
-			final StatisticsImplementor statistics = factory.getStatistics();
-			if ( statistics.isStatisticsEnabled() ) {
-				if ( cachedResults == null ) {
-					statistics.queryCacheMiss( queryIdentifier, queryCache.getRegion().getName() );
-				}
-				else {
-					statistics.queryCacheHit( queryIdentifier, queryCache.getRegion().getName() );
-				}
-			}
 		}
 		else {
 			SqlExecLogger.SQL_EXEC_LOGGER.debugf( "Skipping reading Query result cache data: cache-enabled = %s, cache-mode = %s",
@@ -320,6 +313,7 @@ public class JdbcSelectExecutorStandardImpl implements JdbcSelectExecutor {
 					cacheMode.name()
 			);
 			cachedResults = null;
+			queryCacheRegionName = null;
 			if ( cacheable && cacheMode.isPutEnabled() ) {
 				queryResultsCacheKey = QueryKey.from(
 						jdbcSelect.getSqlString(),
@@ -333,42 +327,82 @@ public class JdbcSelectExecutorStandardImpl implements JdbcSelectExecutor {
 			}
 		}
 
-		if ( cachedResults == null ) {
-			final CachedJdbcValuesMetadata metadataForCache;
-			final JdbcValuesMapping jdbcValuesMapping;
-			if ( queryResultsCacheKey == null ) {
-				jdbcValuesMapping = mappingProducer.resolve( resultSetAccess, session.getLoadQueryInfluencers(), factory );
-				metadataForCache = null;
-			}
-			else {
-				// If we need to put the values into the cache, we need to be able to capture the JdbcValuesMetadata
-				final CapturingJdbcValuesMetadata capturingMetadata = new CapturingJdbcValuesMetadata( resultSetAccess );
-				jdbcValuesMapping = mappingProducer.resolve( capturingMetadata, session.getLoadQueryInfluencers(), factory );
-				metadataForCache = capturingMetadata.resolveMetadataForCache();
-			}
+		final AbstractJdbcValues result = resolveJdbcValues(
+				queryIdentifier,
+				executionContext,
+				resultSetAccess,
+				cachedResults,
+				queryResultsCacheKey,
+				mappingProducer,
+				session,
+				factory
+		);
 
-			return new JdbcValuesResultSetImpl(
-					resultSetAccess,
-					queryResultsCacheKey,
-					queryIdentifier,
-					executionContext.getQueryOptions(),
-					resultSetAccess.usesFollowOnLocking(),
-					jdbcValuesMapping,
-					metadataForCache,
-					executionContext
-			);
+		if ( queryCacheRegionName != null ) {
+			final var statistics = factory.getStatistics();
+			if ( statistics.isStatisticsEnabled() ) {
+				if ( result instanceof JdbcValuesCacheHit ) {
+					statistics.queryCacheHit( queryIdentifier, queryCacheRegionName );
+				}
+				else {
+					statistics.queryCacheMiss( queryIdentifier, queryCacheRegionName );
+				}
+			}
+		}
+
+		return result;
+	}
+
+	private static AbstractJdbcValues resolveJdbcValues(
+			String queryIdentifier,
+			ExecutionContext executionContext,
+			ResultSetAccess resultSetAccess,
+			List<?> cachedResults,
+			QueryKey queryResultsCacheKey,
+			JdbcValuesMappingProducer mappingProducer,
+			SharedSessionContractImplementor session,
+			SessionFactoryImplementor factory) {
+		final var loadQueryInfluencers = session.getLoadQueryInfluencers();
+		// Try to use cached results if available
+		if ( cachedResults != null ) {
+			final JdbcValuesMetadata valuesMetadata =
+					!cachedResults.isEmpty()
+						&& cachedResults.get( 0 ) instanceof JdbcValuesMetadata jdbcValuesMetadata
+							? jdbcValuesMetadata
+							: resultSetAccess;
+			final var resolvedMapping =
+					mappingProducer.resolve( valuesMetadata, loadQueryInfluencers, factory );
+			final var cacheHit = new JdbcValuesCacheHit( cachedResults, resolvedMapping );
+			if ( cacheHit.isDataSufficient() ) {
+				return cacheHit;
+			}
+			// Cached data insufficient for the resolved mapping — fall through to re-execute
+		}
+		// Execute query (cache miss or insufficient cached data)
+		final CachedJdbcValuesMetadata metadataForCache;
+		final JdbcValuesMapping jdbcValuesMapping;
+		if ( queryResultsCacheKey == null ) {
+			jdbcValuesMapping = mappingProducer.resolve( resultSetAccess, loadQueryInfluencers, factory );
+			metadataForCache = null;
 		}
 		else {
-			final JdbcValuesMapping jdbcValuesMapping;
-			if ( cachedResults.isEmpty() || !( cachedResults.get( 0 ) instanceof JdbcValuesMetadata ) ) {
-				jdbcValuesMapping = mappingProducer.resolve( resultSetAccess, session.getLoadQueryInfluencers(), factory );
-			}
-			else {
-				jdbcValuesMapping = mappingProducer.resolve( (JdbcValuesMetadata) cachedResults.get( 0 ), session.getLoadQueryInfluencers(), factory );
-			}
-			return new JdbcValuesCacheHit( cachedResults, jdbcValuesMapping );
+			// If we need to put the values into the cache, we need to be able to capture the JdbcValuesMetadata
+			final var capturingMetadata = new CapturingJdbcValuesMetadata( resultSetAccess );
+			jdbcValuesMapping = mappingProducer.resolve( capturingMetadata, loadQueryInfluencers, factory );
+			metadataForCache = capturingMetadata.resolveMetadataForCache( factory.getTypeConfiguration() );
 		}
+		return new JdbcValuesResultSetImpl(
+				resultSetAccess,
+				queryResultsCacheKey,
+				queryIdentifier,
+				executionContext.getQueryOptions(),
+				false,
+				jdbcValuesMapping,
+				metadataForCache,
+				executionContext
+		);
 	}
+
 
 	static class CapturingJdbcValuesMetadata implements JdbcValuesMetadata {
 		private final ResultSetAccess resultSetAccess;
@@ -444,9 +478,16 @@ public class JdbcSelectExecutorStandardImpl implements JdbcSelectExecutor {
 			return basicType;
 		}
 
-		public CachedJdbcValuesMetadata resolveMetadataForCache() {
+		public CachedJdbcValuesMetadata resolveMetadataForCache(TypeConfiguration typeConfiguration) {
 			if ( columnNames == null ) {
 				return null;
+			}
+			// Resolve any types that were not captured during mapping resolution,
+			// e.g. when an entity result mapping does not call resolveType()
+			for ( int i = 0; i < types.length; i++ ) {
+				if ( types[i] == null ) {
+					types[i] = resultSetAccess.resolveType( i + 1, null, typeConfiguration );
+				}
 			}
 			return new CachedJdbcValuesMetadata( columnNames, types );
 		}
