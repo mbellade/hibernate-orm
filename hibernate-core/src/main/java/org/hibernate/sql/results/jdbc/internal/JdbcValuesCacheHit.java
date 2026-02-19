@@ -34,7 +34,6 @@ public class JdbcValuesCacheHit extends AbstractJdbcValues {
 		this.numberOfRows = cachedResults.size() - offset - 1;
 		this.resultCount = cachedResults.isEmpty() ? 0 : (int) cachedResults.get( cachedResults.size() - 1 );
 		this.resolvedMapping = resolvedMapping;
-
 		if ( hasMetadata ) {
 			final int[] storedMapping =
 					( (CachedJdbcValuesMetadata) cachedResults.get( 0 ) ).getValueIndexesToCacheIndexes();
@@ -55,13 +54,9 @@ public class JdbcValuesCacheHit extends AbstractJdbcValues {
 	 * Compatible means: every column position the reader needs is present in the stored mapping.
 	 *
 	 * @param readerMapping the current result type's compaction mapping (from resolvedMapping)
-	 * @param storedMapping the compaction mapping stored in cache metadata, or null for identity
+	 * @param storedMapping the compaction mapping stored in cache metadata
 	 */
 	private static boolean isMappingCompatible(int[] readerMapping, int[] storedMapping) {
-		if ( storedMapping == null ) {
-			// Writer cached all columns at original positions (identity) — always compatible
-			return true;
-		}
 		// Check that every position the reader needs is present in the stored mapping
 		for ( int i = 0; i < readerMapping.length; i++ ) {
 			if ( readerMapping[i] != -1 ) {
@@ -220,9 +215,7 @@ public class JdbcValuesCacheHit extends AbstractJdbcValues {
 		}
 		final Object row = cachedResults.get( position + offset );
 		if ( row instanceof Object[] array ) {
-			return valueIndexesToCacheIndexes == null
-					? array[valueIndex]
-					: array[valueIndexesToCacheIndexes[valueIndex]];
+			return array[valueIndexesToCacheIndexes[valueIndex]];
 		}
 		else {
 			assert valueIndexesToCacheIndexes[valueIndex] == 0;

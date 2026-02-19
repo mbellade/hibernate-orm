@@ -516,27 +516,7 @@ public class JdbcSelectExecutorStandardImpl implements JdbcSelectExecutor {
 					types[i] = resultSetAccess.resolveType( i + 1, null, typeConfiguration );
 				}
 			}
-//			// Store null for identity mappings (all columns cached at original positions)
-//			// to save serialization space — null means "read directly by position"
-//			final int[] storedMapping = isIdentityMapping( valueIndexesToCacheIndexes, columnNames.length )
-//					? null
-//					: valueIndexesToCacheIndexes;
 			return new CachedJdbcValuesMetadata( columnNames, types, valueIndexesToCacheIndexes );
-		}
-
-		private static boolean isIdentityMapping(int[] mapping, int columnCount) {
-			if ( mapping == null || mapping.length == 0 ) {
-				return true;
-			}
-			if ( mapping.length != columnCount ) {
-				return false;
-			}
-			for ( int i = 0; i < mapping.length; i++ ) {
-				if ( mapping[i] != i ) {
-					return false;
-				}
-			}
-			return true;
 		}
 	}
 
