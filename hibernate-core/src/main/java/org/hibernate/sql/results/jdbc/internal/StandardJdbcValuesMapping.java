@@ -81,7 +81,7 @@ public class StandardJdbcValuesMapping implements JdbcValuesMapping {
 
 		this.needsResolve = needsResolve;
 		this.valueIndexesToCacheIndexes = cacheIndex == 0 ? EMPTY_INT_ARRAY : valueIndexesToCacheIndexes;
-		this.rowToCacheSize = sqlSelections.size();
+		this.rowToCacheSize = cacheIndex;
 	}
 
 	@Override

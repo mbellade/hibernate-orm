@@ -406,7 +406,10 @@ public class JdbcSelectExecutorStandardImpl implements JdbcSelectExecutor {
 			// If we need to put the values into the cache, we need to be able to capture the JdbcValuesMetadata
 			final var capturingMetadata = new CapturingJdbcValuesMetadata( resultSetAccess );
 			jdbcValuesMapping = mappingProducer.resolve( capturingMetadata, loadQueryInfluencers, factory );
-			metadataForCache = capturingMetadata.resolveMetadataForCache( factory.getTypeConfiguration() );
+			metadataForCache = capturingMetadata.resolveMetadataForCache(
+					factory.getTypeConfiguration(),
+					jdbcValuesMapping.getValueIndexesToCacheIndexes()
+			);
 		}
 		return new JdbcValuesResultSetImpl(
 				resultSetAccess,
@@ -500,7 +503,9 @@ public class JdbcSelectExecutorStandardImpl implements JdbcSelectExecutor {
 			return basicType;
 		}
 
-		public CachedJdbcValuesMetadata resolveMetadataForCache(TypeConfiguration typeConfiguration) {
+		public CachedJdbcValuesMetadata resolveMetadataForCache(
+				TypeConfiguration typeConfiguration,
+				int[] valueIndexesToCacheIndexes) {
 			if ( columnNames == null ) {
 				return null;
 			}
@@ -511,7 +516,27 @@ public class JdbcSelectExecutorStandardImpl implements JdbcSelectExecutor {
 					types[i] = resultSetAccess.resolveType( i + 1, null, typeConfiguration );
 				}
 			}
-			return new CachedJdbcValuesMetadata( columnNames, types );
+//			// Store null for identity mappings (all columns cached at original positions)
+//			// to save serialization space — null means "read directly by position"
+//			final int[] storedMapping = isIdentityMapping( valueIndexesToCacheIndexes, columnNames.length )
+//					? null
+//					: valueIndexesToCacheIndexes;
+			return new CachedJdbcValuesMetadata( columnNames, types, valueIndexesToCacheIndexes );
+		}
+
+		private static boolean isIdentityMapping(int[] mapping, int columnCount) {
+			if ( mapping == null || mapping.length == 0 ) {
+				return true;
+			}
+			if ( mapping.length != columnCount ) {
+				return false;
+			}
+			for ( int i = 0; i < mapping.length; i++ ) {
+				if ( mapping[i] != i ) {
+					return false;
+				}
+			}
+			return true;
 		}
 	}
 

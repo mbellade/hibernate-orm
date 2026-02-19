@@ -16,10 +16,16 @@ import static org.hibernate.internal.util.collections.ArrayHelper.indexOf;
 public final class CachedJdbcValuesMetadata implements JdbcValuesMetadata, Serializable {
 	private final String[] columnNames;
 	private final BasicType<?>[] types;
+	private final int[] valueIndexesToCacheIndexes;
 
-	public CachedJdbcValuesMetadata(String[] columnNames, BasicType<?>[] types) {
+	public CachedJdbcValuesMetadata(String[] columnNames, BasicType<?>[] types, int[] valueIndexesToCacheIndexes) {
 		this.columnNames = columnNames;
 		this.types = types;
+		this.valueIndexesToCacheIndexes = valueIndexesToCacheIndexes;
+	}
+
+	public int[] getValueIndexesToCacheIndexes() {
+		return valueIndexesToCacheIndexes;
 	}
 
 	@Override

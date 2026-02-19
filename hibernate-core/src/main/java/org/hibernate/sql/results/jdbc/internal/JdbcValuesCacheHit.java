@@ -35,24 +35,42 @@ public class JdbcValuesCacheHit extends AbstractJdbcValues {
 		this.resultCount = cachedResults.isEmpty() ? 0 : (int) cachedResults.get( cachedResults.size() - 1 );
 		this.resolvedMapping = resolvedMapping;
 
-		final int rowToCacheSize = resolvedMapping.getRowToCacheSize();
-		final int cachedRowSize;
-		if ( numberOfRows > 0 ) {
-			final Object firstRow = cachedResults.get( offset );
-			cachedRowSize = firstRow instanceof Object[] array ? array.length : 1;
+		if ( hasMetadata ) {
+			final int[] storedMapping =
+					( (CachedJdbcValuesMetadata) cachedResults.get( 0 ) ).getValueIndexesToCacheIndexes();
+			this.dataSufficient = isMappingCompatible(
+					resolvedMapping.getValueIndexesToCacheIndexes(),
+					storedMapping
+			);
+			this.valueIndexesToCacheIndexes = storedMapping;
 		}
 		else {
-			cachedRowSize = rowToCacheSize;
+			this.dataSufficient = true;
+			this.valueIndexesToCacheIndexes = resolvedMapping.getValueIndexesToCacheIndexes();
 		}
+	}
 
-		this.dataSufficient = cachedRowSize >= rowToCacheSize;
-		// When the cached row was stored with all result set columns, but this mapping compacts
-		// to fewer columns (different result type), bypass compaction and read by position
-		this.valueIndexesToCacheIndexes = hasMetadata
-				&& cachedRowSize > rowToCacheSize
-				&& cachedRowSize == ( (CachedJdbcValuesMetadata) cachedResults.get( 0 ) ).getColumnCount()
-			? null
-			: resolvedMapping.getValueIndexesToCacheIndexes();
+	/**
+	 * Checks whether the stored (writer's) compaction mapping is compatible with the reader's mapping.
+	 * Compatible means: every column position the reader needs is present in the stored mapping.
+	 *
+	 * @param readerMapping the current result type's compaction mapping (from resolvedMapping)
+	 * @param storedMapping the compaction mapping stored in cache metadata, or null for identity
+	 */
+	private static boolean isMappingCompatible(int[] readerMapping, int[] storedMapping) {
+		if ( storedMapping == null ) {
+			// Writer cached all columns at original positions (identity) — always compatible
+			return true;
+		}
+		// Check that every position the reader needs is present in the stored mapping
+		for ( int i = 0; i < readerMapping.length; i++ ) {
+			if ( readerMapping[i] != -1 ) {
+				if ( i >= storedMapping.length || storedMapping[i] == -1 ) {
+					return false;
+				}
+			}
+		}
+		return true;
 	}
 
 	/**
