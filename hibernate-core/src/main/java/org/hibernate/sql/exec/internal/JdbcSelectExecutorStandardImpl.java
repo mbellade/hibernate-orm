@@ -261,7 +261,6 @@ public class JdbcSelectExecutorStandardImpl implements JdbcSelectExecutor {
 		final SessionFactoryImplementor factory = session.getFactory();
 		final boolean queryCacheEnabled = factory.getSessionFactoryOptions().isQueryCacheEnabled();
 
-		final List<?> cachedResults;
 		final CacheMode cacheMode = JdbcExecHelper.resolveCacheMode( executionContext );
 
 		final JdbcValuesMappingProducer mappingProducer = jdbcSelect.getJdbcValuesMappingProducer();
@@ -365,11 +364,14 @@ public class JdbcSelectExecutorStandardImpl implements JdbcSelectExecutor {
 		final var loadQueryInfluencers = session.getLoadQueryInfluencers();
 		// Try to use cached results if available
 		if ( cachedResults != null ) {
-			final JdbcValuesMetadata valuesMetadata =
-					!cachedResults.isEmpty()
-						&& cachedResults.get( 0 ) instanceof JdbcValuesMetadata jdbcValuesMetadata
-							? jdbcValuesMetadata
-							: resultSetAccess;
+			final JdbcValuesMetadata valuesMetadata;
+			final Object firstResult = cachedResults.isEmpty() ? null : cachedResults.get( 0 );
+			if ( firstResult instanceof JdbcValuesMetadata ) {
+				valuesMetadata = (JdbcValuesMetadata) firstResult;
+			}
+			else {
+				valuesMetadata = resultSetAccess;
+			}
 			final var resolvedMapping =
 					mappingProducer.resolve( valuesMetadata, loadQueryInfluencers, factory );
 			final var cacheHit = new JdbcValuesCacheHit( cachedResults, resolvedMapping );
