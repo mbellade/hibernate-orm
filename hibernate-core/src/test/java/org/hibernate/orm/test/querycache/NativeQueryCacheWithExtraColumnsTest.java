@@ -13,6 +13,8 @@ import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
 import org.hibernate.cfg.AvailableSettings;
 import org.hibernate.dialect.H2Dialect;
+import org.hibernate.stat.Statistics;
+
 import org.hibernate.testing.orm.junit.DomainModel;
 import org.hibernate.testing.orm.junit.Jira;
 import org.hibernate.testing.orm.junit.RequiresDialect;
@@ -40,6 +42,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class NativeQueryCacheWithExtraColumnsTest {
 
 	private static final String NATIVE_QUERY = "SELECT u1.* FROM TEST_USER u1, TEST_USER u2 WHERE u2.ID = u1.ID";
+
+	private static final String NATIVE_QUERY_EXTRA_COLS_FIRST =
+			"SELECT u1.EXTRA_COL1, u1.EXTRA_COL2, u1.ID, u1.NAME, u1.EMAIL, u1.AGE, u1.ADDRESS, u1.PHONE"
+			+ " FROM TEST_USER u1";
 
 	@BeforeAll
 	public void setUp(SessionFactoryScope scope) {
@@ -80,11 +86,7 @@ public class NativeQueryCacheWithExtraColumnsTest {
 			assertTestUser( query.getResultList() );
 		} );
 
-		assertThat( statistics.getQueryCacheHitCount() ).isEqualTo( 0 );
-		assertThat( statistics.getQueryCacheMissCount() ).isEqualTo( 1 );
-		assertThat( statistics.getQueryCachePutCount() ).isEqualTo( 1 );
-
-		statistics.clear();
+		assertQueryCacheStatistics( statistics, 0, 1, 1 );
 
 		// Second query - should use the cache
 		scope.inSession( session -> {
@@ -93,9 +95,7 @@ public class NativeQueryCacheWithExtraColumnsTest {
 			assertTestUser( query.getResultList() );
 		} );
 
-		assertThat( statistics.getQueryCacheHitCount() ).isEqualTo( 1 );
-		assertThat( statistics.getQueryCacheMissCount() ).isEqualTo( 0 );
-		assertThat( statistics.getQueryCachePutCount() ).isEqualTo( 0 );
+		assertQueryCacheStatistics( statistics, 1, 0, 0 );
 	}
 
 	private static void assertTestUser(List<TestUser> users) {
@@ -120,11 +120,7 @@ public class NativeQueryCacheWithExtraColumnsTest {
 			assertTestUserTuple( query.getResultList() );
 		} );
 
-		assertThat( statistics.getQueryCacheHitCount() ).isEqualTo( 0 );
-		assertThat( statistics.getQueryCacheMissCount() ).isEqualTo( 1 );
-		assertThat( statistics.getQueryCachePutCount() ).isEqualTo( 1 );
-
-		statistics.clear();
+		assertQueryCacheStatistics( statistics, 0, 1, 1 );
 
 		// Second query - should use the cache
 		scope.inSession( session -> {
@@ -133,9 +129,7 @@ public class NativeQueryCacheWithExtraColumnsTest {
 			assertTestUserTuple( query.getResultList() );
 		} );
 
-		assertThat( statistics.getQueryCacheHitCount() ).isEqualTo( 1 );
-		assertThat( statistics.getQueryCacheMissCount() ).isEqualTo( 0 );
-		assertThat( statistics.getQueryCachePutCount() ).isEqualTo( 0 );
+		assertQueryCacheStatistics( statistics, 1, 0, 0 );
 	}
 
 	private static void assertTestUserTuple(List<Tuple> tuples) {
@@ -148,6 +142,61 @@ public class NativeQueryCacheWithExtraColumnsTest {
 		assertThat( tuple.get( "PHONE", String.class ) ).isEqualTo( "123456" );
 		assertThat( tuple.get( "EXTRA_COL1", String.class ) ).isEqualTo( "ext1" );
 		assertThat( tuple.get( "EXTRA_COL2", String.class ) ).isEqualTo( "ext2" );
+	}
+
+	@Test
+	public void testExtraColumnsBefore(SessionFactoryScope scope) {
+		final var statistics = scope.getSessionFactory().getStatistics();
+		statistics.clear();
+
+		// First query - should populate the cache (works fine, reads from live ResultSet)
+		scope.inSession( session -> {
+			final var query = session.createNativeQuery( NATIVE_QUERY_EXTRA_COLS_FIRST, TestUser.class );
+			query.setCacheable( true );
+			assertTestUser( query.getResultList() );
+		} );
+
+		assertQueryCacheStatistics( statistics, 0, 1, 1 );
+
+		// Second query - should use the cache
+		scope.inSession( session -> {
+			final var query = session.createNativeQuery( NATIVE_QUERY_EXTRA_COLS_FIRST, TestUser.class );
+			query.setCacheable( true );
+			assertTestUser( query.getResultList() );
+		} );
+
+		assertQueryCacheStatistics( statistics, 1, 0, 0 );
+	}
+
+	@Test
+	public void testExtraColumnsBeforeTuple(SessionFactoryScope scope) {
+		final var statistics = scope.getSessionFactory().getStatistics();
+		statistics.clear();
+
+		// First query - should populate the cache (works fine, reads from live ResultSet)
+		scope.inSession( session -> {
+			final var query = session.createNativeQuery( NATIVE_QUERY_EXTRA_COLS_FIRST, Tuple.class );
+			query.setCacheable( true );
+			assertTestUserTuple( query.getResultList() );
+		} );
+
+		assertQueryCacheStatistics( statistics, 0, 1, 1 );
+
+		// Second query - should use the cache
+		scope.inSession( session -> {
+			final var query = session.createNativeQuery( NATIVE_QUERY_EXTRA_COLS_FIRST, Tuple.class );
+			query.setCacheable( true );
+			assertTestUserTuple( query.getResultList() );
+		} );
+
+		assertQueryCacheStatistics( statistics, 1, 0, 0 );
+	}
+
+	private static void assertQueryCacheStatistics(Statistics statistics, int hits, int misses, int puts) {
+		assertThat( statistics.getQueryCacheHitCount() ).isEqualTo( hits );
+		assertThat( statistics.getQueryCacheMissCount() ).isEqualTo( misses );
+		assertThat( statistics.getQueryCachePutCount() ).isEqualTo( puts );
+		statistics.clear();
 	}
 
 	@Entity(name = "TestUser")
