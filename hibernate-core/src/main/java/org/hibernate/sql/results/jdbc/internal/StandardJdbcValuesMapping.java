@@ -55,18 +55,25 @@ public class StandardJdbcValuesMapping implements JdbcValuesMapping {
 		this.sqlSelections = sqlSelections;
 		this.domainResults = domainResults;
 
-		final int rowSize = sqlSelections.size();
+		// Compute the effective row size from actual SqlSelection positions,
+		// which may exceed sqlSelections.size() for native queries where
+		// non-entity columns precede entity columns in the result set
+		int maxPosition = -1;
+		boolean needsResolve = false;
+		for ( SqlSelection sqlSelection : sqlSelections ) {
+			maxPosition = Math.max( maxPosition, sqlSelection.getValuesArrayPosition() );
+			needsResolve = needsResolve
+					|| sqlSelection instanceof SqlSelectionImpl && ( (SqlSelectionImpl) sqlSelection ).needsResolve();
+		}
+		final int rowSize = maxPosition + 1;
+
 		final BitSet valueIndexesToCache = new BitSet( rowSize );
 		for ( DomainResult<?> domainResult : domainResults ) {
 			domainResult.collectValueIndexesToCache( valueIndexesToCache );
 		}
 		final int[] valueIndexesToCacheIndexes = new int[rowSize];
 		int cacheIndex = 0;
-		boolean needsResolve = false;
-		for ( int i = 0; i < valueIndexesToCacheIndexes.length; i++ ) {
-			final SqlSelection sqlSelection = sqlSelections.get( i );
-			needsResolve = needsResolve
-					|| sqlSelection instanceof SqlSelectionImpl && ( (SqlSelectionImpl) sqlSelection ).needsResolve();
+		for ( int i = 0; i < rowSize; i++ ) {
 			if ( valueIndexesToCache.get( i ) ) {
 				valueIndexesToCacheIndexes[i] = cacheIndex++;
 			}
