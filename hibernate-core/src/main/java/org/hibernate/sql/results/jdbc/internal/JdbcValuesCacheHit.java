@@ -27,11 +27,34 @@ public class JdbcValuesCacheHit extends AbstractJdbcValues {
 	public JdbcValuesCacheHit(List<?> cachedResults, JdbcValuesMapping resolvedMapping) {
 		// See QueryCachePutManagerEnabledImpl for what is being put into the cached results
 		this.cachedResults = cachedResults;
-		this.offset = !cachedResults.isEmpty() && cachedResults.get( 0 ) instanceof CachedJdbcValuesMetadata ? 1 : 0;
+		final boolean hasMetadata = !cachedResults.isEmpty()
+				&& cachedResults.get( 0 ) instanceof CachedJdbcValuesMetadata;
+		this.offset = hasMetadata ? 1 : 0;
 		this.numberOfRows = cachedResults.size() - offset - 1;
 		this.resultCount = cachedResults.isEmpty() ? 0 : (int) cachedResults.get( cachedResults.size() - 1 );
 		this.resolvedMapping = resolvedMapping;
-		this.valueIndexesToCacheIndexes = resolvedMapping.getValueIndexesToCacheIndexes();
+
+		final int[] mappingIndexes = resolvedMapping.getValueIndexesToCacheIndexes();
+		// When the cached row was stored with identity compaction (all result set columns
+		// at their original valuesArrayPosition), and this mapping compacts differently
+		// (caches fewer columns), bypass compaction and read directly by position.
+		// This handles the case where e.g. a Tuple result cached all columns, and an
+		// Entity result reads from the same cache entry using different column positions.
+		if ( mappingIndexes.length > 0 && numberOfRows > 0 && hasMetadata ) {
+			final CachedJdbcValuesMetadata metadata = (CachedJdbcValuesMetadata) cachedResults.get( 0 );
+			final Object firstRow = cachedResults.get( offset );
+			final int cachedRowSize = firstRow instanceof Object[] array ? array.length : 1;
+			if ( cachedRowSize == metadata.getColumnCount()
+					&& cachedRowSize > resolvedMapping.getRowToCacheSize() ) {
+				this.valueIndexesToCacheIndexes = null;
+			}
+			else {
+				this.valueIndexesToCacheIndexes = mappingIndexes;
+			}
+		}
+		else {
+			this.valueIndexesToCacheIndexes = mappingIndexes;
+		}
 	}
 
 	/**
@@ -42,7 +65,13 @@ public class JdbcValuesCacheHit extends AbstractJdbcValues {
 	public boolean isDataSufficient() {
 		if ( numberOfRows > 0 ) {
 			final Object firstRow = cachedResults.get( offset );
-			final int cachedRowSize = firstRow instanceof Object[] array ? array.length : 1;
+			final int cachedRowSize; // = firstRow instanceof Object[] array ? array.length : 1;
+			if ( firstRow instanceof Object[] ) {
+				cachedRowSize = ( (Object[]) firstRow ).length;
+			}
+			else {
+				cachedRowSize = 1;
+			}
 			return cachedRowSize >= resolvedMapping.getRowToCacheSize();
 		}
 		return true;
