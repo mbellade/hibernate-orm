@@ -20,6 +20,7 @@ public class JdbcValuesCacheHit extends AbstractJdbcValues {
 	private final int numberOfRows;
 	private final JdbcValuesMapping resolvedMapping;
 	private final int[] valueIndexesToCacheIndexes;
+	private final boolean dataSufficient;
 	private final int offset;
 	private final int resultCount;
 	private int position = -1;
@@ -34,27 +35,24 @@ public class JdbcValuesCacheHit extends AbstractJdbcValues {
 		this.resultCount = cachedResults.isEmpty() ? 0 : (int) cachedResults.get( cachedResults.size() - 1 );
 		this.resolvedMapping = resolvedMapping;
 
-		final int[] mappingIndexes = resolvedMapping.getValueIndexesToCacheIndexes();
-		// When the cached row was stored with identity compaction (all result set columns
-		// at their original valuesArrayPosition), and this mapping compacts differently
-		// (caches fewer columns), bypass compaction and read directly by position.
-		// This handles the case where e.g. a Tuple result cached all columns, and an
-		// Entity result reads from the same cache entry using different column positions.
-		if ( mappingIndexes.length > 0 && numberOfRows > 0 && hasMetadata ) {
-			final CachedJdbcValuesMetadata metadata = (CachedJdbcValuesMetadata) cachedResults.get( 0 );
+		final int rowToCacheSize = resolvedMapping.getRowToCacheSize();
+		final int cachedRowSize;
+		if ( numberOfRows > 0 ) {
 			final Object firstRow = cachedResults.get( offset );
-			final int cachedRowSize = firstRow instanceof Object[] array ? array.length : 1;
-			if ( cachedRowSize == metadata.getColumnCount()
-					&& cachedRowSize > resolvedMapping.getRowToCacheSize() ) {
-				this.valueIndexesToCacheIndexes = null;
-			}
-			else {
-				this.valueIndexesToCacheIndexes = mappingIndexes;
-			}
+			cachedRowSize = firstRow instanceof Object[] array ? array.length : 1;
 		}
 		else {
-			this.valueIndexesToCacheIndexes = mappingIndexes;
+			cachedRowSize = rowToCacheSize;
 		}
+
+		this.dataSufficient = cachedRowSize >= rowToCacheSize;
+		// When the cached row was stored with all result set columns, but this mapping compacts
+		// to fewer columns (different result type), bypass compaction and read by position
+		this.valueIndexesToCacheIndexes = hasMetadata
+				&& cachedRowSize > rowToCacheSize
+				&& cachedRowSize == ( (CachedJdbcValuesMetadata) cachedResults.get( 0 ) ).getColumnCount()
+			? null
+			: resolvedMapping.getValueIndexesToCacheIndexes();
 	}
 
 	/**
@@ -63,18 +61,7 @@ public class JdbcValuesCacheHit extends AbstractJdbcValues {
 	 * (e.g. entity) that cached fewer columns and needs to be re-populated.
 	 */
 	public boolean isDataSufficient() {
-		if ( numberOfRows > 0 ) {
-			final Object firstRow = cachedResults.get( offset );
-			final int cachedRowSize; // = firstRow instanceof Object[] array ? array.length : 1;
-			if ( firstRow instanceof Object[] ) {
-				cachedRowSize = ( (Object[]) firstRow ).length;
-			}
-			else {
-				cachedRowSize = 1;
-			}
-			return cachedRowSize >= resolvedMapping.getRowToCacheSize();
-		}
-		return true;
+		return dataSufficient;
 	}
 
 	@Override

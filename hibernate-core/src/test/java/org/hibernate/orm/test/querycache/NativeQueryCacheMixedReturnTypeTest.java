@@ -41,6 +41,9 @@ public class NativeQueryCacheMixedReturnTypeTest {
 	private static final String NATIVE_QUERY_EXTRA_COLS_FIRST =
 			"SELECT u1.EXTRA_COL1, u1.EXTRA_COL2, u1.ID, u1.NAME, u1.EMAIL, u1.AGE, u1.ADDRESS, u1.PHONE"
 					+ " FROM TEST_USER u1";
+	private static final String NATIVE_QUERY_EXTRA_COLS_SCATTERED =
+			"SELECT u1.ID, u1.EXTRA_COL1, u1.NAME, u1.EMAIL, u1.EXTRA_COL2, u1.AGE, u1.ADDRESS, u1.PHONE"
+					+ " FROM TEST_USER u1";
 	private static final String NATIVE_QUERY_ENTITY_COLS =
 			"SELECT u1.ID, u1.NAME, u1.EMAIL, u1.AGE, u1.ADDRESS, u1.PHONE"
 			+ " FROM TEST_USER u1, TEST_USER u2 WHERE u2.ID = u1.ID";
@@ -226,6 +229,73 @@ public class NativeQueryCacheMixedReturnTypeTest {
 		// Second query with entity return type - reads from the cache
 		scope.inSession( session -> {
 			final var query = session.createNativeQuery( NATIVE_QUERY_EXTRA_COLS_FIRST, TestUser.class );
+			query.setCacheable( true );
+			assertTestUser( query.getSingleResult() );
+		} );
+
+		assertQueryCacheStatistics( statistics, 1, 0, 0 );
+	}
+
+	@Test
+	public void testEntityThenTupleExtraColsScattered(SessionFactoryScope scope) {
+		final var statistics = scope.getSessionFactory().getStatistics();
+		statistics.clear();
+
+		// First query with entity return type - populates the cache
+		scope.inSession( session -> {
+			final var query = session.createNativeQuery( NATIVE_QUERY_EXTRA_COLS_SCATTERED, TestUser.class );
+			query.setCacheable( true );
+			assertTestUser( query.getSingleResult() );
+		} );
+
+		assertQueryCacheStatistics( statistics, 0, 1, 1 );
+
+		// Second query with Tuple return type - cached data is insufficient (entity cached
+		// fewer columns), so re-executes and re-populates the cache with complete data
+		scope.inSession( session -> {
+			final var query = session.createNativeQuery( NATIVE_QUERY_EXTRA_COLS_SCATTERED, Tuple.class );
+			query.setCacheable( true );
+			final var tuple = query.getSingleResult();
+			assertTestUserTuple( tuple );
+			assertThat( tuple.get( "extra_col1", String.class ) ).isEqualTo( "ext1" );
+			assertThat( tuple.get( "extra_col2", String.class ) ).isEqualTo( "ext2" );
+		} );
+
+		assertQueryCacheStatistics( statistics, 0, 1, 1 );
+
+		// Third query with Tuple return type - reads from the re-populated cache
+		scope.inSession( session -> {
+			final var query = session.createNativeQuery( NATIVE_QUERY_EXTRA_COLS_SCATTERED, Tuple.class );
+			query.setCacheable( true );
+			final var tuple = query.getSingleResult();
+			assertTestUserTuple( tuple );
+			assertThat( tuple.get( "extra_col1", String.class ) ).isEqualTo( "ext1" );
+			assertThat( tuple.get( "extra_col2", String.class ) ).isEqualTo( "ext2" );
+		} );
+
+		assertQueryCacheStatistics( statistics, 1, 0, 0 );
+	}
+
+	@Test
+	public void testTupleThenEntityExtraColsScattered(SessionFactoryScope scope) {
+		final var statistics = scope.getSessionFactory().getStatistics();
+		statistics.clear();
+
+		// First query with Tuple return type - populates the cache
+		scope.inSession( session -> {
+			final var query = session.createNativeQuery( NATIVE_QUERY_EXTRA_COLS_SCATTERED, Tuple.class );
+			query.setCacheable( true );
+			final var tuple = query.getSingleResult();
+			assertTestUserTuple( tuple );
+			assertThat( tuple.get( "extra_col1", String.class ) ).isEqualTo( "ext1" );
+			assertThat( tuple.get( "extra_col2", String.class ) ).isEqualTo( "ext2" );
+		} );
+
+		assertQueryCacheStatistics( statistics, 0, 1, 1 );
+
+		// Second query with entity return type - reads from the cache
+		scope.inSession( session -> {
+			final var query = session.createNativeQuery( NATIVE_QUERY_EXTRA_COLS_SCATTERED, TestUser.class );
 			query.setCacheable( true );
 			assertTestUser( query.getSingleResult() );
 		} );
