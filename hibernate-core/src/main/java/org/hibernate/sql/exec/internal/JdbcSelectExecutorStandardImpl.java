@@ -406,10 +406,7 @@ public class JdbcSelectExecutorStandardImpl implements JdbcSelectExecutor {
 			// If we need to put the values into the cache, we need to be able to capture the JdbcValuesMetadata
 			final var capturingMetadata = new CapturingJdbcValuesMetadata( resultSetAccess );
 			jdbcValuesMapping = mappingProducer.resolve( capturingMetadata, loadQueryInfluencers, factory );
-			metadataForCache = capturingMetadata.resolveMetadataForCache(
-					factory.getTypeConfiguration(),
-					jdbcValuesMapping
-			);
+			metadataForCache = capturingMetadata.resolveMetadataForCache( jdbcValuesMapping, factory.getTypeConfiguration() );
 		}
 		return new JdbcValuesResultSetImpl(
 				resultSetAccess,
@@ -504,8 +501,8 @@ public class JdbcSelectExecutorStandardImpl implements JdbcSelectExecutor {
 		}
 
 		public CachedJdbcValuesMetadata resolveMetadataForCache(
-				TypeConfiguration typeConfiguration,
-				JdbcValuesMapping jdbcValuesMapping) {
+				JdbcValuesMapping jdbcValuesMapping,
+				TypeConfiguration typeConfiguration) {
 			if ( columnNames == null ) {
 				return null;
 			}
@@ -514,8 +511,7 @@ public class JdbcSelectExecutorStandardImpl implements JdbcSelectExecutor {
 			for ( var selection : jdbcValuesMapping.getSqlSelections() ) {
 				final int pos = selection.getValuesArrayPosition();
 				if ( types[pos] == null && selection.getExpressionType() != null ) {
-					final var javaType = selection.getExpressionType().getSingleJdbcMapping().getJavaTypeDescriptor();
-					types[pos] = resultSetAccess.resolveType( pos + 1, javaType, typeConfiguration );
+					types[pos] = (BasicType<?>) selection.getExpressionType().getSingleJdbcMapping();
 				}
 			}
 			// Fall back to JDBC ResultSet metadata for any remaining gaps

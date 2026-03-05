@@ -12,11 +12,9 @@ import jakarta.persistence.Tuple;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
 import org.hibernate.cfg.AvailableSettings;
-import org.hibernate.dialect.H2Dialect;
 import org.hibernate.stat.Statistics;
 import org.hibernate.testing.orm.junit.DomainModel;
 import org.hibernate.testing.orm.junit.Jira;
-import org.hibernate.testing.orm.junit.RequiresDialect;
 import org.hibernate.testing.orm.junit.ServiceRegistry;
 import org.hibernate.testing.orm.junit.SessionFactory;
 import org.hibernate.testing.orm.junit.SessionFactoryScope;
@@ -38,7 +36,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 		@Setting(name = AvailableSettings.USE_SECOND_LEVEL_CACHE, value = "true"),
 		@Setting(name = AvailableSettings.USE_QUERY_CACHE, value = "true")
 })
-@RequiresDialect(H2Dialect.class)
 @Jira("https://hibernate.atlassian.net/browse/HHH-20231")
 public class NativeQueryCacheMixedReturnTypeTest {
 
