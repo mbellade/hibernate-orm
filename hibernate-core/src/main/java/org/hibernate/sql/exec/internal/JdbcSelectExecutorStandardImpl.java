@@ -390,10 +390,10 @@ public class JdbcSelectExecutorStandardImpl implements JdbcSelectExecutor {
 			final var resolvedMapping =
 					mappingProducer.resolve( valuesMetadata, loadQueryInfluencers, factory );
 			final var cacheHit = new JdbcValuesCacheHit( cachedResults, resolvedMapping );
-			if ( cacheHit.isDataSufficient() ) {
+			if ( cacheHit.isCacheCompatible() ) {
 				return cacheHit;
 			}
-			// Cached data insufficient for the resolved mapping — fall through to re-execute
+			// Cached data incompatible with the resolved mapping — fall through to re-execute
 		}
 		// Execute query (cache miss or insufficient cached data)
 		final CachedJdbcValuesMetadata metadataForCache;
@@ -408,7 +408,7 @@ public class JdbcSelectExecutorStandardImpl implements JdbcSelectExecutor {
 			jdbcValuesMapping = mappingProducer.resolve( capturingMetadata, loadQueryInfluencers, factory );
 			metadataForCache = capturingMetadata.resolveMetadataForCache(
 					factory.getTypeConfiguration(),
-					jdbcValuesMapping.getValueIndexesToCacheIndexes()
+					jdbcValuesMapping
 			);
 		}
 		return new JdbcValuesResultSetImpl(
@@ -505,18 +505,30 @@ public class JdbcSelectExecutorStandardImpl implements JdbcSelectExecutor {
 
 		public CachedJdbcValuesMetadata resolveMetadataForCache(
 				TypeConfiguration typeConfiguration,
-				int[] valueIndexesToCacheIndexes) {
+				JdbcValuesMapping jdbcValuesMapping) {
 			if ( columnNames == null ) {
 				return null;
 			}
-			// Resolve any types that were not captured during mapping resolution,
-			// e.g. when an entity result mapping does not call resolveType()
+			// Fill in types from the mapping's SqlSelections for positions that
+			// were not captured during mapping resolution (e.g. entity results)
+			for ( var selection : jdbcValuesMapping.getSqlSelections() ) {
+				final int pos = selection.getValuesArrayPosition();
+				if ( types[pos] == null && selection.getExpressionType() != null ) {
+					final var javaType = selection.getExpressionType().getSingleJdbcMapping().getJavaTypeDescriptor();
+					types[pos] = resultSetAccess.resolveType( pos + 1, javaType, typeConfiguration );
+				}
+			}
+			// Fall back to JDBC ResultSet metadata for any remaining gaps
 			for ( int i = 0; i < types.length; i++ ) {
 				if ( types[i] == null ) {
 					types[i] = resultSetAccess.resolveType( i + 1, null, typeConfiguration );
 				}
 			}
-			return new CachedJdbcValuesMetadata( columnNames, types, valueIndexesToCacheIndexes );
+			return new CachedJdbcValuesMetadata(
+					columnNames,
+					types,
+					jdbcValuesMapping.getValueIndexesToCacheIndexes()
+			);
 		}
 	}
 

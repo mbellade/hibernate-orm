@@ -30,7 +30,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @DomainModel(annotatedClasses = {
 		NativeQueryCacheMixedReturnTypeTest.TestUser.class,
-		NativeQueryCacheMixedReturnTypeTest.TestUserProfile.class
+		NativeQueryCacheMixedReturnTypeTest.TestUserProfile.class,
+		NativeQueryCacheMixedReturnTypeTest.TestUserLongAge.class
 })
 @SessionFactory(generateStatistics = true)
 @ServiceRegistry(settings = {
@@ -42,26 +43,26 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class NativeQueryCacheMixedReturnTypeTest {
 
 	private static final String NATIVE_QUERY_EXTRA_COLS_LAST =
-			"SELECT u1.ID, u1.NAME, u1.EMAIL, u1.AGE, u1.ADDRESS, u1.PHONE, u1.EXTRA_COL1, u1.EXTRA_COL2 FROM TEST_USER u1";
+			"select u1.id, u1.name, u1.email, u1.age, u1.address, u1.phone, u1.extra_col1, u1.extra_col2 from test_user u1";
 	private static final String NATIVE_QUERY_EXTRA_COLS_FIRST =
-			"SELECT u1.EXTRA_COL1, u1.EXTRA_COL2, u1.ID, u1.NAME, u1.EMAIL, u1.AGE, u1.ADDRESS, u1.PHONE FROM TEST_USER u1";
+			"select u1.extra_col1, u1.extra_col2, u1.id, u1.name, u1.email, u1.age, u1.address, u1.phone from test_user u1";
 	private static final String NATIVE_QUERY_EXTRA_COLS_SCATTERED =
-			"SELECT u1.ID, u1.EXTRA_COL1, u1.NAME, u1.EMAIL, u1.EXTRA_COL2, u1.AGE, u1.ADDRESS, u1.PHONE FROM TEST_USER u1";
+			"select u1.id, u1.extra_col1, u1.name, u1.email, u1.extra_col2, u1.age, u1.address, u1.phone from test_user u1";
 	private static final String NATIVE_QUERY_ENTITY_COLS =
-			"SELECT u1.ID, u1.NAME, u1.EMAIL, u1.AGE, u1.ADDRESS, u1.PHONE FROM TEST_USER u1";
+			"select u1.id, u1.name, u1.email, u1.age, u1.address, u1.phone from test_user u1";
 
 	@BeforeAll
 	public void setUp(SessionFactoryScope scope) {
 		scope.inTransaction( session -> {
 			// Add extra columns to the table that are not mapped in the entity
-			session.createNativeMutationQuery( "ALTER TABLE TEST_USER ADD COLUMN IF NOT EXISTS EXTRA_COL1 VARCHAR(50)" )
+			session.createNativeMutationQuery( "alter table test_user add column if not exists extra_col1 varchar(50)" )
 					.executeUpdate();
-			session.createNativeMutationQuery( "ALTER TABLE TEST_USER ADD COLUMN IF NOT EXISTS EXTRA_COL2 VARCHAR(50)" )
+			session.createNativeMutationQuery( "alter table test_user add column if not exists extra_col2 varchar(50)" )
 					.executeUpdate();
 
 			// Insert test data with extra columns
 			session.createNativeMutationQuery(
-							"INSERT INTO TEST_USER (ID, NAME, EMAIL, AGE, ADDRESS, PHONE, EXTRA_COL1, EXTRA_COL2) VALUES "
+							"insert into test_user (id, name, email, age, address, phone, extra_col1, extra_col2) values "
 							+ "(1, 'john', 'john@test.com', 30, 'ny', '123456', 'ext1', 'ext2')" )
 					.executeUpdate();
 		} );
@@ -91,7 +92,7 @@ public class NativeQueryCacheMixedReturnTypeTest {
 
 		assertQueryCacheStatistics( statistics, 0, 1, 1 );
 
-		// Second query with Tuple return type - cached data is insufficient (entity cached
+		// Second query with Tuple return type - cached data is incompatible (entity cached
 		// fewer columns), so re-executes and re-populates the cache with complete data
 		scope.inSession( session -> {
 			final var query = session.createNativeQuery( NATIVE_QUERY_EXTRA_COLS_LAST, Tuple.class );
@@ -161,7 +162,7 @@ public class NativeQueryCacheMixedReturnTypeTest {
 		assertQueryCacheStatistics( statistics, 0, 1, 1 );
 
 		// Second query with Tuple return type - same column count as entity, cached data
-		// should be sufficient
+		// should be compatible
 		scope.inSession( session -> {
 			final var query = session.createNativeQuery( NATIVE_QUERY_ENTITY_COLS, Tuple.class );
 			query.setCacheable( true );
@@ -185,7 +186,7 @@ public class NativeQueryCacheMixedReturnTypeTest {
 
 		assertQueryCacheStatistics( statistics, 0, 1, 1 );
 
-		// Second query with Tuple return type - cached data is insufficient (entity cached
+		// Second query with Tuple return type - cached data is incompatible (entity cached
 		// fewer columns), so re-executes and re-populates the cache with complete data
 		scope.inSession( session -> {
 			final var query = session.createNativeQuery( NATIVE_QUERY_EXTRA_COLS_FIRST, Tuple.class );
@@ -252,7 +253,7 @@ public class NativeQueryCacheMixedReturnTypeTest {
 
 		assertQueryCacheStatistics( statistics, 0, 1, 1 );
 
-		// Second query with Tuple return type - cached data is insufficient (entity cached
+		// Second query with Tuple return type - cached data is incompatible (entity cached
 		// fewer columns), so re-executes and re-populates the cache with complete data
 		scope.inSession( session -> {
 			final var query = session.createNativeQuery( NATIVE_QUERY_EXTRA_COLS_SCATTERED, Tuple.class );
@@ -310,22 +311,22 @@ public class NativeQueryCacheMixedReturnTypeTest {
 		final var statistics = scope.getSessionFactory().getStatistics();
 		statistics.clear();
 
-		// First query with TestUserProfile (maps EXTRA_COL1, not AGE) - populates the cache
+		// First query with TestUserProfile (maps extra_col1, not age) - populates the cache
 		scope.inSession( session -> {
 			final var query = session.createNativeQuery( NATIVE_QUERY_EXTRA_COLS_SCATTERED, TestUserProfile.class );
 			query.setCacheable( true );
 			final var profile = query.getSingleResult();
-			assertThat( profile.getName() ).isEqualTo( "john" );
-			assertThat( profile.getEmail() ).isEqualTo( "john@test.com" );
-			assertThat( profile.getExtraCol1() ).isEqualTo( "ext1" );
-			assertThat( profile.getAddress() ).isEqualTo( "ny" );
-			assertThat( profile.getPhone() ).isEqualTo( "123456" );
+			assertThat( profile.name ).isEqualTo( "john" );
+			assertThat( profile.email ).isEqualTo( "john@test.com" );
+			assertThat( profile.extraCol1 ).isEqualTo( "ext1" );
+			assertThat( profile.address ).isEqualTo( "ny" );
+			assertThat( profile.phone ).isEqualTo( "123456" );
 		} );
 
 		assertQueryCacheStatistics( statistics, 0, 1, 1 );
 
-		// Second query with TestUser (maps AGE, not EXTRA_COL1) - stored mapping is
-		// incompatible (no entry for AGE position), so re-executes and re-populates
+		// Second query with TestUser (maps age, not extra_col1) - stored mapping is
+		// incompatible (no entry for age position), so re-executes and re-populates
 		scope.inSession( session -> {
 			final var query = session.createNativeQuery( NATIVE_QUERY_EXTRA_COLS_SCATTERED, TestUser.class );
 			query.setCacheable( true );
@@ -340,7 +341,7 @@ public class NativeQueryCacheMixedReturnTypeTest {
 		final var statistics = scope.getSessionFactory().getStatistics();
 		statistics.clear();
 
-		// First query with TestUser (maps AGE, not EXTRA_COL1) - populates the cache
+		// First query with TestUser (maps age, not extra_col1) - populates the cache
 		scope.inSession( session -> {
 			final var query = session.createNativeQuery( NATIVE_QUERY_EXTRA_COLS_SCATTERED, TestUser.class );
 			query.setCacheable( true );
@@ -349,17 +350,17 @@ public class NativeQueryCacheMixedReturnTypeTest {
 
 		assertQueryCacheStatistics( statistics, 0, 1, 1 );
 
-		// Second query with TestUserProfile (maps EXTRA_COL1, not AGE) - stored mapping is
-		// incompatible (no entry for EXTRA_COL1 position), so re-executes and re-populates
+		// Second query with TestUserProfile (maps extra_col1, not age) - stored mapping is
+		// incompatible (no entry for extra_col1 position), so re-executes and re-populates
 		scope.inSession( session -> {
 			final var query = session.createNativeQuery( NATIVE_QUERY_EXTRA_COLS_SCATTERED, TestUserProfile.class );
 			query.setCacheable( true );
 			final var profile = query.getSingleResult();
-			assertThat( profile.getName() ).isEqualTo( "john" );
-			assertThat( profile.getEmail() ).isEqualTo( "john@test.com" );
-			assertThat( profile.getExtraCol1() ).isEqualTo( "ext1" );
-			assertThat( profile.getAddress() ).isEqualTo( "ny" );
-			assertThat( profile.getPhone() ).isEqualTo( "123456" );
+			assertThat( profile.name ).isEqualTo( "john" );
+			assertThat( profile.email ).isEqualTo( "john@test.com" );
+			assertThat( profile.extraCol1 ).isEqualTo( "ext1" );
+			assertThat( profile.address ).isEqualTo( "ny" );
+			assertThat( profile.phone ).isEqualTo( "123456" );
 		} );
 
 		assertQueryCacheStatistics( statistics, 0, 1, 1 );
@@ -373,11 +374,11 @@ public class NativeQueryCacheMixedReturnTypeTest {
 	}
 
 	private static void assertTestUser(TestUser user) {
-		assertThat( user.getName() ).isEqualTo( "john" );
-		assertThat( user.getEmail() ).isEqualTo( "john@test.com" );
-		assertThat( user.getAge() ).isEqualTo( 30 );
-		assertThat( user.getAddress() ).isEqualTo( "ny" );
-		assertThat( user.getPhone() ).isEqualTo( "123456" );
+		assertThat( user.name ).isEqualTo( "john" );
+		assertThat( user.email ).isEqualTo( "john@test.com" );
+		assertThat( user.age ).isEqualTo( 30 );
+		assertThat( user.address ).isEqualTo( "ny" );
+		assertThat( user.phone ).isEqualTo( "123456" );
 	}
 
 	private static void assertTestUserTuple(Tuple tuple) {
@@ -388,149 +389,168 @@ public class NativeQueryCacheMixedReturnTypeTest {
 		assertThat( tuple.get( "phone", String.class ) ).isEqualTo( "123456" );
 	}
 
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	// Tests for same SQL with compatible but different scalar Java types.
+	// When the cached value's Java type differs from the reader's expected type,
+	// the cache hit is treated as incompatible and the query is re-executed.
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	@Test
+	public void testScalarIntegerThenLong(SessionFactoryScope scope) {
+		final var statistics = scope.getSessionFactory().getStatistics();
+		statistics.clear();
+
+		final String nativeQuery = "select u1.age from test_user u1";
+
+		// First query with Integer result type - populates the cache
+		scope.inSession( session -> {
+			final var query = session.createNativeQuery( nativeQuery, Integer.class );
+			query.setCacheable( true );
+			assertThat( query.getSingleResult() ).isEqualTo( 30 );
+		} );
+
+		assertQueryCacheStatistics( statistics, 0, 1, 1 );
+
+		// Second query with Long result type - same SQL, same position, different Java type.
+		// Cached data has incompatible type, so re-executes and re-populates the cache.
+		scope.inSession( session -> {
+			final var query = session.createNativeQuery( nativeQuery, Long.class );
+			query.setCacheable( true );
+			assertThat( query.getSingleResult() ).isEqualTo( 30L );
+		} );
+
+		assertQueryCacheStatistics( statistics, 0, 1, 1 );
+
+		// Third query with Long result type - now reads from the re-populated cache
+		scope.inSession( session -> {
+			final var query = session.createNativeQuery( nativeQuery, Long.class );
+			query.setCacheable( true );
+			assertThat( query.getSingleResult() ).isEqualTo( 30L );
+		} );
+
+		assertQueryCacheStatistics( statistics, 1, 0, 0 );
+	}
+
+	@Test
+	public void testScalarLongThenInteger(SessionFactoryScope scope) {
+		final var statistics = scope.getSessionFactory().getStatistics();
+		statistics.clear();
+
+		final String nativeQuery = "select u1.age from test_user u1";
+
+		// First query with Long result type - populates the cache
+		scope.inSession( session -> {
+			final var query = session.createNativeQuery( nativeQuery, Long.class );
+			query.setCacheable( true );
+			assertThat( query.getSingleResult() ).isEqualTo( 30L );
+		} );
+
+		assertQueryCacheStatistics( statistics, 0, 1, 1 );
+
+		// Second query with Integer result type - cached data has incompatible type,
+		// so re-executes and re-populates the cache.
+		scope.inSession( session -> {
+			final var query = session.createNativeQuery( nativeQuery, Integer.class );
+			query.setCacheable( true );
+			assertThat( query.getSingleResult() ).isEqualTo( 30 );
+		} );
+
+		assertQueryCacheStatistics( statistics, 0, 1, 1 );
+
+		// Third query with Integer result type - now reads from the re-populated cache
+		scope.inSession( session -> {
+			final var query = session.createNativeQuery( nativeQuery, Integer.class );
+			query.setCacheable( true );
+			assertThat( query.getSingleResult() ).isEqualTo( 30 );
+		} );
+
+		assertQueryCacheStatistics( statistics, 1, 0, 0 );
+	}
+
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	// Test for entities with the same columns but different Java types.
+	// TestUser maps age as Integer, TestUserLongAge maps age as Long.
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	@Test
+	public void testEntityIntegerAgeThenEntityLongAge(SessionFactoryScope scope) {
+		final var statistics = scope.getSessionFactory().getStatistics();
+		statistics.clear();
+
+		// First query with TestUser (age as Integer) - populates the cache
+		scope.inSession( session -> {
+			final var query = session.createNativeQuery( NATIVE_QUERY_ENTITY_COLS, TestUser.class );
+			query.setCacheable( true );
+			assertTestUser( query.getSingleResult() );
+		} );
+
+		assertQueryCacheStatistics( statistics, 0, 1, 1 );
+
+		// Second query with TestUserLongAge (age as Long) - same SQL, same columns,
+		// but age is mapped with a different Java type. Cached data has incompatible type,
+		// so re-executes and re-populates the cache.
+		scope.inSession( session -> {
+			final var query = session.createNativeQuery( NATIVE_QUERY_ENTITY_COLS, TestUserLongAge.class );
+			query.setCacheable( true );
+			final var user = query.getSingleResult();
+			assertThat( user.name ).isEqualTo( "john" );
+			assertThat( user.email ).isEqualTo( "john@test.com" );
+			assertThat( user.age ).isEqualTo( 30L );
+			assertThat( user.address ).isEqualTo( "ny" );
+			assertThat( user.phone ).isEqualTo( "123456" );
+		} );
+
+		assertQueryCacheStatistics( statistics, 0, 1, 1 );
+
+		// Third query with TestUserLongAge - now reads from the re-populated cache
+		scope.inSession( session -> {
+			final var query = session.createNativeQuery( NATIVE_QUERY_ENTITY_COLS, TestUserLongAge.class );
+			query.setCacheable( true );
+			final var user = query.getSingleResult();
+			assertThat( user.age ).isEqualTo( 30L );
+		} );
+
+		assertQueryCacheStatistics( statistics, 1, 0, 0 );
+	}
+
 	@Entity(name = "TestUser")
-	@Table(name = "TEST_USER")
+	@Table(name = "test_user")
 	@Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
 	public static class TestUser {
 		@Id
-		@Column(name = "ID")
-		private Long id;
-
-		@Column(name = "NAME")
-		private String name;
-
-		@Column(name = "EMAIL")
-		private String email;
-
-		@Column(name = "AGE")
-		private Integer age;
-
-		@Column(name = "ADDRESS")
-		private String address;
-
-		@Column(name = "PHONE")
-		private String phone;
-
-		public Long getId() {
-			return id;
-		}
-
-		public void setId(Long id) {
-			this.id = id;
-		}
-
-		public String getName() {
-			return name;
-		}
-
-		public void setName(String name) {
-			this.name = name;
-		}
-
-		public String getEmail() {
-			return email;
-		}
-
-		public void setEmail(String email) {
-			this.email = email;
-		}
-
-		public Integer getAge() {
-			return age;
-		}
-
-		public void setAge(Integer age) {
-			this.age = age;
-		}
-
-		public String getAddress() {
-			return address;
-		}
-
-		public void setAddress(String address) {
-			this.address = address;
-		}
-
-		public String getPhone() {
-			return phone;
-		}
-
-		public void setPhone(String phone) {
-			this.phone = phone;
-		}
+		Long id;
+		String name;
+		String email;
+		Integer age;
+		String address;
+		String phone;
 	}
 
 	@Entity(name = "TestUserProfile")
-	@Table(name = "TEST_USER")
+	@Table(name = "test_user")
 	@Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
 	public static class TestUserProfile {
 		@Id
-		@Column(name = "ID")
-		private Long id;
+		Long id;
+		String name;
+		String email;
+		@Column(name = "extra_col1")
+		String extraCol1;
+		// Does NOT map age — different column subset than TestUser
+		String address;
+		String phone;
+	}
 
-		@Column(name = "NAME")
-		private String name;
-
-		@Column(name = "EMAIL")
-		private String email;
-
-		@Column(name = "EXTRA_COL1")
-		private String extraCol1;
-
-		// Does NOT map AGE — different column subset than TestUser
-
-		@Column(name = "ADDRESS")
-		private String address;
-
-		@Column(name = "PHONE")
-		private String phone;
-
-		public Long getId() {
-			return id;
-		}
-
-		public void setId(Long id) {
-			this.id = id;
-		}
-
-		public String getName() {
-			return name;
-		}
-
-		public void setName(String name) {
-			this.name = name;
-		}
-
-		public String getEmail() {
-			return email;
-		}
-
-		public void setEmail(String email) {
-			this.email = email;
-		}
-
-		public String getExtraCol1() {
-			return extraCol1;
-		}
-
-		public void setExtraCol1(String extraCol1) {
-			this.extraCol1 = extraCol1;
-		}
-
-		public String getAddress() {
-			return address;
-		}
-
-		public void setAddress(String address) {
-			this.address = address;
-		}
-
-		public String getPhone() {
-			return phone;
-		}
-
-		public void setPhone(String phone) {
-			this.phone = phone;
-		}
+	@Entity(name = "TestUserLongAge")
+	@Table(name = "test_user")
+	@Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
+	public static class TestUserLongAge {
+		@Id
+		Long id;
+		String name;
+		String email;
+		Long age;
+		String address;
+		String phone;
 	}
 }

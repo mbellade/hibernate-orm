@@ -11,7 +11,6 @@ import org.hibernate.type.BasicType;
 import org.hibernate.type.descriptor.java.JavaType;
 import org.hibernate.type.spi.TypeConfiguration;
 
-import static org.hibernate.internal.util.collections.ArrayHelper.indexOf;
 
 public final class CachedJdbcValuesMetadata implements JdbcValuesMetadata, Serializable {
 	private final String[] columnNames;
@@ -28,6 +27,11 @@ public final class CachedJdbcValuesMetadata implements JdbcValuesMetadata, Seria
 		return valueIndexesToCacheIndexes;
 	}
 
+	public JavaType<?> getStoredJavaType(int columnIndex) {
+		final var type = types[columnIndex];
+		return type != null ? type.getJavaTypeDescriptor() : null;
+	}
+
 	@Override
 	public int getColumnCount() {
 		return columnNames.length;
@@ -35,11 +39,12 @@ public final class CachedJdbcValuesMetadata implements JdbcValuesMetadata, Seria
 
 	@Override
 	public int resolveColumnPosition(String columnName) {
-		final int position = indexOf( columnNames, columnName ) + 1;
-		if ( position == 0 ) {
-			throw new IllegalStateException( "Unexpected resolving of unavailable column: " + columnName );
+		for ( int i = 0; i < columnNames.length; i++ ) {
+			if ( columnName.equalsIgnoreCase( columnNames[i] ) ) {
+				return i + 1;
+			}
 		}
-		return position;
+		throw new IllegalStateException( "Unexpected resolving of unavailable column: " + columnName );
 	}
 
 	@Override

@@ -20,7 +20,7 @@ public class JdbcValuesCacheHit extends AbstractJdbcValues {
 	private final int numberOfRows;
 	private final JdbcValuesMapping resolvedMapping;
 	private final int[] valueIndexesToCacheIndexes;
-	private final boolean dataSufficient;
+	private final boolean cacheCompatible;
 	private final int offset;
 	private final int resultCount;
 	private int position = -1;
@@ -28,35 +28,45 @@ public class JdbcValuesCacheHit extends AbstractJdbcValues {
 	public JdbcValuesCacheHit(List<?> cachedResults, JdbcValuesMapping resolvedMapping) {
 		// See QueryCachePutManagerEnabledImpl for what is being put into the cached results
 		this.cachedResults = cachedResults;
-		final boolean hasMetadata = !cachedResults.isEmpty()
-				&& cachedResults.get( 0 ) instanceof CachedJdbcValuesMetadata;
-		this.offset = hasMetadata ? 1 : 0;
+		final CachedJdbcValuesMetadata metadata = !cachedResults.isEmpty()
+				&& cachedResults.get( 0 ) instanceof CachedJdbcValuesMetadata cachedMetadata
+						? cachedMetadata
+						: null;
+		this.offset = metadata != null ? 1 : 0;
 		this.numberOfRows = cachedResults.size() - offset - 1;
 		this.resultCount = cachedResults.isEmpty() ? 0 : (int) cachedResults.get( cachedResults.size() - 1 );
 		this.resolvedMapping = resolvedMapping;
-		if ( hasMetadata ) {
-			final int[] storedMapping =
-					( (CachedJdbcValuesMetadata) cachedResults.get( 0 ) ).getValueIndexesToCacheIndexes();
-			this.dataSufficient = isMappingCompatible(
-					resolvedMapping.getValueIndexesToCacheIndexes(),
-					storedMapping
+		if ( metadata != null ) {
+			final int[] storedMapping = metadata.getValueIndexesToCacheIndexes();
+			this.cacheCompatible = isCacheCompatible(
+					resolvedMapping,
+					storedMapping,
+					metadata
 			);
 			this.valueIndexesToCacheIndexes = storedMapping;
 		}
 		else {
-			this.dataSufficient = true;
+			this.cacheCompatible = true;
 			this.valueIndexesToCacheIndexes = resolvedMapping.getValueIndexesToCacheIndexes();
 		}
 	}
 
 	/**
-	 * Checks whether the stored (writer's) compaction mapping is compatible with the reader's mapping.
-	 * Compatible means: every column position the reader needs is present in the stored mapping.
+	 * Checks whether the cached data is compatible with the reader's mapping.
+	 * This verifies both that every column position the reader needs is present
+	 * in the stored mapping, and that the Java types of cached values match
+	 * what the reader expects (to avoid {@link ClassCastException}s when the
+	 * same SQL is executed with different result types).
 	 *
-	 * @param readerMapping the current result type's compaction mapping (from resolvedMapping)
+	 * @param resolvedMapping the current result type's mapping
 	 * @param storedMapping the compaction mapping stored in cache metadata
+	 * @param metadata the cached metadata containing stored Java types
 	 */
-	private static boolean isMappingCompatible(int[] readerMapping, int[] storedMapping) {
+	private static boolean isCacheCompatible(
+			JdbcValuesMapping resolvedMapping,
+			int[] storedMapping,
+			CachedJdbcValuesMetadata metadata) {
+		final int[] readerMapping = resolvedMapping.getValueIndexesToCacheIndexes();
 		// Check that every position the reader needs is present in the stored mapping
 		for ( int i = 0; i < readerMapping.length; i++ ) {
 			if ( readerMapping[i] != -1 ) {
@@ -65,16 +75,27 @@ public class JdbcValuesCacheHit extends AbstractJdbcValues {
 				}
 			}
 		}
+		// Check that the Java types of cached values match the reader's expected types
+		for ( var selection : resolvedMapping.getSqlSelections() ) {
+			final int valueIndex = selection.getValuesArrayPosition();
+			final var storedJavaType = metadata.getStoredJavaType( valueIndex );
+			final var expressionType = selection.getExpressionType();
+			if ( storedJavaType != null && expressionType != null
+					&& expressionType.getSingleJdbcMapping().getJavaTypeDescriptor() != storedJavaType ) {
+				return false;
+			}
+		}
 		return true;
 	}
 
 	/**
-	 * Returns whether the cached data has enough columns for the resolved mapping.
-	 * When {@code false}, the cache entry was populated by a different result type
-	 * (e.g. entity) that cached fewer columns and needs to be re-populated.
+	 * Returns whether the cached data is compatible with the resolved mapping.
+	 * When {@code false}, the cache entry was populated by a query with a different
+	 * result type that either cached fewer columns or used different Java types,
+	 * and needs to be re-populated.
 	 */
-	public boolean isDataSufficient() {
-		return dataSufficient;
+	public boolean isCacheCompatible() {
+		return cacheCompatible;
 	}
 
 	@Override
