@@ -37,6 +37,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /**
  * @author Steve Ebersole
@@ -45,7 +46,7 @@ public class JdbcSelectWithActions implements JdbcOperationQuery, JdbcSelect {
 	private final JdbcOperationQuerySelect primaryOperation;
 
 	// Used by Hibernate Reactive
-	protected final LoadedValuesCollector loadedValuesCollector;
+	protected final @Nullable Supplier<LoadedValuesCollector> loadedValuesCollectorFactory;
 	// Used by Hibernate Reactive
 	protected final PreAction[] preActions;
 	// Used by Hibernate Reactive
@@ -53,19 +54,17 @@ public class JdbcSelectWithActions implements JdbcOperationQuery, JdbcSelect {
 
 	public JdbcSelectWithActions(
 			JdbcOperationQuerySelect primaryOperation,
-			LoadedValuesCollector loadedValuesCollector,
+			@Nullable Supplier<LoadedValuesCollector> loadedValuesCollectorFactory,
 			PreAction[] preActions,
 			PostAction[] postActions) {
 		this.primaryOperation = primaryOperation;
-		this.loadedValuesCollector = loadedValuesCollector;
+		this.loadedValuesCollectorFactory = loadedValuesCollectorFactory;
 		this.preActions = preActions;
 		this.postActions = postActions;
 	}
 
-	public JdbcSelectWithActions(
-			JdbcOperationQuerySelect primaryAction,
-			LoadedValuesCollector loadedValuesCollector) {
-		this( primaryAction, loadedValuesCollector, null, null );
+	public JdbcSelectWithActions(JdbcOperationQuerySelect primaryAction) {
+		this( primaryAction, null, null, null );
 	}
 
 	@Override
@@ -99,8 +98,8 @@ public class JdbcSelectWithActions implements JdbcOperationQuery, JdbcSelect {
 	}
 
 	@Override
-	public @Nullable LoadedValuesCollector getLoadedValuesCollector() {
-		return loadedValuesCollector;
+	public @Nullable LoadedValuesCollector createLoadedValuesCollector() {
+		return loadedValuesCollectorFactory != null ? loadedValuesCollectorFactory.get() : null;
 	}
 
 	@Override
@@ -115,16 +114,13 @@ public class JdbcSelectWithActions implements JdbcOperationQuery, JdbcSelect {
 	}
 
 	@Override
-	public void performPostAction(boolean succeeded, StatementAccess jdbcStatementAccess, Connection jdbcConnection, ExecutionContext executionContext) {
+	public void performPostAction(boolean succeeded, StatementAccess jdbcStatementAccess, Connection jdbcConnection, ExecutionContext executionContext, @Nullable LoadedValuesCollector loadedValuesCollector) {
 		if ( postActions != null ) {
 			for ( int i = 0; i < postActions.length; i++ ) {
 				if ( succeeded || postActions[i].shouldRunAfterFail() ) {
-					postActions[i].performPostAction( jdbcStatementAccess, jdbcConnection, executionContext );
+					postActions[i].performPostAction( jdbcStatementAccess, jdbcConnection, executionContext, loadedValuesCollector );
 				}
 			}
-		}
-		if ( loadedValuesCollector != null ) {
-			loadedValuesCollector.clear();
 		}
 	}
 
@@ -163,7 +159,7 @@ public class JdbcSelectWithActions implements JdbcOperationQuery, JdbcSelect {
 
 	public static class Builder implements JdbcSelectWithActionsBuilder {
 		private JdbcOperationQuerySelect primaryAction;
-		private LoadedValuesCollector loadedValuesCollector;
+		private Supplier<LoadedValuesCollector> loadedValuesCollectorFactory;
 		protected List<PreAction> preActions;
 		protected List<PostAction> postActions;
 		protected LockTimeoutType lockTimeoutType;
@@ -182,8 +178,8 @@ public class JdbcSelectWithActions implements JdbcOperationQuery, JdbcSelect {
 
 		@SuppressWarnings("UnusedReturnValue")
 		@Override
-		public Builder setLoadedValuesCollector(LoadedValuesCollector loadedValuesCollector) {
-			this.loadedValuesCollector = loadedValuesCollector;
+		public Builder setLoadedValuesCollectorFactory(Supplier<LoadedValuesCollector> collectorFactory) {
+			this.loadedValuesCollectorFactory = collectorFactory;
 			return this;
 		}
 
@@ -240,12 +236,12 @@ public class JdbcSelectWithActions implements JdbcOperationQuery, JdbcSelect {
 				CollectionLockingAction.apply( lockOptions, lockingTarget, this );
 			}
 			if ( preActions == null && postActions == null ) {
-				assert loadedValuesCollector == null;
+				assert loadedValuesCollectorFactory == null;
 				return primaryAction;
 			}
 			final PreAction[] preActions = toPreActionArray( this.preActions );
 			final PostAction[] postActions = toPostActionArray( this.postActions );
-			return new JdbcSelectWithActions( primaryAction, loadedValuesCollector, preActions, postActions );
+			return new JdbcSelectWithActions( primaryAction, loadedValuesCollectorFactory, preActions, postActions );
 		}
 
 		/**

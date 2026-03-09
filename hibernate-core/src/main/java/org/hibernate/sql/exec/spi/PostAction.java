@@ -4,6 +4,7 @@
  */
 package org.hibernate.sql.exec.spi;
 
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.hibernate.Incubating;
 
 import java.sql.Connection;
@@ -24,8 +25,13 @@ public interface PostAction extends SecondaryAction {
 	 * @param jdbcStatementAccess Access to a JDBC Statement object which may be used to perform the action.
 	 * @param jdbcConnection The JDBC Connection.
 	 * @param executionContext Access to contextual information useful while executing.
+	 * @param loadedValuesCollector The per-execution collector of loaded values, may be {@code null}.
 	 */
-	void performPostAction(StatementAccess jdbcStatementAccess, Connection jdbcConnection, ExecutionContext executionContext);
+	void performPostAction(
+			StatementAccess jdbcStatementAccess,
+			Connection jdbcConnection,
+			ExecutionContext executionContext,
+			@Nullable LoadedValuesCollector loadedValuesCollector);
 
 	/**
 	 * Should this post-action always be run even if the primary operation fails?

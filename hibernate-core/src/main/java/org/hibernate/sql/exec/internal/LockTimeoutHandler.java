@@ -7,7 +7,9 @@ package org.hibernate.sql.exec.internal;
 import jakarta.persistence.Timeout;
 import org.hibernate.dialect.lock.spi.ConnectionLockTimeoutStrategy;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.hibernate.sql.exec.spi.ExecutionContext;
+import org.hibernate.sql.exec.spi.LoadedValuesCollector;
 import org.hibernate.sql.exec.spi.PostAction;
 import org.hibernate.sql.exec.spi.PreAction;
 import org.hibernate.sql.exec.spi.StatementAccess;
@@ -50,7 +52,7 @@ public class LockTimeoutHandler implements PreAction, PostAction {
 	}
 
 	@Override
-	public void performPostAction(StatementAccess jdbcStatementAccess, Connection jdbcConnection, ExecutionContext executionContext) {
+	public void performPostAction(StatementAccess jdbcStatementAccess, Connection jdbcConnection, ExecutionContext executionContext, @Nullable LoadedValuesCollector loadedValuesCollector) {
 		final SessionFactoryImplementor factory = executionContext.getSession().getFactory();
 
 		// reset the timeout

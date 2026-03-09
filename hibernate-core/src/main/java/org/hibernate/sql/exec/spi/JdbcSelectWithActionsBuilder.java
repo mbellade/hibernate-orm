@@ -11,6 +11,8 @@ import org.hibernate.dialect.lock.spi.LockingSupport;
 import org.hibernate.sql.ast.spi.LockingClauseStrategy;
 import org.hibernate.sql.ast.tree.select.QuerySpec;
 
+import java.util.function.Supplier;
+
 /// Contract used while building a [JdbcSelect] which might potentially
 /// include [pre-][PreAction] and/or [post-][PostAction] actions.
 ///
@@ -22,8 +24,8 @@ public interface JdbcSelectWithActionsBuilder {
 	/// The primary selection.
 	JdbcSelectWithActionsBuilder setPrimaryAction(JdbcSelect primaryAction);
 
-	/// Collector of loaded values for post-processing.
-	JdbcSelectWithActionsBuilder setLoadedValuesCollector(LoadedValuesCollector loadedValuesCollector);
+	/// Factory for creating per-execution collectors of loaded values.
+	JdbcSelectWithActionsBuilder setLoadedValuesCollectorFactory(Supplier<LoadedValuesCollector> collectorFactory);
 
 	///  Lock-timeout handling type.
 	JdbcSelectWithActionsBuilder setLockTimeoutType(LockTimeoutType lockTimeoutType);

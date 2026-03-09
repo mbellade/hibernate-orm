@@ -5,6 +5,7 @@
 package org.hibernate.sql.exec.internal.lock;
 
 import jakarta.persistence.Timeout;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.hibernate.LockMode;
 import org.hibernate.LockOptions;
 import org.hibernate.Locking;
@@ -41,18 +42,14 @@ import static org.hibernate.sql.exec.SqlExecLogger.SQL_EXEC_LOGGER;
  */
 public class CollectionLockingAction implements PostAction {
 	// Used by Hibernate Reactive
-	protected final LoadedValuesCollectorImpl loadedValuesCollector;
-	// Used by Hibernate Reactive
 	protected final LockMode lockMode;
 	// Used by Hibernate Reactive
 	protected final Timeout lockTimeout;
 
 	// Used by Hibernate Reactive
 	protected CollectionLockingAction(
-			LoadedValuesCollectorImpl loadedValuesCollector,
 			LockMode lockMode,
 			Timeout lockTimeout) {
-		this.loadedValuesCollector = loadedValuesCollector;
 		this.lockMode = lockMode;
 		this.lockTimeout = lockTimeout;
 	}
@@ -63,15 +60,13 @@ public class CollectionLockingAction implements PostAction {
 			JdbcSelectWithActionsBuilder jdbcSelectBuilder) {
 		assert lockOptions.getScope() == Locking.Scope.INCLUDE_COLLECTIONS;
 
-		final var loadedValuesCollector = resolveLoadedValuesCollector( lockingTarget );
-
-		// NOTE: we need to set this separately so that it can get incorporated into
-		// the JdbcValuesSourceProcessingState for proper callbacks
-		jdbcSelectBuilder.setLoadedValuesCollector( loadedValuesCollector );
+		// set a factory that creates a fresh collector per execution
+		jdbcSelectBuilder.setLoadedValuesCollectorFactory(
+				() -> resolveLoadedValuesCollector( lockingTarget )
+		);
 
 		// additionally, add a post-action which uses the collected values.
 		jdbcSelectBuilder.appendPostAction( new CollectionLockingAction(
-				loadedValuesCollector,
 				lockOptions.getLockMode(),
 				lockOptions.getTimeout()
 		) );
@@ -81,12 +76,16 @@ public class CollectionLockingAction implements PostAction {
 	public void performPostAction(
 			StatementAccess jdbcStatementAccess,
 			Connection jdbcConnection,
-			ExecutionContext executionContext) {
-		performPostAction( executionContext );
+			ExecutionContext executionContext,
+			@Nullable LoadedValuesCollector loadedValuesCollector) {
+		performPostAction( loadedValuesCollector, executionContext );
 	}
 
 	// Used by Hibernate Reactive
-	protected void performPostAction(ExecutionContext executionContext) {
+	protected void performPostAction(@Nullable LoadedValuesCollector loadedValuesCollector, ExecutionContext executionContext) {
+		if ( loadedValuesCollector == null ) {
+			return;
+		}
 		LockingHelper.logLoadedValues( loadedValuesCollector );
 
 		final var session = executionContext.getSession();

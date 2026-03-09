@@ -26,12 +26,16 @@ public interface JdbcSelect extends PrimaryOperation, CacheableJdbcOperation {
 	int getMaxRows();
 
 	/**
-	 * Access to a collector of values loaded to be applied during the
+	 * Create a fresh collector of values loaded to be applied during the
 	 * processing of the selection's results.
-	 * May be {@code null}.
+	 * May return {@code null}.
+	 *
+	 * @apiNote A new collector is created per execution to avoid
+	 * thread-safety issues when the {@code JdbcSelect} is cached and
+	 * shared across concurrent sessions.
 	 */
 	@Nullable
-	LoadedValuesCollector getLoadedValuesCollector();
+	LoadedValuesCollector createLoadedValuesCollector();
 
 	/**
 	 * Perform any pre-actions.
@@ -61,6 +65,7 @@ public interface JdbcSelect extends PrimaryOperation, CacheableJdbcOperation {
 			boolean succeeded,
 			StatementAccess jdbcStatementAccess,
 			Connection jdbcConnection,
-			ExecutionContext executionContext);
+			ExecutionContext executionContext,
+			@Nullable LoadedValuesCollector loadedValuesCollector);
 
 }
