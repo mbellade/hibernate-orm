@@ -14,7 +14,6 @@ import jakarta.persistence.OneToMany;
 import jakarta.persistence.OneToOne;
 import jakarta.persistence.Subgraph;
 import org.hibernate.Hibernate;
-import org.hibernate.annotations.DynamicUpdate;
 import org.hibernate.cfg.AvailableSettings;
 import org.hibernate.engine.spi.SessionImplementor;
 import org.hibernate.jpa.HibernateHints;
@@ -132,9 +131,8 @@ public class FetchGraphReadOnlyNpeTest {
 	}
 
 	@Entity(name = "Account")
-	@DynamicUpdate
 	public static class Account extends AbstractIdEntity {
-		@OneToOne(fetch = FetchType.LAZY, optional = false)
+		@OneToOne(fetch = FetchType.LAZY)
 		private UserName userName;
 
 		@OneToMany(fetch = FetchType.LAZY, mappedBy = "account")
@@ -153,7 +151,6 @@ public class FetchGraphReadOnlyNpeTest {
 	}
 
 	@Entity(name = "UserName")
-	@DynamicUpdate
 	public static class UserName extends AbstractIdEntity {
 		@OneToOne(mappedBy = "userName", fetch = FetchType.LAZY)
 		private Account device;
@@ -170,7 +167,6 @@ public class FetchGraphReadOnlyNpeTest {
 	}
 
 	@Entity(name = "AddressAssignment")
-	@DynamicUpdate
 	public static class AddressAssignment extends AbstractIdEntity {
 		@OneToOne
 		private UserName userName;
@@ -178,10 +174,10 @@ public class FetchGraphReadOnlyNpeTest {
 		@OneToOne
 		private Address address;
 
-		@ManyToOne(optional = false)
+		@ManyToOne
 		private Booking booking;
 
-		@ManyToOne(optional = false)
+		@ManyToOne
 		private Account account;
 
 		public AddressAssignment() {
@@ -197,12 +193,11 @@ public class FetchGraphReadOnlyNpeTest {
 	}
 
 	@Entity(name = "Address")
-	@DynamicUpdate
 	public static class Address extends AbstractIdEntity {
-		@ManyToOne(optional = false)
+		@ManyToOne
 		private Store store;
 
-		@OneToOne(optional = true, mappedBy = "address", fetch = FetchType.LAZY)
+		@OneToOne(mappedBy = "address", fetch = FetchType.LAZY)
 		private AddressAssignment addressAssignment;
 
 		public Address() {
@@ -216,7 +211,7 @@ public class FetchGraphReadOnlyNpeTest {
 
 	@Entity(name = "Store")
 	public static class Store extends AbstractIdEntity {
-		@ManyToOne(fetch = FetchType.LAZY, optional = false)
+		@ManyToOne(fetch = FetchType.LAZY)
 		private Booking booking;
 
 		public Store() {
@@ -242,12 +237,11 @@ public class FetchGraphReadOnlyNpeTest {
 	}
 
 	@Entity(name = "BookingAssignment")
-	@DynamicUpdate
 	public static class BookingAssignment extends AbstractIdEntity {
-		@ManyToOne(optional = false)
+		@ManyToOne
 		private Account account;
 
-		@ManyToOne(optional = false)
+		@ManyToOne
 		private Booking booking;
 
 		public BookingAssignment() {
