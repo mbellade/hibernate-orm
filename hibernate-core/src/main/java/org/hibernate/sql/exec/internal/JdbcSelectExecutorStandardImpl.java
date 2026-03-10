@@ -211,6 +211,10 @@ public class JdbcSelectExecutorStandardImpl implements JdbcSelectExecutor {
 
 		final var connection = logicalConnection.getPhysicalConnection();
 		final var statementAccess = new StatementAccessImpl( connection, logicalConnection, factory );
+		final var lockTimeoutHandler = jdbcSelect.createLockTimeoutHandler();
+		if ( lockTimeoutHandler != null ) {
+			lockTimeoutHandler.performPreAction( statementAccess, connection, executionContext );
+		}
 		jdbcSelect.performPreActions( statementAccess, connection, executionContext );
 
 		try {
@@ -224,6 +228,9 @@ public class JdbcSelectExecutorStandardImpl implements JdbcSelectExecutor {
 			);
 
 			jdbcSelect.performPostAction( true, statementAccess, connection, executionContext, loadedValuesCollector );
+			if ( lockTimeoutHandler != null ) {
+				lockTimeoutHandler.performPostAction( statementAccess, connection, executionContext, loadedValuesCollector );
+			}
 
 			if ( stats ) {
 				logQueryStatistics( jdbcSelect, executionContext, startTime, result, statistics );
@@ -233,6 +240,9 @@ public class JdbcSelectExecutorStandardImpl implements JdbcSelectExecutor {
 		}
 		catch (RuntimeException e) {
 			jdbcSelect.performPostAction( false, statementAccess, connection, executionContext, loadedValuesCollector );
+			if ( lockTimeoutHandler != null && lockTimeoutHandler.shouldRunAfterFail() ) {
+				lockTimeoutHandler.performPostAction( statementAccess, connection, executionContext, loadedValuesCollector );
+			}
 			throw e;
 		}
 		finally {

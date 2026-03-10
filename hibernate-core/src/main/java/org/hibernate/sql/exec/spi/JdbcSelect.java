@@ -7,6 +7,7 @@ package org.hibernate.sql.exec.spi;
 import org.checkerframework.checker.nullness.qual.Nullable;
 import org.hibernate.Incubating;
 import org.hibernate.sql.ast.tree.expression.JdbcParameter;
+import org.hibernate.sql.exec.internal.LockTimeoutHandler;
 import org.hibernate.sql.results.jdbc.spi.JdbcValuesMappingProducer;
 
 import java.sql.Connection;
@@ -36,6 +37,18 @@ public interface JdbcSelect extends PrimaryOperation, CacheableJdbcOperation {
 	 */
 	@Nullable
 	LoadedValuesCollector createLoadedValuesCollector();
+
+	/**
+	 * Create a fresh {@linkplain LockTimeoutHandler} for this execution.
+	 * May return {@code null}.
+	 *
+	 * @apiNote A new handler is created per execution to avoid
+	 * thread-safety issues when the {@code JdbcSelect} is cached and
+	 * shared across concurrent sessions.
+	 */
+	default @Nullable LockTimeoutHandler createLockTimeoutHandler() {
+		return null;
+	}
 
 	/**
 	 * Perform any pre-actions.

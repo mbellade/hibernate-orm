@@ -47,6 +47,7 @@ public class JdbcSelectWithActions implements JdbcOperationQuery, JdbcSelect {
 
 	// Used by Hibernate Reactive
 	protected final @Nullable Supplier<LoadedValuesCollector> loadedValuesCollectorFactory;
+	private final @Nullable Supplier<LockTimeoutHandler> lockTimeoutHandlerFactory;
 	// Used by Hibernate Reactive
 	protected final PreAction[] preActions;
 	// Used by Hibernate Reactive
@@ -55,16 +56,18 @@ public class JdbcSelectWithActions implements JdbcOperationQuery, JdbcSelect {
 	public JdbcSelectWithActions(
 			JdbcOperationQuerySelect primaryOperation,
 			@Nullable Supplier<LoadedValuesCollector> loadedValuesCollectorFactory,
+			@Nullable Supplier<LockTimeoutHandler> lockTimeoutHandlerFactory,
 			PreAction[] preActions,
 			PostAction[] postActions) {
 		this.primaryOperation = primaryOperation;
 		this.loadedValuesCollectorFactory = loadedValuesCollectorFactory;
+		this.lockTimeoutHandlerFactory = lockTimeoutHandlerFactory;
 		this.preActions = preActions;
 		this.postActions = postActions;
 	}
 
 	public JdbcSelectWithActions(JdbcOperationQuerySelect primaryAction) {
-		this( primaryAction, null, null, null );
+		this( primaryAction, null, null, null, null );
 	}
 
 	@Override
@@ -100,6 +103,11 @@ public class JdbcSelectWithActions implements JdbcOperationQuery, JdbcSelect {
 	@Override
 	public @Nullable LoadedValuesCollector createLoadedValuesCollector() {
 		return loadedValuesCollectorFactory != null ? loadedValuesCollectorFactory.get() : null;
+	}
+
+	@Override
+	public @Nullable LockTimeoutHandler createLockTimeoutHandler() {
+		return lockTimeoutHandlerFactory != null ? lockTimeoutHandlerFactory.get() : null;
 	}
 
 	@Override
@@ -160,6 +168,7 @@ public class JdbcSelectWithActions implements JdbcOperationQuery, JdbcSelect {
 	public static class Builder implements JdbcSelectWithActionsBuilder {
 		private JdbcOperationQuerySelect primaryAction;
 		private Supplier<LoadedValuesCollector> loadedValuesCollectorFactory;
+		private Supplier<LockTimeoutHandler> lockTimeoutHandlerFactory;
 		protected List<PreAction> preActions;
 		protected List<PostAction> postActions;
 		protected LockTimeoutType lockTimeoutType;
@@ -222,12 +231,9 @@ public class JdbcSelectWithActions implements JdbcOperationQuery, JdbcSelect {
 		@Override
 		public JdbcSelect build() {
 			if ( lockTimeoutType == LockTimeoutType.CONNECTION ) {
-				addSecondaryActionPair(
-						new LockTimeoutHandler(
-								lockOptions.getTimeout(),
-								lockingSupport.getConnectionLockTimeoutStrategy()
-						)
-				);
+				final var timeout = lockOptions.getTimeout();
+				final var strategy = lockingSupport.getConnectionLockTimeoutStrategy();
+				lockTimeoutHandlerFactory = () -> new LockTimeoutHandler( timeout, strategy );
 			}
 			if ( isFollowOnLockStrategy ) {
 				FollowOnLockingAction.apply( lockOptions, lockingTarget, lockingClauseStrategy, this );
@@ -235,13 +241,13 @@ public class JdbcSelectWithActions implements JdbcOperationQuery, JdbcSelect {
 			else if ( lockOptions.getScope() == Locking.Scope.INCLUDE_COLLECTIONS ) {
 				CollectionLockingAction.apply( lockOptions, lockingTarget, this );
 			}
-			if ( preActions == null && postActions == null ) {
+			if ( preActions == null && postActions == null && lockTimeoutHandlerFactory == null ) {
 				assert loadedValuesCollectorFactory == null;
 				return primaryAction;
 			}
 			final PreAction[] preActions = toPreActionArray( this.preActions );
 			final PostAction[] postActions = toPostActionArray( this.postActions );
-			return new JdbcSelectWithActions( primaryAction, loadedValuesCollectorFactory, preActions, postActions );
+			return new JdbcSelectWithActions( primaryAction, loadedValuesCollectorFactory, lockTimeoutHandlerFactory, preActions, postActions );
 		}
 
 		/**

@@ -35,10 +35,6 @@ public class LockTimeoutHandler implements PreAction, PostAction {
 		this.lockTimeoutStrategy = lockTimeoutStrategy;
 	}
 
-	public Timeout getBaseline() {
-		return baseline;
-	}
-
 	@Override
 	public void performPreAction(StatementAccess jdbcStatementAccess, Connection jdbcConnection, ExecutionContext executionContext) {
 		final var factory = executionContext.getSession().getFactory();
