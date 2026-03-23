@@ -64,17 +64,18 @@ public interface StateManagementSettings {
 	String USE_SERVER_TRANSACTION_TIMESTAMPS = "hibernate.temporal.use_server_transaction_timestamps";
 
 	/**
-	 * Specify a {@link java.util.function.Supplier SUpplier} which
-	 * provides unique, monotonically increasing transaction IDs for
+	 * Specify a {@link org.hibernate.temporal.spi.TransactionIdentifierSupplier
+	 * TransactionIdentifierSupplier} which provides unique, monotonically
+	 * increasing transaction IDs for
 	 * {@linkplain org.hibernate.annotations.Temporal temporal data}
 	 * when using the {@link TemporalTableStrategy#SINGLE_TABLE} or
 	 * {@link TemporalTableStrategy#HISTORY_TABLE} mapping strategy
 	 * or for {@linkplain org.hibernate.annotations.Audited audited
-	 * data}.
+	 * data}. A plain {@link java.util.function.Supplier Supplier}
+	 * is also accepted for backward compatibility.
 	 * <p>
 	 * The Java type of the transaction id is inferred from the type
-	 * argument {@code T} in the instantiation of {@code Supplier<T>}
-	 * implemented by the supplier class, and is used instead of
+	 * argument {@code T} of the supplier, and is used instead of
 	 * {@link java.time.Instant} for the effectivity column mappings.
 	 * <p>
 	 * By default, transaction IDs are timestamps generated using
@@ -86,6 +87,7 @@ public interface StateManagementSettings {
 	 * @see org.hibernate.annotations.Temporal
 	 * @see org.hibernate.annotations.Audited
 	 * @see org.hibernate.temporal.spi.TransactionIdentifierService
+	 * @see org.hibernate.temporal.spi.TransactionIdentifierSupplier
 	 *
 	 * @since 7.4
 	 */

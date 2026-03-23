@@ -20,7 +20,7 @@ import org.hibernate.metamodel.mapping.AttributeMapping;
 import org.hibernate.metamodel.mapping.PluralAttributeMapping;
 import org.hibernate.metamodel.mapping.SelectableMapping;
 import org.hibernate.persister.entity.EntityPersister;
-import org.hibernate.persister.state.internal.AuditStateManagement;
+import org.hibernate.audit.ModificationType;
 import org.hibernate.sql.model.MutationOperationGroup;
 import org.hibernate.sql.model.MutationType;
 import org.hibernate.sql.model.ast.builder.TableInsertBuilderStandard;
@@ -71,7 +71,7 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator {
 			Object entity,
 			Object id,
 			Object[] values,
-			AuditStateManagement.ModificationType modificationType,
+			ModificationType modificationType,
 			SharedSessionContractImplementor session) {
 		if ( values != null ) {
 			final boolean dynamicInsert = entityPersister().isDynamicInsert();
@@ -170,7 +170,7 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator {
 			Object id,
 			Object[] values,
 			boolean[] propertyInclusions,
-			AuditStateManagement.ModificationType modificationType,
+			ModificationType modificationType,
 			SharedSessionContractImplementor session,
 			JdbcValueBindings jdbcValueBindings) {
 		final String tableName = auditTableName;

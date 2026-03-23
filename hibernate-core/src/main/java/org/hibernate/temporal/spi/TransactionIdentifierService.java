@@ -8,8 +8,6 @@ import org.hibernate.Incubating;
 import org.hibernate.cfg.StateManagementSettings;
 import org.hibernate.service.Service;
 
-import java.util.function.Supplier;
-
 
 /**
  * A source of transaction identifiers or timestamps for use
@@ -48,10 +46,11 @@ public interface TransactionIdentifierService extends Service {
 
 	/**
 	 * A supplier of transaction identifiers or timestamps.
+	 * The current session is passed to the supplier.
 	 *
 	 * @see StateManagementSettings#TRANSACTION_ID_SUPPLIER
 	 */
-	Supplier<?> getIdentifierSupplier();
+	TransactionIdentifierSupplier<?> getIdentifierSupplier();
 
 	/**
 	 * Whether the timestamps or identifiers are assigned by the database server.

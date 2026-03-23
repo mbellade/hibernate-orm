@@ -17,7 +17,7 @@ import org.hibernate.metamodel.mapping.EntityMappingType;
 import org.hibernate.metamodel.mapping.JdbcMapping;
 import org.hibernate.metamodel.mapping.PluralAttributeMapping;
 import org.hibernate.metamodel.mapping.SelectableMapping;
-import org.hibernate.persister.state.internal.AuditStateManagement;
+import org.hibernate.audit.ModificationType;
 import org.hibernate.query.sqm.function.AbstractSqmSelfRenderingFunctionDescriptor;
 import org.hibernate.query.sqm.function.FunctionRenderer;
 import org.hibernate.query.sqm.function.SelfRenderingAggregateFunctionSqlAstExpression;
@@ -162,7 +162,7 @@ public class AuditMappingImpl implements AuditMapping {
 						new ColumnReference( tableReference, modificationTypeMapping ),
 						NOT_EQUAL,
 						new JdbcLiteral<>(
-								AuditStateManagement.ModificationType.DEL.ordinal(),
+								ModificationType.DEL.ordinal(),
 								modificationTypeMapping.getJdbcMapping()
 						)
 				);

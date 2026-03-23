@@ -14,7 +14,7 @@ import org.hibernate.engine.jdbc.mutation.spi.MutationExecutorService;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.hibernate.engine.spi.SharedSessionContractImplementor;
 import org.hibernate.persister.collection.CollectionPersister;
-import org.hibernate.persister.state.internal.AuditStateManagement;
+import org.hibernate.audit.ModificationType;
 import org.hibernate.sql.model.MutationOperationGroup;
 
 /**
@@ -87,7 +87,7 @@ public class DeleteRowsCoordinatorAudit implements DeleteRowsCoordinator {
 								key,
 								removal,
 								i,
-								AuditStateManagement.ModificationType.DEL,
+								ModificationType.DEL,
 								session,
 								auditExecutor.getJdbcValueBindings()
 						);

@@ -11,7 +11,7 @@ import org.hibernate.engine.jdbc.batch.internal.BasicBatchKey;
 import org.hibernate.engine.jdbc.mutation.spi.MutationExecutorService;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.hibernate.engine.spi.SharedSessionContractImplementor;
-import org.hibernate.persister.state.internal.AuditStateManagement;
+import org.hibernate.audit.ModificationType;
 import org.hibernate.sql.model.MutationOperationGroup;
 
 /**
@@ -90,7 +90,7 @@ public class InsertRowsCoordinatorAudit implements InsertRowsCoordinator {
 								id,
 								entry,
 								entryCount,
-								AuditStateManagement.ModificationType.ADD,
+								ModificationType.ADD,
 								session,
 								mutationExecutor.getJdbcValueBindings()
 						);

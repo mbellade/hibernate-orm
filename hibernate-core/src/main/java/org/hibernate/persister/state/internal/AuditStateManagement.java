@@ -50,20 +50,6 @@ public class AuditStateManagement implements StateManagement {
 	private AuditStateManagement() {
 	}
 
-	/**
-	 * The modification type stored in the
-	 * {@linkplain org.hibernate.annotations.Audited#modificationType
-	 * modification type column}.
-	 */
-	public enum ModificationType {
-		/** Creation, encoded as 0 */
-		ADD,
-		/** Modification, encoded as 1 */
-		MOD,
-		/** Deletion, encoded as 2 */
-		DEL
-	}
-
 	@Override
 	public InsertCoordinator createInsertCoordinator(EntityPersister persister) {
 		return new InsertCoordinatorAudit( persister, persister.getFactory(),

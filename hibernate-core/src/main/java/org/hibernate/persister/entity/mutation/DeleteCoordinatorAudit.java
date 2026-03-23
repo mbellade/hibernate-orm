@@ -7,7 +7,7 @@ package org.hibernate.persister.entity.mutation;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.hibernate.engine.spi.SharedSessionContractImplementor;
 import org.hibernate.persister.entity.EntityPersister;
-import org.hibernate.persister.state.internal.AuditStateManagement;
+import org.hibernate.audit.ModificationType;
 import org.hibernate.sql.model.MutationOperationGroup;
 
 /**
@@ -38,7 +38,7 @@ public class DeleteCoordinatorAudit extends AbstractAuditCoordinator implements 
 		currentDeleteCoordinator.delete( entity, id, version, session );
 		final var state = resolveDeleteState( entity, session );
 		if ( state != null ) {
-			insertAuditRow( entity, id, state, AuditStateManagement.ModificationType.DEL, session );
+			insertAuditRow( entity, id, state, ModificationType.DEL, session );
 		}
 	}
 

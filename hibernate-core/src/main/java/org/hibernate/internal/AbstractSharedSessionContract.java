@@ -49,7 +49,7 @@ import org.hibernate.engine.spi.SharedSessionContractImplementor;
 import org.hibernate.engine.spi.StatelessSessionImplementor;
 import org.hibernate.engine.transaction.internal.TransactionImpl;
 import org.hibernate.event.monitor.spi.EventMonitor;
-import java.util.function.Supplier;
+import org.hibernate.temporal.spi.TransactionIdentifierSupplier;
 import org.hibernate.graph.GraphSemantic;
 import org.hibernate.graph.RootGraph;
 import org.hibernate.graph.internal.RootGraphImpl;
@@ -167,7 +167,7 @@ abstract class AbstractSharedSessionContract implements SharedSessionContractImp
 	private final boolean readOnly;
 	private final TimeZone jdbcTimeZone;
 
-	private transient Supplier<?> transactionIdSupplier;
+	private transient TransactionIdentifierSupplier<?> transactionIdSupplier;
 
 	// mutable state
 	private CacheMode cacheMode;
@@ -257,7 +257,7 @@ abstract class AbstractSharedSessionContract implements SharedSessionContractImp
 		}
 	}
 
-	private static Supplier<?> initializeTransactionIdSupplier(SessionFactoryImplementor factory) {
+	private static TransactionIdentifierSupplier<?> initializeTransactionIdSupplier(SessionFactoryImplementor factory) {
 		final var transactionIdentifierService = factory.getTransactionIdentifierService();
 		return transactionIdentifierService.isDisabled()
 				? null
@@ -635,12 +635,11 @@ abstract class AbstractSharedSessionContract implements SharedSessionContractImp
 	private Object generateCurrentTransactionIdentifier() {
 		return transactionIdSupplier == null
 				? null
-				: transactionIdSupplier.get();
+				: transactionIdSupplier.getTransactionIdentifier( this );
 	}
 
 	@Override
 	public void afterTransactionBegin() {
-		initializeCurrentTransactionIdentifier();
 	}
 
 	protected void initializeCurrentTransactionIdentifier() {

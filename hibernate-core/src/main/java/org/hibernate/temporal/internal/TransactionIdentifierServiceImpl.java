@@ -15,6 +15,7 @@ import org.hibernate.cfg.StateManagementSettings;
 import org.hibernate.engine.config.spi.ConfigurationService;
 import org.hibernate.service.ServiceRegistry;
 import org.hibernate.temporal.spi.TransactionIdentifierService;
+import org.hibernate.temporal.spi.TransactionIdentifierSupplier;
 
 import static org.hibernate.cfg.StateManagementSettings.TRANSACTION_ID_SUPPLIER;
 import static org.hibernate.cfg.StateManagementSettings.USE_SERVER_TRANSACTION_TIMESTAMPS;
@@ -34,10 +35,10 @@ import static org.hibernate.internal.util.config.ConfigurationHelper.getBoolean;
  *
  * @since 7.4
  */
-public class TransactionIdentifierServiceImpl implements TransactionIdentifierService, Supplier<Instant> {
+public class TransactionIdentifierServiceImpl implements TransactionIdentifierService {
 
 	private final Class<?> identifierValueType;
-	private final Supplier<?> identifierValueSupplier;
+	private final TransactionIdentifierSupplier<?> identifierSupplier;
 	private final boolean useServerTransactionTimestamps;
 
 	public TransactionIdentifierServiceImpl(ServiceRegistry serviceRegistry) {
@@ -53,22 +54,15 @@ public class TransactionIdentifierServiceImpl implements TransactionIdentifierSe
 						+ TRANSACTION_ID_SUPPLIER + "' are mutually exclusive"
 				);
 			}
-			identifierValueSupplier = null;
+			identifierSupplier = null;
 			identifierValueType = Instant.class;
 		}
 		else {
-			identifierValueSupplier =
-					transactionIdSupplier( settings,
+			identifierSupplier =
+					resolveSupplier( settings,
 							serviceRegistry.requireService( StrategySelector.class ) );
-			@SuppressWarnings( "unchecked" ) // completely safe
-			final var supplierClass = (Class<Supplier<?>>) identifierValueSupplier.getClass();
-			identifierValueType = resolveSuppliedType( supplierClass );
+			identifierValueType = resolveSuppliedType( identifierSupplier );
 		}
-	}
-
-	@Override
-	public Instant get() {
-		return Instant.now();
 	}
 
 	@Override
@@ -82,8 +76,8 @@ public class TransactionIdentifierServiceImpl implements TransactionIdentifierSe
 	}
 
 	@Override
-	public Supplier<?> getIdentifierSupplier() {
-		return identifierValueSupplier;
+	public TransactionIdentifierSupplier<?> getIdentifierSupplier() {
+		return identifierSupplier;
 	}
 
 	@Override
@@ -91,44 +85,100 @@ public class TransactionIdentifierServiceImpl implements TransactionIdentifierSe
 		return useServerTransactionTimestamps;
 	}
 
-	private static Class<?> resolveSuppliedType(Class<? extends Supplier<?>> supplierClass) {
-		final var supplierInstantiation = supertypeInstantiation( Supplier.class, supplierClass );
-		if ( supplierInstantiation == null ) {
-			return null;
-		}
-		else {
+	private static Class<?> resolveSuppliedType(TransactionIdentifierSupplier<?> supplier) {
+		final var supplierInstantiation =
+				supertypeInstantiation( TransactionIdentifierSupplier.class, supplier.getClass() );
+		if ( supplierInstantiation != null ) {
 			final var typeArguments = supplierInstantiation.getActualTypeArguments();
-			return typeArguments.length == 0 ? null : erasedType( typeArguments[0] );
+			if ( typeArguments.length > 0 ) {
+				final var type = erasedType( typeArguments[0] );
+				if ( type != null ) {
+					return type;
+				}
+			}
 		}
+		// fall back to Supplier type argument if the supplier also implements Supplier
+		if ( supplier instanceof Supplier<?> ) {
+			final var fallback = supertypeInstantiation( Supplier.class, supplier.getClass() );
+			if ( fallback != null ) {
+				final var args = fallback.getActualTypeArguments();
+				if ( args.length > 0 ) {
+					return erasedType( args[0] );
+				}
+			}
+		}
+		return null;
 	}
 
-	public Supplier<?> transactionIdSupplier(
+	private TransactionIdentifierSupplier<?> resolveSupplier(
 			Map<String,Object> settings,
 			StrategySelector strategySelector) {
 		final Object setting = settings.get( TRANSACTION_ID_SUPPLIER );
 		if ( setting == null ) {
-			return this;
+			return defaultSupplier();
 		}
-		else if ( setting instanceof Supplier<?> supplier ) {
+		else if ( setting instanceof TransactionIdentifierSupplier<?> supplier ) {
 			return supplier;
 		}
+		else if ( setting instanceof Supplier<?> supplier ) {
+			return wrapSupplier( supplier );
+		}
 		else if ( setting instanceof Class<?> clazz ) {
-			if ( !Supplier.class.isAssignableFrom( clazz ) ) {
-				throw new HibernateException(
-						"Setting '" + TRANSACTION_ID_SUPPLIER + "' must specify a '"
-								+ Supplier.class.getName() + "' or a class name"
-				);
-			}
-			return strategySelector.resolveStrategy( Supplier.class, clazz );
+			return resolveClass( clazz, strategySelector );
 		}
 		else if ( setting instanceof String name ) {
-			return strategySelector.resolveStrategy( Supplier.class, name );
+			return resolveByName( name, strategySelector );
 		}
 		else {
 			throw new HibernateException(
 					"Setting '" + TRANSACTION_ID_SUPPLIER + "' must specify a '"
-							+ Supplier.class.getName() + "' or a class name"
+							+ TransactionIdentifierSupplier.class.getName() + "' or '"
+							+ Supplier.class.getName()
+							+ "' or a class name"
 			);
 		}
+	}
+
+	private TransactionIdentifierSupplier<?> resolveClass(
+			Class<?> clazz,
+			StrategySelector strategySelector) {
+		if ( TransactionIdentifierSupplier.class.isAssignableFrom( clazz ) ) {
+			return strategySelector.resolveStrategy( TransactionIdentifierSupplier.class, clazz );
+		}
+		else if ( Supplier.class.isAssignableFrom( clazz ) ) {
+			return wrapSupplier( strategySelector.resolveStrategy( Supplier.class, clazz ) );
+		}
+		else {
+			throw new HibernateException(
+					"Setting '" + TRANSACTION_ID_SUPPLIER + "' must specify a '"
+							+ TransactionIdentifierSupplier.class.getName() + "' or '"
+							+ Supplier.class.getName()
+							+ "' or a class name"
+			);
+		}
+	}
+
+	private TransactionIdentifierSupplier<?> resolveByName(
+			String name,
+			StrategySelector strategySelector) {
+		// Try dedicated supplier first, then fall back to plain Supplier
+		try {
+			final var resolved =
+					strategySelector.resolveStrategy( TransactionIdentifierSupplier.class, name );
+			if ( resolved != null ) {
+				return resolved;
+			}
+		}
+		catch (Exception ignore) {
+		}
+		return wrapSupplier( strategySelector.resolveStrategy( Supplier.class, name ) );
+	}
+
+	private static TransactionIdentifierSupplier<Instant> defaultSupplier() {
+		return session -> Instant.now();
+	}
+
+	private static <T> TransactionIdentifierSupplier<T> wrapSupplier(Supplier<T> supplier) {
+		return session -> supplier.get();
 	}
 }

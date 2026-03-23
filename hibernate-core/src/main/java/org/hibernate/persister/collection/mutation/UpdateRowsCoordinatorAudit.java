@@ -15,7 +15,7 @@ import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.hibernate.engine.spi.SharedSessionContractImplementor;
 import org.hibernate.metamodel.mapping.PluralAttributeMapping;
 import org.hibernate.persister.collection.CollectionPersister;
-import org.hibernate.persister.state.internal.AuditStateManagement;
+import org.hibernate.audit.ModificationType;
 import org.hibernate.sql.model.MutationOperationGroup;
 
 /**
@@ -82,7 +82,7 @@ public class UpdateRowsCoordinatorAudit implements UpdateRowsCoordinator {
 								key,
 								row.entry,
 								row.position,
-								AuditStateManagement.ModificationType.MOD,
+								ModificationType.MOD,
 								session,
 								auditExecutor.getJdbcValueBindings()
 						);

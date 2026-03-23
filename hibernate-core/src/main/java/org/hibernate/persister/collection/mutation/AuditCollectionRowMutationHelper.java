@@ -12,7 +12,7 @@ import org.hibernate.engine.jdbc.mutation.ParameterUsage;
 import org.hibernate.engine.spi.SharedSessionContractImplementor;
 import org.hibernate.metamodel.mapping.PluralAttributeMapping;
 import org.hibernate.metamodel.mapping.SelectableMapping;
-import org.hibernate.persister.state.internal.AuditStateManagement;
+import org.hibernate.audit.ModificationType;
 
 /**
  * Binds collection row values for audit table mutations.
@@ -53,7 +53,7 @@ final class AuditCollectionRowMutationHelper {
 			Object key,
 			Object rowValue,
 			int rowPosition,
-			AuditStateManagement.ModificationType modificationType,
+			ModificationType modificationType,
 			SharedSessionContractImplementor session,
 			JdbcValueBindings jdbcValueBindings) {
 		if ( key == null ) {

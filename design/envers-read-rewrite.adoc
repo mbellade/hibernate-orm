@@ -16,6 +16,9 @@ The write side is functional (though not yet feature-complete). This document pl
 We do **not** need to re-implement identical APIs. The goal is to provide equivalent functionality with a clear
 migration path, leveraging the simpler `atTransaction` session paradigm wherever possible.
 
+The ultimate objective for this migration is avoiding the need to use the old `hbm.xml` mapping format,
+as that is deprecated and will be removed in the upcoming Hibernate major version.
+
 == Current State
 
 === hibernate-core `@Audited` (since 7.4, @Incubating)
@@ -184,8 +187,8 @@ projections, joins, and aggregations.
 
 | 15
 | Custom revision entity (user, comments, etc. per revision)
-| `TransactionIdentifierSupplier` — persist revision entity in supplier, return generated ID
-| [red]#TODO# — see <<Custom Revision Entity Support>>
+| `RevisionEntitySupplier` — persists via child `StatelessSession`, returns generated ID
+| [green]#DONE# — see <<Custom Revision Entity Support>>
 |===
 
 === Tier 3 — Nice-to-have (advanced, lower priority)
@@ -274,12 +277,12 @@ See <<Custom Revision Entity Support>> section below.
 
 | W6
 | Custom revision entity with auto-persist
-| [red]#TODO# — current `Supplier<?>` has no session access
+| [green]#DONE# — `RevisionEntitySupplier` persists via child `StatelessSession`
 | High
 
 | W7
 | Revision listener callbacks (`RevisionListener`, `EntityTrackingRevisionListener`)
-| [red]#TODO# — no callback mechanism in core
+| [yellow]#PARTIAL# — `RevisionListener` callback in core; `EntityTrackingRevisionListener` deferred
 | High
 
 | W8
@@ -434,12 +437,13 @@ and return its generated identifier. Two approaches:
 
 ==== Option A: Richer supplier contract (recommended)
 
-Introduce a new SPI that receives the session, allowing it to persist a revision entity:
+Replace the plain `Supplier<?>` SPI with a dedicated `TransactionIdentifierSupplier<T>` that always
+receives the session. Implementors who don't need the session simply ignore it.
 
 [source,java]
 ----
 /**
- * A session-aware supplier of transaction identifiers.
+ * A supplier of transaction identifiers.
  * Implementations may persist a revision entity and return its generated ID.
  */
 @Incubating
@@ -452,16 +456,11 @@ public interface TransactionIdentifierSupplier<T> {
      * @return the transaction identifier (e.g. the generated ID of a revision entity)
      */
     T getTransactionIdentifier(SharedSessionContractImplementor session);
-
-    /**
-     * The Java type of transaction identifiers produced by this supplier.
-     */
-    Class<T> getIdentifierType();
 }
 ----
 
-The `TransactionIdentifierService` would detect whether the configured supplier implements
-`TransactionIdentifierSupplier` (session-aware) or plain `Supplier` (stateless), and dispatch accordingly.
+**Status**: [green]#DONE# — `TransactionIdentifierService.getIdentifierSupplier()` now returns
+`TransactionIdentifierSupplier<?>`. Plain `Supplier<?>` instances are auto-wrapped for backward compatibility.
 
 Usage example:
 
@@ -485,11 +484,6 @@ public class RevisionInfoSupplier implements TransactionIdentifierSupplier<Long>
         session.persist(rev);
         session.flush(); // ensure ID is generated
         return rev.getId();
-    }
-
-    @Override
-    public Class<Long> getIdentifierType() {
-        return Long.class;
     }
 }
 ----
@@ -538,7 +532,7 @@ a straightforward migration path:
 | Can be covered by a separate callback or event listener (Phase 2)
 
 | Automatic revision entity persistence
-| User calls `session.persist(revisionEntity)` in the supplier
+| `RevisionEntitySupplier` handles persistence via child `StatelessSession`
 
 | Revision number = generated ID
 | Return value of `getTransactionIdentifier()` = transaction ID used in audit rows
@@ -546,12 +540,43 @@ a straightforward migration path:
 
 === Implementation Tasks
 
-* [ ] Define `TransactionIdentifierSupplier<T>` SPI in `org.hibernate.temporal.spi`
-* [ ] Update `TransactionIdentifierService` / `TransactionIdentifierServiceImpl` to detect and use the new SPI
-* [ ] Update `AbstractSharedSessionContract.getCurrentTransactionIdentifier()` to pass session to supplier
-* [ ] Add test with custom revision entity + supplier
+* [x] Define `TransactionIdentifierSupplier<T>` SPI in `org.hibernate.temporal.spi`
+  — replaces plain `Supplier<?>`, session is always passed (implementors may ignore it)
+* [x] Update `TransactionIdentifierService` / `TransactionIdentifierServiceImpl` to use the new SPI
+  — `getIdentifierSupplier()` now returns `TransactionIdentifierSupplier<?>`
+  — plain `Supplier<?>` instances are auto-wrapped for backward compatibility
+* [x] Update `AbstractSharedSessionContract.getCurrentTransactionIdentifier()` to pass session to supplier
+* [x] Add test with custom revision entity + supplier (`AuditRevisionEntityTest`)
+* [x] Add built-in `RevisionEntitySupplier` — persists revision entity via child `StatelessSession`
+  (uses `statelessWithOptions().connection().open()` to avoid polluting user's persistence context)
+* [x] Add `RevisionListener` callback interface in `org.hibernate.audit`
+* [x] Make transaction ID initialization on-demand (lazy) instead of eager at `afterTransactionBegin()`
+  — prevents empty revisions for transactions that don't modify audited entities
 * [ ] Document migration from envers `@RevisionEntity` / `RevisionListener`
 * [ ] Consider: `EntityTrackingRevisionListener` equivalent (per-entity-change callback)
+
+== Package Structure
+
+New public API types are placed in a dedicated `org.hibernate.audit` package, keeping
+audit concerns clearly separated from the existing `org.hibernate.temporal` SPI layer.
+
+[cols="2,3"]
+|===
+| Package | Contents
+
+| `org.hibernate.audit`
+| Public API: `ModificationType` enum, `AuditLog` service interface, `RevisionEntitySupplier`, `RevisionListener`
+
+| `org.hibernate.temporal.spi`
+| SPI: `TransactionIdentifierSupplier<T>` (replaces plain `Supplier<?>`)
+
+| `org.hibernate.temporal.internal`
+| Internal: `TransactionIdentifierServiceImpl` (updated for new SPI)
+|===
+
+NOTE: The `org.hibernate.audit` package currently lives in hibernate-core.
+If advanced audit features later move to a separate module, this package
+provides a clean boundary.
 
 == Proposed Architecture
 
@@ -592,9 +617,8 @@ Goal: Fill the essential gaps that standard `atTransaction` sessions cannot cove
 
 ==== 1.1 Extract `ModificationType` to public API
 
-* [ ] Move `AuditStateManagement.ModificationType` (ADD/MOD/DEL) to a public type
-  (e.g. `org.hibernate.audit.ModificationType` or reuse existing location)
-* [ ] Ensure it maps cleanly to the byte values stored in `REVTYPE` (0=ADD, 1=MOD, 2=DEL)
+* [x] Move `AuditStateManagement.ModificationType` (ADD/MOD/DEL) to `org.hibernate.audit.ModificationType`
+* [x] Ensure it maps cleanly to the byte values stored in `REVTYPE` (0=ADD, 1=MOD, 2=DEL)
 
 ==== 1.2 `AuditLog` interface
 
@@ -628,7 +652,7 @@ public interface AuditLog {
 }
 ----
 
-* [ ] Define `AuditLog` interface
+* [x] Define `AuditLog` interface in `org.hibernate.audit`
 * [ ] Implement using SQL AST queries against audit tables (leverage `AuditMapping` metamodel)
 * [ ] Make obtainable from `SessionFactory` (e.g. `sessionFactory.getAuditLog()` or via `ServiceRegistry`)
 
@@ -713,7 +737,7 @@ public interface AuditLog {
 | Regular `@Entity` with `@Id @GeneratedValue` — user defines structure freely
 
 | `RevisionListener.newRevision(revisionEntity)`
-| `TransactionIdentifierSupplier.getTransactionIdentifier(session)` — persist entity, return ID
+| `org.hibernate.audit.RevisionListener` callback via `RevisionEntitySupplier`
 
 | `EntityTrackingRevisionListener.entityChanged(...)`
 | Separate callback SPI (future) or application-level event listener
@@ -834,24 +858,17 @@ public class RevisionInfo {
 }
 ----
 
-==== Step 2: Implement `TransactionIdentifierSupplier`
+==== Step 2: Implement `RevisionEntitySupplier`
 
 [source,java]
 ----
-public class RevisionInfoSupplier implements TransactionIdentifierSupplier<Integer> {
-    @Override
-    public Integer getTransactionIdentifier(SharedSessionContractImplementor session) {
-        var rev = new RevisionInfo();
-        rev.setTimestamp(System.currentTimeMillis());
-        // rev.setUsername(SecurityContext.getCurrentUser());
-        session.persist(rev);
-        session.flush();
-        return rev.getId();
-    }
-
-    @Override
-    public Class<Integer> getIdentifierType() {
-        return Integer.class;
+public class RevisionInfoSupplier extends RevisionEntitySupplier<Integer> {
+    public RevisionInfoSupplier() {
+        super( RevisionInfo.class, rev -> {
+            var revInfo = (RevisionInfo) rev;
+            revInfo.setTimestamp(System.currentTimeMillis());
+            // revInfo.setUsername(SecurityContext.getCurrentUser());
+        } );
     }
 }
 ----
@@ -930,29 +947,40 @@ audit tables. Migration considerations:
   optimization is lost. The MAX-subquery approach works on all data. Future: consider adding validity
   support to core if performance demands it.
 
-=== Built-in REVINFO Support (Optional Enhancement)
+=== Built-in REVINFO Support
 
-To simplify migration further, consider providing a built-in `TransactionIdentifierSupplier` implementation
-that handles the REVINFO pattern out of the box:
+`RevisionEntitySupplier` is a built-in `TransactionIdentifierSupplier` that handles the REVINFO
+pattern out of the box. It persists a user-defined revision entity using a temporary child
+`StatelessSession` (via `statelessWithOptions().connection().open()`) that shares the parent
+session's JDBC connection and transaction, then returns the generated ID.
+
+Key design decisions:
+
+* **Child `StatelessSession` for persistence**: Avoids polluting the user's persistence context.
+  The child session shares the same JDBC connection/transaction, so the revision entity insert
+  participates in the user's transaction without interfering with the user's `Session`.
+  This mirrors envers' approach of using `sessionWithOptions().connection()` for revision persistence.
+* **On-demand initialization**: Transaction ID generation is lazy — the supplier is only called
+  when `getCurrentTransactionIdentifier()` is first accessed (i.e. when an audited entity is
+  actually modified). This prevents empty revisions for transactions that don't touch audited entities.
+* **`RevisionListener` callback**: An optional callback for populating custom fields (user, timestamp, etc.)
+  on the revision entity, invoked before persistence.
 
 [source,java]
 ----
-/**
- * Built-in supplier that persists a revision entity to a REVINFO-like table,
- * compatible with hibernate-envers schema conventions.
- *
- * Configure via:
- *   hibernate.temporal.transaction_id_supplier=org.hibernate.audit.RevisionEntitySupplier
- *   hibernate.audit.revision_entity_class=com.example.RevisionInfo (optional)
- */
-@Incubating
-public class RevisionEntitySupplier implements TransactionIdentifierSupplier<Integer> {
-    // Auto-detects @Entity mapped to REVINFO table, or uses a default entity
-    // Persists and returns generated ID
+// Subclass approach:
+public class RevisionInfoSupplier extends RevisionEntitySupplier<Integer> {
+    public RevisionInfoSupplier() {
+        super( RevisionInfo.class, rev -> {
+            var revInfo = (RevisionInfo) rev;
+            revInfo.timestamp = Instant.now().toEpochMilli();
+            revInfo.username = SecurityContext.getCurrentUser();
+        } );
+    }
 }
 ----
 
-This would make migration a one-line configuration change for users with standard envers schemas.
+**Status**: [green]#DONE# — see `AuditRevisionEntityTest` for full example.
 
 === Implementation Tasks
 
@@ -961,7 +989,7 @@ This would make migration a one-line configuration change for users with standar
 * [ ] Test FK constraint satisfaction when using `TransactionIdentifierSupplier` with REVINFO entity
 * [ ] Test sequence continuity: new revision numbers continue from where envers left off
 * [ ] Document ValidityAuditStrategy migration path and limitations
-* [ ] Consider: built-in `RevisionEntitySupplier` for zero-effort migration
+* [x] Built-in `RevisionEntitySupplier` for zero-effort migration
 * [ ] Consider: configuration property to specify audit table suffix for envers compatibility
   (case sensitivity: envers default `_AUD` vs core default `_aud`)
 
@@ -1029,9 +1057,6 @@ This would make migration a one-line configuration change for users with standar
 * Should `TransactionIdentifierSupplier.getTransactionIdentifier()` receive a richer context
   (e.g. list of entities being modified in this transaction) to support `EntityTrackingRevisionListener`-like
   functionality?
-* How should the supplier handle the case where `session.flush()` hasn't been called yet?
-  The revision entity needs its generated ID before audit rows are written. Should the framework
-  handle the flush automatically?
 
 === Read-side
 
