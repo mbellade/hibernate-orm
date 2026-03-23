@@ -14,7 +14,7 @@ import org.hibernate.Incubating;
  * {@linkplain org.hibernate.annotations.Audited audited}
  * entities, complementing the transparent point-in-time
  * reads available via
- * {@link org.hibernate.SessionFactory#withOptions()
+ * {@link org.hibernate.SessionBuilder#atTransaction(Object)
  * atTransaction()} sessions.
  * <p>
  * Obtain an instance via
@@ -65,4 +65,32 @@ public interface AuditLog {
 	 * @return {@code true} if the entity is audited
 	 */
 	boolean isAudited(Class<?> entityClass);
+
+	/**
+	 * Find an entity snapshot at a specific transaction.
+	 *
+	 * @param entityClass the audited entity class
+	 * @param id the entity identifier
+	 * @param transactionId the transaction identifier
+	 * @return the entity state at that transaction, or
+	 *         {@code null} if the entity did not exist
+	 *         (e.g. before creation or after deletion)
+	 *
+	 * @param <T> the entity type
+	 */
+	<T> T find(Class<T> entityClass, Object id, Object transactionId);
+
+	/**
+	 * Find all entity snapshots of the given type that
+	 * were modified at a specific transaction.
+	 * <p>
+	 * Deleted entities are excluded from the result.
+	 *
+	 * @param entityClass the audited entity class
+	 * @param transactionId the transaction identifier
+	 * @return the entity snapshots at that transaction
+	 *
+	 * @param <T> the entity type
+	 */
+	<T> List<T> findEntitiesModifiedAt(Class<T> entityClass, Object transactionId);
 }

@@ -46,6 +46,7 @@ import org.hibernate.temporal.spi.TransactionIdentifierSupplier;
  */
 @Incubating
 public class RevisionEntitySupplier<T> implements TransactionIdentifierSupplier<T> {
+	private final Class<T> identifierType;
 	private final Class<?> revisionEntityClass;
 	private final RevisionListener listener;
 
@@ -53,17 +54,23 @@ public class RevisionEntitySupplier<T> implements TransactionIdentifierSupplier<
 	 * Constructor for subclasses that override
 	 * {@link #createRevisionEntity()}.
 	 */
-	protected RevisionEntitySupplier() {
-		this( null, null );
+	protected RevisionEntitySupplier(Class<T> identifierType) {
+		this( identifierType, null, null );
 	}
 
 	/**
 	 * Constructor with explicit revision entity class
 	 * and optional listener.
 	 */
-	public RevisionEntitySupplier(Class<?> revisionEntityClass, RevisionListener listener) {
+	public RevisionEntitySupplier(Class<T> identifierType, Class<?> revisionEntityClass, RevisionListener listener) {
+		this.identifierType = identifierType;
 		this.revisionEntityClass = revisionEntityClass;
 		this.listener = listener;
+	}
+
+	@Override
+	public Class<T> getIdentifierType() {
+		return identifierType;
 	}
 
 	@Override

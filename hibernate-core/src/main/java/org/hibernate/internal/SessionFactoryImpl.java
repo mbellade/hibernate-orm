@@ -945,6 +945,16 @@ public class SessionFactoryImpl implements SessionFactoryImplementor {
 		return status == Status.CLOSED;
 	}
 
+	private transient org.hibernate.audit.AuditLog auditLog;
+
+	@Override
+	public org.hibernate.audit.AuditLog getAuditLog() {
+		if ( auditLog == null ) {
+			auditLog = new org.hibernate.audit.internal.AuditLogImpl( this );
+		}
+		return auditLog;
+	}
+
 	private transient StatisticsImplementor statistics;
 
 	public StatisticsImplementor getStatistics() {

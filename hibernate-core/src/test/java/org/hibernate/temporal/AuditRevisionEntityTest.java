@@ -66,7 +66,7 @@ class AuditRevisionEntityTest {
 	 */
 	public static class RevisionInfoSupplier extends RevisionEntitySupplier<Integer> {
 		public RevisionInfoSupplier() {
-			super( RevisionInfo.class, rev -> {
+			super( Integer.class, RevisionInfo.class, rev -> {
 				final var revInfo = (RevisionInfo) rev;
 				revInfo.timestamp = Instant.now().toEpochMilli();
 				revInfo.username = "test-user";
@@ -138,6 +138,7 @@ class AuditRevisionEntityTest {
 				final var entity = s.find( MyEntity.class, 1L );
 				assertNull( entity );
 			}
+
 		} );
 	}
 }

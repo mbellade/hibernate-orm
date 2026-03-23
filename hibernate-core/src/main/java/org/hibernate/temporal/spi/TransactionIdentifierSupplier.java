@@ -45,4 +45,12 @@ public interface TransactionIdentifierSupplier<T> {
 	 *         generated id of a persisted revision entity
 	 */
 	T getTransactionIdentifier(SharedSessionContractImplementor session);
+
+	/**
+	 * The Java type of the transaction identifiers produced
+	 * by this supplier.
+	 *
+	 * @return the identifier type, never null
+	 */
+	Class<T> getIdentifierType();
 }

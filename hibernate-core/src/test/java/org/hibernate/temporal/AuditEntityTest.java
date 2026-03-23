@@ -17,9 +17,11 @@ import org.hibernate.testing.orm.junit.SessionFactoryScope;
 import org.hibernate.testing.orm.junit.Setting;
 import org.junit.jupiter.api.Test;
 
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.temporal.spi.TransactionIdentifierSupplier;
+
 import java.util.HashSet;
 import java.util.Set;
-import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -32,10 +34,15 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 class AuditEntityTest {
 	private static int currentTxId;
 
-	public static class TxIdSupplier implements Supplier<Integer> {
+	public static class TxIdSupplier implements TransactionIdentifierSupplier<Integer> {
 		@Override
-		public Integer get() {
+		public Integer getTransactionIdentifier(SharedSessionContractImplementor session) {
 			return ++currentTxId;
+		}
+
+		@Override
+		public Class<Integer> getIdentifierType() {
+			return Integer.class;
 		}
 	}
 

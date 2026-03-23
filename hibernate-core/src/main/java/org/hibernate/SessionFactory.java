@@ -401,6 +401,18 @@ public interface SessionFactory extends EntityManagerFactory, Referenceable, Ser
 	Statistics getStatistics();
 
 	/**
+	 * Obtain the {@link org.hibernate.audit.AuditLog} for querying
+	 * audit metadata of {@linkplain org.hibernate.annotations.Audited
+	 * audited} entities.
+	 *
+	 * @return The audit log service.
+	 *
+	 * @since envers-rewrite
+	 */
+	@Incubating
+	org.hibernate.audit.AuditLog getAuditLog();
+
+	/**
 	 * A {@link SchemaManager} with the same default catalog and schema as
 	 * pooled connections belonging to this factory. Intended mostly as a
 	 * convenience for writing tests.

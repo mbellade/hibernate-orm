@@ -23,13 +23,15 @@ import org.hibernate.testing.orm.junit.SessionFactoryScope;
 import org.hibernate.testing.orm.junit.Setting;
 import org.junit.jupiter.api.Test;
 
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.temporal.spi.TransactionIdentifierSupplier;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -46,10 +48,15 @@ class TemporalEntityTxIdTest {
 
 	private static int currentTxId;
 
-	public static class TxIdSupplier implements Supplier<Integer> {
+	public static class TxIdSupplier implements TransactionIdentifierSupplier<Integer> {
 		@Override
-		public Integer get() {
+		public Integer getTransactionIdentifier(SharedSessionContractImplementor session) {
 			return ++currentTxId;
+		}
+
+		@Override
+		public Class<Integer> getIdentifierType() {
+			return Integer.class;
 		}
 	}
 

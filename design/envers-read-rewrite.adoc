@@ -628,33 +628,29 @@ New interface in hibernate-core, obtainable from `SessionFactory`:
 ----
 @Incubating
 public interface AuditLog {
-    /**
-     * List all transaction IDs where this entity was modified,
-     * ordered chronologically.
-     */
-    <T> List<Object> getRevisions(Class<T> entityClass, Object id);
+    // --- metadata queries (SQL AST against audit tables) ---
 
-    /**
-     * Get the modification type (ADD/MOD/DEL) for an entity
-     * at a specific transaction.
-     */
+    List<Object> getRevisions(Class<?> entityClass, Object id);
     ModificationType getModificationType(Class<?> entityClass, Object id, Object transactionId);
-
-    /**
-     * Get all entity IDs of the given type modified in a given transaction.
-     */
-    <T> List<Object> getEntitiesModifiedAt(Class<T> entityClass, Object transactionId);
-
-    /**
-     * Check if an entity type is audited.
-     */
+    List<Object> getEntitiesModifiedAt(Class<?> entityClass, Object transactionId);
     boolean isAudited(Class<?> entityClass);
+
+    // --- convenience methods (combine metadata + atTransaction reads) ---
+
+    <T> T find(Class<T> entityClass, Object id, Object transactionId);
+    <T> List<T> findEntitiesModifiedAt(Class<T> entityClass, Object transactionId);
 }
 ----
 
 * [x] Define `AuditLog` interface in `org.hibernate.audit`
-* [ ] Implement using SQL AST queries against audit tables (leverage `AuditMapping` metamodel)
-* [ ] Make obtainable from `SessionFactory` (e.g. `sessionFactory.getAuditLog()` or via `ServiceRegistry`)
+* [x] Implement using SQL AST queries against audit tables (leverage `AuditMapping` metamodel)
+* [x] Make obtainable from `SessionFactory` (`sessionFactory.getAuditLog()`)
+* [x] Add convenience methods `find()` and `findEntitiesModifiedAt()` combining metadata with `atTransaction` reads
+
+NOTE: The `AuditLog` API provides both thin metadata queries (revision lists, modification
+types, entity IDs) and convenience methods that combine them with `atTransaction` sessions
+for full entity snapshot reads. Users can also use the metadata methods directly with
+`atTransaction` sessions for more control (e.g. custom HQL queries at a revision).
 
 ==== 1.3 RevisionType exposure during reads
 
