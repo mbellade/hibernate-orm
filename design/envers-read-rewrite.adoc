@@ -1,0 +1,1051 @@
+= Envers Rewrite Plan
+:toc:
+:toclevels: 3
+
+== Overview
+
+The `hibernate-envers` module currently relies on hbm.xml-contributed runtime mapping objects to add audit entity
+mappings to the SessionFactory, and provides a dedicated read API (`AuditReader`, `AuditQuery`) on top of those
+mappings.
+
+Hibernate Core 7.4 introduced `@org.hibernate.annotations.Audited`, which integrates audit trail persistence directly
+into mutation coordinators and provides transparent read access via `atTransaction(txId)` sessions.
+The write side is functional (though not yet feature-complete). This document plans the path forward for both
+**write-side** completeness and the **read side** — migrating envers capabilities to hibernate-core.
+
+We do **not** need to re-implement identical APIs. The goal is to provide equivalent functionality with a clear
+migration path, leveraging the simpler `atTransaction` session paradigm wherever possible.
+
+== Current State
+
+=== hibernate-core `@Audited` (since 7.4, @Incubating)
+
+Write::
+Fully integrated into mutation coordinators.
+INSERT/UPDATE/DELETE automatically create audit rows in `*_aud` tables with:
+- Transaction ID column (`REV`, configurable) — application-supplied via `TransactionIdentifierService`
+- Modification type column (`REVTYPE`, configurable) — 0=ADD, 1=MOD, 2=DEL
+
+Read::
+Open a session with `sessionFactory.withOptions().atTransaction(txId).open()`, then use **standard Hibernate APIs**:
+`session.find()`, HQL, criteria. Audit table filtering is applied transparently via `AuditMappingImpl.applyPredicate()`
+which builds a subquery to find `MAX(REV)` from the audit table where `REV \<= suppliedTxId` and `REVTYPE != 2` (DEL).
+
+Key differences from envers::
+- No separate "audit entity" mappings — same entity class, transparently reads from audit table
+- No revision entity (REVINFO) — transaction IDs are opaque, application-supplied (any comparable type)
+- No custom query DSL — everything goes through the normal session
+- Attribute exclusion via `@Audited.Excluded` (equivalent to `@NotAudited`)
+
+Key files::
+- `org.hibernate.annotations.Audited` — annotation
+- `org.hibernate.metamodel.mapping.AuditMapping` — metamodel interface
+- `org.hibernate.metamodel.mapping.internal.AuditMappingImpl` — predicate application for reads
+- `org.hibernate.persister.state.internal.AuditStateManagement` — write-side coordinators
+- `org.hibernate.boot.model.internal.AuditHelper` — boot-time table creation
+- `org.hibernate.engine.creation.CommonBuilder#atTransaction(Object)` — session builder method
+- `org.hibernate.temporal.AuditEntityTest` — test demonstrating current capabilities
+
+=== hibernate-envers (existing)
+
+Write::
+Event listeners (`EnversPostInsertEventListenerImpl`, etc.) capture DML operations, create work units
+(`AddWorkUnit`, `ModWorkUnit`, `DelWorkUnit`), and queue them via `AuditProcess` for insertion at transaction
+commit. Audit entity mappings are contributed via `AdditionalMappingContributorImpl` using hbm.xml JAXB generation.
+
+Read::
+Dedicated API surface:
+- `AuditReaderFactory.get(session/em)` → `AuditReader`
+- `AuditReader.find(Class, id, revision)` — point-in-time entity retrieval
+- `AuditReader.getRevisions(Class, id)` — revision history
+- `AuditReader.getRevisionDate(revision)` / `getRevisionNumberForDate(date)` — revision ↔ time mapping
+- `AuditReader.createQuery()` → `AuditQueryCreator` → `AuditQuery` — rich query DSL
+- `AuditEntity` — static factory for criteria/projections (`property()`, `revisionNumber()`, `revisionType()`, etc.)
+- `CrossTypeRevisionChangesReader` — query all entity types changed in a revision
+
+Key envers read patterns from tests::
+- `forEntitiesAtRevision(Class, rev)` — bulk entity state at a revision (with filters, ordering, pagination)
+- `forRevisionsOfEntity(Class, selectEntitiesOnly, selectDeleted)` — full revision history with snapshots
+- `forEntitiesModifiedAtRevision(Class, rev)` — only entities changed IN that revision
+- `AuditEntity.property("field").hasChanged()` / `hasNotChanged()` — modified flag queries
+- `AuditEntity.relatedId("relation").eq(id)` — relationship-based filters
+- Aggregate projections (`max()`, `min()`, `count()`, `function()`)
+- Association traversal (`traverseRelation()`)
+
+== Philosophical Difference
+
+[cols="1,2,2"]
+|===
+| | Envers | Core `@Audited`
+
+| Read paradigm | Dedicated audit-specific API | Standard session APIs with temporal context
+| Query model | Custom DSL (AuditQuery/AuditEntity) | HQL/Criteria/find() — same as regular entities
+| Entity identity | Separate "audit entity" mappings (hbm.xml) | Same entity class, reads from audit table transparently
+| Revision model | First-class RevisionEntity with auto-increment | Opaque transaction ID (app-supplied)
+|===
+
+The core approach is fundamentally simpler: **"open a session at a point in time, use normal Hibernate."**
+This eliminates the need for most of the envers query DSL, since HQL already provides filtering, ordering,
+projections, joins, and aggregations.
+
+== Gap Analysis
+
+=== Tier 1 — Essential (must-have for migration)
+
+[cols="1,3,2,3,1"]
+|===
+| # | Envers Capability | Core Status | Migration Path | Status
+
+| 1
+| Point-in-time entity read (`find(Class, id, revision)`)
+| Done
+| `atTransaction(txId)` + `session.find()`
+| [green]#DONE#
+
+| 2
+| Point-in-time queries (HQL/criteria at a revision)
+| Done
+| HQL works transparently in `atTransaction` session
+| [green]#DONE#
+
+| 3
+| Deletion awareness (entity was deleted at revision N)
+| Done
+| `find()` returns `null` for deleted entities
+| [green]#DONE#
+
+| 4
+| Collection auditing
+| Done
+| `@Audited` on `@ElementCollection` works
+| [green]#DONE#
+
+| 5
+| Revision history for entity (`getRevisions(Class, id)`)
+| Missing
+| New API: query audit table for distinct TX IDs where entity key matches
+| [red]#TODO#
+
+| 6
+| Revision-to-timestamp mapping (`getRevisionDate()`, `getRevisionNumberForDate()`)
+| Missing
+| With `TransactionIdentifierSupplier`, timestamps live in user's revision entity — queryable via HQL.
+  When TX IDs are `Instant`-based, mapping is trivial.
+| [yellow]#DEFERRED# — application concern with supplier
+
+| 7
+| RevisionType access (was change ADD/MOD/DEL?)
+| Missing at read time
+| `REVTYPE` column exists but isn't exposed to readers. Need API to surface modification type.
+| [red]#TODO#
+
+| 8
+| Attribute exclusion (`@NotAudited` equivalent)
+| Done
+| `@Audited.Excluded`
+| [green]#DONE#
+|===
+
+=== Tier 2 — Important (needed for feature parity, can be phased)
+
+[cols="1,3,3,1"]
+|===
+| # | Envers Capability | Migration Path | Status
+
+| 9
+| `forEntitiesAtRevision` — bulk query all entities of type at revision
+| Already works: HQL in `atTransaction` session (`from Foo`)
+| [green]#DONE#
+
+| 10
+| `forEntitiesModifiedAtRevision` — entities changed IN a specific revision (exact match, not point-in-time)
+| Requires new query: `SELECT ... FROM foo_aud WHERE REV = :txId`
+| [red]#TODO#
+
+| 11
+| `forRevisionsOfEntity` — full revision history with entity snapshots
+| Combine #5 (revision list) + `atTransaction` reads for each; or direct audit table query
+| [red]#TODO#
+
+| 12
+| Modified property tracking (`withModifiedFlag`, `hasChanged()`)
+| Not in core. Would require `_MOD` columns. Can defer — `diff()` alternative.
+| [yellow]#DEFERRED#
+
+| 13
+| Cross-type revision queries (`CrossTypeRevisionChangesReader`)
+| Query multiple audit tables for given TX ID. Utility service.
+| [red]#TODO#
+
+| 14
+| Relation traversal in audit queries (`traverseRelation()`)
+| Already works — HQL joins in `atTransaction` session
+| [green]#DONE#
+
+| 15
+| Custom revision entity (user, comments, etc. per revision)
+| `TransactionIdentifierSupplier` — persist revision entity in supplier, return generated ID
+| [red]#TODO# — see <<Custom Revision Entity Support>>
+|===
+
+=== Tier 3 — Nice-to-have (advanced, lower priority)
+
+[cols="1,3,3,1"]
+|===
+| # | Envers Capability | Migration Path | Status
+
+| 16
+| Aggregate audit queries (MAX, MIN, COUNT)
+| HQL aggregations in `atTransaction` session
+| [green]#DONE#
+
+| 17
+| `find()` by Date/LocalDateTime/Instant
+| `asOf(Instant)` exists on `SessionBuilder`. Date→revision mapping is application concern.
+| [green]#DONE#
+
+| 18
+| Audit configuration inspection (`isEntityClassAudited()`)
+| Expose via metamodel: `entityPersister.getAuditMapping() != null`
+| [red]#TODO#
+
+| 19
+| First-level cache for audit reads
+| Standard session cache handles this for `atTransaction` sessions
+| [green]#DONE#
+
+| 20
+| `RelationTargetAuditMode.NOT_AUDITED` (mixed audited/non-audited relations)
+| Needs investigation
+| [yellow]#TODO# — investigate
+|===
+
+== Write-Side Gap Analysis
+
+The core `@Audited` write infrastructure handles the basic audit trail (INSERT/UPDATE/DELETE → audit row with
+TX ID + modification type), but envers has many additional write-side features that need consideration.
+
+=== Custom Revision Entity
+
+Envers provides a first-class revision entity model:
+
+- `@RevisionEntity` marks a custom entity as the revision tracker
+- `@RevisionNumber` / `@RevisionTimestamp` mark its fields
+- `RevisionListener.newRevision(revisionEntity)` callback lets users populate custom fields (user, comment, etc.)
+- `EntityTrackingRevisionListener.entityChanged(...)` notifies per-entity change
+- The revision entity is persisted automatically; its generated ID becomes the `REV` value in all audit rows
+- Built-in defaults: `DefaultRevisionEntity`, `SequenceIdRevisionEntity`, tracking variants with `@ModifiedEntityNames`
+
+Core currently has `TransactionIdentifierService` with a plain `Supplier<?>` — no session access, no persistence.
+
+**Proposed approach**: Enhance `TransactionIdentifierService` to support session-aware revision entity creation.
+See <<Custom Revision Entity Support>> section below.
+
+=== Write-Side Feature Inventory
+
+[cols="1,3,2,1"]
+|===
+| # | Envers Feature | Core Status | Priority
+
+| W1
+| Basic audit trail (INSERT/UPDATE/DELETE → audit row)
+| [green]#DONE# — mutation coordinators handle this
+| —
+
+| W2
+| Transaction ID column (`REV`)
+| [green]#DONE# — configurable via `@Audited.transactionId()`
+| —
+
+| W3
+| Modification type column (`REVTYPE`, 0/1/2)
+| [green]#DONE# — configurable via `@Audited.modificationType()`
+| —
+
+| W4
+| Attribute exclusion (`@NotAudited`)
+| [green]#DONE# — `@Audited.Excluded`
+| —
+
+| W5
+| Element collection auditing
+| [green]#DONE# — `@Audited` on `@ElementCollection`
+| —
+
+| W6
+| Custom revision entity with auto-persist
+| [red]#TODO# — current `Supplier<?>` has no session access
+| High
+
+| W7
+| Revision listener callbacks (`RevisionListener`, `EntityTrackingRevisionListener`)
+| [red]#TODO# — no callback mechanism in core
+| High
+
+| W8
+| `@AuditTable` — custom audit table naming
+| [green]#DONE# — `@Audited.tableName()`
+| —
+
+| W9
+| `@AuditTable` schema/catalog override
+| [red]#TODO# — `@Audited` has no schema/catalog attributes
+| Low
+
+| W10
+| Audit strategy: ValidityAuditStrategy (start/end revision intervals)
+| [red]#TODO# — core uses DefaultAuditStrategy-like approach (MAX subquery)
+| Medium
+
+| W11
+| Modified property flags (`withModifiedFlag`, `_MOD` columns)
+| [red]#TODO# — not in core
+| Low (defer)
+
+| W12
+| `@AuditOverride` / `@AuditOverrides` for inherited properties
+| [red]#TODO# — investigate need
+| Medium
+
+| W13
+| `DO_NOT_AUDIT_OPTIMISTIC_LOCKING_FIELD` (skip `@Version`)
+| [yellow]#TODO# — investigate current behavior
+| Low
+
+| W14
+| `STORE_DATA_AT_DELETE` (preserve entity state on deletion)
+| [yellow]#TODO# — core stores full state on DEL, need to verify
+| Low
+
+| W15
+| `REVISION_ON_COLLECTION_CHANGE` (audit non-owned collection changes)
+| [yellow]#TODO# — investigate current behavior
+| Medium
+
+| W16
+| ManyToOne / OneToOne relationship auditing
+| [yellow]#TODO# — investigate current support
+| High
+
+| W17
+| ManyToMany / OneToMany owned relationship auditing (join tables)
+| [yellow]#TODO# — investigate current support
+| High
+
+| W18
+| `@AuditJoinTable` / `@AuditMappedBy` (join table customization)
+| [red]#TODO#
+| Low
+
+| W19
+| Embeddable/component auditing
+| [yellow]#TODO# — investigate current support
+| High
+
+| W20
+| Entity inheritance (single-table, joined, table-per-class)
+| [yellow]#TODO# — investigate current support
+| High
+
+| W21
+| `RelationTargetAuditMode.NOT_AUDITED` (audit FK but not target entity)
+| [red]#TODO#
+| Medium
+
+| W22
+| `@SecondaryAuditTable` (audit for `@SecondaryTable`)
+| [red]#TODO#
+| Low
+
+| W23
+| `@CollectionAuditTable` (custom collection audit table name)
+| [red]#TODO#
+| Low
+
+| W24
+| Modified column naming strategies
+| [red]#TODO# — only relevant if W11 is implemented
+| Low
+
+| W25
+| Collection type support (bags, sets, lists, maps, sorted variants)
+| [yellow]#TODO# — investigate beyond `@ElementCollection`
+| High
+|===
+
+NOTE: Items marked [yellow]#TODO# — investigate need verification of what the core `@Audited` already handles.
+Several of these may already work and just need test coverage.
+
+== Custom Revision Entity Support
+
+=== Problem
+
+Envers users define custom revision entities to store per-transaction metadata:
+
+[source,java]
+----
+@RevisionEntity(MyRevisionListener.class)
+@Entity
+public class MyRevision {
+    @RevisionNumber @Id @GeneratedValue
+    private int id;
+
+    @RevisionTimestamp
+    private Instant timestamp;
+
+    private String username;
+    private String comment;
+}
+
+public class MyRevisionListener implements RevisionListener {
+    @Override
+    public void newRevision(Object revisionEntity) {
+        MyRevision rev = (MyRevision) revisionEntity;
+        rev.setUsername(SecurityContext.getCurrentUser());
+        rev.setComment(AuditContext.getComment());
+    }
+}
+----
+
+The revision entity is:
+
+1. Instantiated and populated (via `RevisionListener`) once per transaction
+2. Persisted to the database (generating an ID)
+3. Its generated ID used as the `REV` value in all audit rows for that transaction
+
+=== Current Core Limitation
+
+`TransactionIdentifierService` provides a `Supplier<?>` that returns an opaque ID.
+It has **no access to a Session** — it cannot persist anything:
+
+[source,java]
+----
+public interface TransactionIdentifierService extends Service {
+    Class<?> getIdentifierType();
+    Supplier<?> getIdentifierSupplier();
+    // ...
+}
+----
+
+=== Proposed Solution
+
+Enhance `TransactionIdentifierService` to support a session-aware supplier that can persist a revision entity
+and return its generated identifier. Two approaches:
+
+==== Option A: Richer supplier contract (recommended)
+
+Introduce a new SPI that receives the session, allowing it to persist a revision entity:
+
+[source,java]
+----
+/**
+ * A session-aware supplier of transaction identifiers.
+ * Implementations may persist a revision entity and return its generated ID.
+ */
+@Incubating
+public interface TransactionIdentifierSupplier<T> {
+    /**
+     * Called once per transaction to obtain the transaction identifier.
+     * The implementation may persist a revision entity using the provided session.
+     *
+     * @param session the current session (can be used to persist entities)
+     * @return the transaction identifier (e.g. the generated ID of a revision entity)
+     */
+    T getTransactionIdentifier(SharedSessionContractImplementor session);
+
+    /**
+     * The Java type of transaction identifiers produced by this supplier.
+     */
+    Class<T> getIdentifierType();
+}
+----
+
+The `TransactionIdentifierService` would detect whether the configured supplier implements
+`TransactionIdentifierSupplier` (session-aware) or plain `Supplier` (stateless), and dispatch accordingly.
+
+Usage example:
+
+[source,java]
+----
+@Entity
+public class RevisionInfo {
+    @Id @GeneratedValue
+    private Long id;
+    private Instant timestamp;
+    private String username;
+    // getters/setters
+}
+
+public class RevisionInfoSupplier implements TransactionIdentifierSupplier<Long> {
+    @Override
+    public Long getTransactionIdentifier(SharedSessionContractImplementor session) {
+        var rev = new RevisionInfo();
+        rev.setTimestamp(Instant.now());
+        rev.setUsername(SecurityContext.getCurrentUser());
+        session.persist(rev);
+        session.flush(); // ensure ID is generated
+        return rev.getId();
+    }
+
+    @Override
+    public Class<Long> getIdentifierType() {
+        return Long.class;
+    }
+}
+----
+
+Configuration:
+[source,properties]
+----
+hibernate.temporal.transaction_id_supplier=com.example.RevisionInfoSupplier
+----
+
+==== Option B: Callback-based (RevisionListener-like)
+
+Keep `Supplier<?>` but add a callback interface similar to envers' `RevisionListener`:
+
+[source,java]
+----
+@Incubating
+public interface AuditTransactionListener {
+    /**
+     * Called once per transaction before audit rows are written.
+     * Can persist revision metadata using the provided session.
+     */
+    void onAuditTransaction(SharedSessionContractImplementor session, Object transactionId);
+}
+----
+
+This separates ID generation from revision entity persistence but adds complexity.
+
+==== Recommendation
+
+**Option A** is cleaner — a single extension point that handles both ID generation and revision entity
+persistence in one call. It maps directly to the envers `RevisionInfoGenerator` pattern and provides
+a straightforward migration path:
+
+[cols="2,3"]
+|===
+| Envers | Core
+
+| `@RevisionEntity` + `@RevisionNumber` + `@RevisionTimestamp`
+| Regular `@Entity` — user defines structure freely
+
+| `RevisionListener.newRevision(revisionEntity)`
+| Logic inside `TransactionIdentifierSupplier.getTransactionIdentifier(session)`
+
+| `EntityTrackingRevisionListener.entityChanged(...)`
+| Can be covered by a separate callback or event listener (Phase 2)
+
+| Automatic revision entity persistence
+| User calls `session.persist(revisionEntity)` in the supplier
+
+| Revision number = generated ID
+| Return value of `getTransactionIdentifier()` = transaction ID used in audit rows
+|===
+
+=== Implementation Tasks
+
+* [ ] Define `TransactionIdentifierSupplier<T>` SPI in `org.hibernate.temporal.spi`
+* [ ] Update `TransactionIdentifierService` / `TransactionIdentifierServiceImpl` to detect and use the new SPI
+* [ ] Update `AbstractSharedSessionContract.getCurrentTransactionIdentifier()` to pass session to supplier
+* [ ] Add test with custom revision entity + supplier
+* [ ] Document migration from envers `@RevisionEntity` / `RevisionListener`
+* [ ] Consider: `EntityTrackingRevisionListener` equivalent (per-entity-change callback)
+
+== Proposed Architecture
+
+Instead of replicating the envers API, we introduce a **thin audit-aware service** that fills the gaps while
+leveraging the existing `atTransaction` session mechanism for actual data reads.
+
+----
+┌───────────────────────────────────────────────────┐
+│                    User Code                      │
+├─────────────┬─────────────────────────────────────┤
+│             │                                     │
+│  AuditLog (NEW)             Standard Session      │
+│  ┌───────────────────┐   ┌────────────────────┐   │
+│  │ getRevisions()    │   │ atTransaction(id)  │   │
+│  │ getChangeType()   │   │   .find()          │   │
+│  │ getChangesAt()    │   │   .createQuery()   │   │
+│  │ diff()            │   │   HQL / Criteria   │   │
+│  └───────────────────┘   └────────────────────┘   │
+│          │                       │                 │
+│          ▼                       ▼                 │
+│  ┌─────────────────────────────────────────────┐   │
+│  │        AuditMapping / AuxiliaryMapping       │   │
+│  │        (existing metamodel layer)            │   │
+│  └─────────────────────────────────────────────┘   │
+│                       │                            │
+│                       ▼                            │
+│  ┌─────────────────────────────────────────────┐   │
+│  │             Audit Tables (*_aud)             │   │
+│  └─────────────────────────────────────────────┘   │
+└───────────────────────────────────────────────────┘
+----
+
+== Implementation Plan
+
+=== Phase 1: Audit Metadata Access (Tier 1 gaps)
+
+Goal: Fill the essential gaps that standard `atTransaction` sessions cannot cover.
+
+==== 1.1 Extract `ModificationType` to public API
+
+* [ ] Move `AuditStateManagement.ModificationType` (ADD/MOD/DEL) to a public type
+  (e.g. `org.hibernate.audit.ModificationType` or reuse existing location)
+* [ ] Ensure it maps cleanly to the byte values stored in `REVTYPE` (0=ADD, 1=MOD, 2=DEL)
+
+==== 1.2 `AuditLog` interface
+
+New interface in hibernate-core, obtainable from `SessionFactory`:
+
+[source,java]
+----
+@Incubating
+public interface AuditLog {
+    /**
+     * List all transaction IDs where this entity was modified,
+     * ordered chronologically.
+     */
+    <T> List<Object> getRevisions(Class<T> entityClass, Object id);
+
+    /**
+     * Get the modification type (ADD/MOD/DEL) for an entity
+     * at a specific transaction.
+     */
+    ModificationType getModificationType(Class<?> entityClass, Object id, Object transactionId);
+
+    /**
+     * Get all entity IDs of the given type modified in a given transaction.
+     */
+    <T> List<Object> getEntitiesModifiedAt(Class<T> entityClass, Object transactionId);
+
+    /**
+     * Check if an entity type is audited.
+     */
+    boolean isAudited(Class<?> entityClass);
+}
+----
+
+* [ ] Define `AuditLog` interface
+* [ ] Implement using SQL AST queries against audit tables (leverage `AuditMapping` metamodel)
+* [ ] Make obtainable from `SessionFactory` (e.g. `sessionFactory.getAuditLog()` or via `ServiceRegistry`)
+
+==== 1.3 RevisionType exposure during reads
+
+* [ ] Investigate whether `REVTYPE` can be surfaced when reading via `atTransaction` sessions
+* [ ] Consider: should a deleted entity be loadable (returning the pre-deletion state + DEL type)?
+  Currently `find()` returns null for deleted entities — this is correct for "current state at revision"
+  but users may want to know "what was the entity before deletion"
+
+=== Phase 2: Enhanced Read Capabilities (Tier 2)
+
+==== 2.1 Revision history with snapshots
+
+* [ ] `AuditLog.getRevisions()` returns TX IDs
+* [ ] User opens `atTransaction` sessions to read each snapshot
+* [ ] Consider convenience: `List<AuditEntry<T>>` returning entity + modification type + TX ID
+
+==== 2.2 "Modified at" queries
+
+* [ ] Entities changed IN a specific transaction (exact `REV = :txId` match)
+* [ ] vs. current behavior: effective at a transaction (`REV \<= :txId` with MAX subquery)
+* [ ] Could be an `AuditLog` method or a mode on the session builder
+
+==== 2.3 Diff support
+
+* [ ] Compare entity state between two transaction IDs
+* [ ] Return which properties changed
+* [ ] Leverage metamodel attribute iteration for property comparison
+
+==== 2.4 Cross-type queries
+
+* [ ] `AuditLog.getEntityTypesModifiedAt(Object transactionId)` — which entity types changed
+* [ ] Query multiple `*_aud` tables for a given TX ID
+
+=== Phase 3: Migration Bridge (optional)
+
+==== 3.1 Envers compatibility adapter
+
+* [ ] Implement `AuditReader`-like API on top of `AuditLog` + `atTransaction`
+* [ ] Map `AuditEntity.property().eq()` criteria to HQL predicates
+* [ ] Provide migration path for users with heavy envers query usage
+* [ ] Can live in a slimmed-down `hibernate-envers` module or a new `hibernate-envers-compat` module
+
+== Migration Guide (envers → core)
+
+[cols="2,3"]
+|===
+| Envers Pattern | Core Replacement
+
+| `AuditReaderFactory.get(em)`
+| `sf.withOptions().atTransaction(txId)` or `sf.getAuditLog()`
+
+| `reader.find(Foo.class, id, rev)`
+| `session.find(Foo.class, id)` (in `atTransaction` session)
+
+| `reader.getRevisions(Foo.class, id)`
+| `auditLog.getRevisions(Foo.class, id)`
+
+| `createQuery().forEntitiesAtRevision(Foo.class, rev).add(...).getResultList()`
+| HQL in `atTransaction` session: `from Foo where ...`
+
+| `createQuery().forRevisionsOfEntity(...)`
+| `auditLog.getRevisions()` + loop `atTransaction` sessions
+
+| `AuditEntity.property("name").eq("x")`
+| HQL: `where name = :name`
+
+| `AuditEntity.revisionNumber().between(1,5)`
+| `auditLog.getRevisions()` filtered
+
+| `AuditEntity.revisionType().eq(ADD)`
+| `auditLog.getModificationType()`
+
+| `@org.hibernate.envers.Audited`
+| `@org.hibernate.annotations.Audited`
+
+| `@NotAudited`
+| `@Audited.Excluded`
+
+| `@RevisionEntity` + `@RevisionNumber` + `@RevisionTimestamp`
+| Regular `@Entity` with `@Id @GeneratedValue` — user defines structure freely
+
+| `RevisionListener.newRevision(revisionEntity)`
+| `TransactionIdentifierSupplier.getTransactionIdentifier(session)` — persist entity, return ID
+
+| `EntityTrackingRevisionListener.entityChanged(...)`
+| Separate callback SPI (future) or application-level event listener
+
+| `traverseRelation("rel", INNER)`
+| HQL: `join fetch e.rel r where ...`
+
+| Existing `REVINFO` table
+| Map as regular `@Entity` + `TransactionIdentifierSupplier` — no schema changes
+
+| Existing `*_AUD` tables with FK to REVINFO
+| Work as-is — core reads by column values, FK is transparent
+
+| `ValidityAuditStrategy` (`REVEND` / `REVEND_TSTMP` columns)
+| Extra columns ignored by core reads — see <<Schema Compatibility & Migration from Envers>>
+|===
+
+== Schema Compatibility & Migration from Envers
+
+A critical requirement: existing envers users must be able to migrate to core `@Audited` **without changing
+their existing database schema**. Audit data is typically append-only and can span years — schema migration
+is impractical or impossible for many users.
+
+=== Schema Comparison
+
+[cols="1,2,2,1"]
+|===
+| Aspect | Envers Schema | Core `@Audited` Schema | Compatible?
+
+| Audit table name
+| `{prefix}{entity}{suffix}` (default `Foo_AUD`)
+| `{entity}_aud` (configurable via `@Audited.tableName()`)
+| Yes — configure to match
+
+| Audit table columns
+| Entity columns + `REV` + `REVTYPE` + (optionally `REVEND`, `REVEND_TSTMP`)
+| Entity columns + `REV` + `REVTYPE`
+| Yes — extra envers columns are harmless
+
+| `REV` column type
+| `INTEGER` (always)
+| Determined by `TransactionIdentifierService.getIdentifierType()`
+| Yes — configure supplier to return `Integer`
+
+| `REVTYPE` column type
+| `TINYINT` (byte: 0/1/2)
+| `BYTE` (0/1/2)
+| Yes — same encoding
+
+| Column names
+| `REV`, `REVTYPE` (configurable via `EnversSettings`)
+| `REV`, `REVTYPE` (configurable via `@Audited`)
+| Yes — defaults match
+
+| Primary key
+| Composite PK: `(entity_id, REV)`
+| No PK defined on audit table
+| Yes — existing PK is harmless, core reads work regardless
+
+| FK to REVINFO
+| `REV` → `REVINFO.REV` (always present)
+| No FK
+| Yes — existing FK is harmless if REVINFO rows exist
+
+| REVINFO table
+| Created automatically (`REV` INT PK, `REVTSTMP` TIMESTAMP)
+| Not created — no concept of revision entity
+| *Gap* — must ensure REVINFO rows continue to be created
+
+| `originalId` mapping
+| Entity ID wrapped in `originalId` composite-id component
+| Entity ID columns copied directly
+| Yes — underlying columns are identical
+
+| ValidityAuditStrategy
+| `REVEND` + optional `REVEND_TSTMP` columns
+| Not supported
+| Yes — extra columns ignored by core reads
+|===
+
+=== Key Insight: Schema Is Already Compatible
+
+The good news: **core's audit table schema is a subset of envers' schema**. The defaults already match
+(`REV`, `REVTYPE`, `_aud` suffix). The only real gap is the `REVINFO` table — envers creates it
+automatically and FKs point to it, while core has no concept of it.
+
+This gap is bridged by the `TransactionIdentifierSupplier` proposal: if the user maps their existing
+`REVINFO` table as a regular `@Entity` and implements a supplier that persists to it, everything works:
+
+1. The supplier persists a `RevisionInfo` entity → row written to `REVINFO` table
+2. The generated ID is returned as the transaction identifier
+3. Core writes this ID into the `REV` column of audit tables
+4. The existing FK constraint (`*_AUD.REV` → `REVINFO.REV`) is satisfied
+5. Core's `AuditMappingImpl.applyPredicate()` reads audit rows by `REV` value — works regardless of FK
+
+=== Migration Recipe: Envers → Core with Existing Schema
+
+==== Step 1: Map the existing REVINFO table
+
+[source,java]
+----
+// Map the EXISTING REVINFO table — no schema changes needed
+@Entity
+@Table(name = "REVINFO")
+public class RevisionInfo {
+    @Id
+    @GeneratedValue  // matches envers' generator strategy
+    @Column(name = "REV")
+    private int id;
+
+    @Column(name = "REVTSTMP")
+    private long timestamp;
+
+    // Add any custom fields that were in the user's @RevisionEntity
+    // private String username;
+
+    // getters/setters
+}
+----
+
+==== Step 2: Implement `TransactionIdentifierSupplier`
+
+[source,java]
+----
+public class RevisionInfoSupplier implements TransactionIdentifierSupplier<Integer> {
+    @Override
+    public Integer getTransactionIdentifier(SharedSessionContractImplementor session) {
+        var rev = new RevisionInfo();
+        rev.setTimestamp(System.currentTimeMillis());
+        // rev.setUsername(SecurityContext.getCurrentUser());
+        session.persist(rev);
+        session.flush();
+        return rev.getId();
+    }
+
+    @Override
+    public Class<Integer> getIdentifierType() {
+        return Integer.class;
+    }
+}
+----
+
+==== Step 3: Replace envers annotations
+
+[source,java]
+----
+// Before (envers):
+@org.hibernate.envers.Audited
+@Entity
+public class Customer { ... }
+
+// After (core):
+@org.hibernate.annotations.Audited
+@Entity
+public class Customer { ... }
+----
+
+==== Step 4: Configure the supplier
+
+[source,properties]
+----
+# Remove envers integration
+# hibernate.integration.envers.enabled=true  ← remove
+
+# Configure core audit supplier
+hibernate.temporal.transaction_id_supplier=com.example.RevisionInfoSupplier
+----
+
+==== Step 5: Read historical data
+
+[source,java]
+----
+// Before (envers):
+AuditReader reader = AuditReaderFactory.get(entityManager);
+Customer c = reader.find(Customer.class, customerId, revisionNumber);
+
+// After (core) — same revision numbers work because same REVINFO table:
+try (var s = sf.withOptions().atTransaction(revisionNumber).open()) {
+    Customer c = s.find(Customer.class, customerId);
+}
+----
+
+=== Schema Compatibility Constraints
+
+For the migration to work seamlessly, these constraints must hold:
+
+1. **`REV` column type must match**: If envers used `INTEGER`, the supplier must return `Integer`.
+   The `TransactionIdentifierService` must be configured with matching type.
+
+2. **Column names must match**: Core defaults (`REV`, `REVTYPE`) already match envers defaults.
+   If envers was configured with custom names (via `EnversSettings`), use `@Audited(transactionId=..., modificationType=...)`.
+
+3. **Audit table names must match**: If envers used custom prefix/suffix, use `@Audited(tableName=...)`.
+
+4. **REVINFO table must continue to be populated**: The `TransactionIdentifierSupplier` must persist
+   to the same REVINFO table so FK constraints are satisfied and revision numbers continue the sequence.
+
+5. **Sequence/generator must continue**: The `@GeneratedValue` on the REVINFO entity must use the same
+   sequence/generator that envers used (e.g. `REVISION_GENERATOR` sequence).
+
+=== What About ValidityAuditStrategy Users?
+
+Users who configured `ValidityAuditStrategy` have extra columns (`REVEND`, `REVEND_TSTMP`) in their
+audit tables. Migration considerations:
+
+- **Core reads**: The extra columns are ignored — core uses the MAX-subquery approach, not validity intervals.
+  This works correctly but may be slower for large audit tables (the validity approach avoids subqueries).
+- **Existing data**: Fully readable by core — the `REV`/`REVTYPE` columns are the same.
+- **New writes**: Core won't populate `REVEND`/`REVEND_TSTMP` — new audit rows will have NULL in these columns.
+  This is acceptable: NULL `REVEND` means "current/latest", which is correct for newly written rows.
+- **Mixed reads**: If some rows have `REVEND` (written by envers) and some don't (written by core),
+  only the core MAX-subquery approach works correctly. The validity approach would break.
+- **Recommendation**: ValidityAuditStrategy users can migrate, but should accept that the validity
+  optimization is lost. The MAX-subquery approach works on all data. Future: consider adding validity
+  support to core if performance demands it.
+
+=== Built-in REVINFO Support (Optional Enhancement)
+
+To simplify migration further, consider providing a built-in `TransactionIdentifierSupplier` implementation
+that handles the REVINFO pattern out of the box:
+
+[source,java]
+----
+/**
+ * Built-in supplier that persists a revision entity to a REVINFO-like table,
+ * compatible with hibernate-envers schema conventions.
+ *
+ * Configure via:
+ *   hibernate.temporal.transaction_id_supplier=org.hibernate.audit.RevisionEntitySupplier
+ *   hibernate.audit.revision_entity_class=com.example.RevisionInfo (optional)
+ */
+@Incubating
+public class RevisionEntitySupplier implements TransactionIdentifierSupplier<Integer> {
+    // Auto-detects @Entity mapped to REVINFO table, or uses a default entity
+    // Persists and returns generated ID
+}
+----
+
+This would make migration a one-line configuration change for users with standard envers schemas.
+
+=== Implementation Tasks
+
+* [ ] Verify core reads work against envers-shaped schema (write integration test)
+* [ ] Test with existing envers audit data: create data with envers, read with core `atTransaction`
+* [ ] Test FK constraint satisfaction when using `TransactionIdentifierSupplier` with REVINFO entity
+* [ ] Test sequence continuity: new revision numbers continue from where envers left off
+* [ ] Document ValidityAuditStrategy migration path and limitations
+* [ ] Consider: built-in `RevisionEntitySupplier` for zero-effort migration
+* [ ] Consider: configuration property to specify audit table suffix for envers compatibility
+  (case sensitivity: envers default `_AUD` vs core default `_aud`)
+
+== Design Decisions
+
+=== Decided
+
+1. **Read paradigm**: Use standard session APIs with `atTransaction` context, not a custom query DSL.
+   HQL already provides filtering, ordering, projections, joins, and aggregations.
+
+2. **No built-in revision entity in core**: Transaction IDs are opaque and application-supplied.
+   Users who need revision metadata (timestamp, user, etc.) define their own entity and persist it
+   via `TransactionIdentifierSupplier`.
+
+3. **Custom revision entity via `TransactionIdentifierSupplier`**: A session-aware supplier that can persist
+   a revision entity and return its generated ID. This replaces envers' `@RevisionEntity` + `RevisionListener`
+   with a single, simpler extension point.
+
+=== To Decide
+
+1. **Where does `AuditLog` live?**
+   - Option A: In hibernate-core alongside `AuditMapping` (recommended — audit infra is already there)
+   - Option B: In a slimmed-down hibernate-envers
+
+2. **Transaction ID vs Revision Number semantics**
+   - Envers: auto-incrementing integers with "next/previous" navigation
+   - Core: arbitrary comparable types
+   - Do we need navigation helpers? Recommendation: No — keep TX IDs opaque
+
+3. **`AuditLog` query implementation**
+   - Option A: SQL AST queries (like `AuditMappingImpl.applyPredicate()`)
+   - Option B: HQL against audit tables
+   - Option C: Direct JDBC
+   - Recommendation: SQL AST for consistency with existing infrastructure
+
+4. **Modified property tracking (`withModifiedFlag`)**
+   - Requires `_MOD` boolean columns per audited property
+   - Significant schema + complexity cost
+   - Defer in favor of `diff()` which computes changes from snapshots?
+
+5. **Fate of hibernate-envers module**
+   - Option A: Deprecate entirely, provide migration guide
+   - Option B: Rewrite as thin adapter over core `@Audited` + `AuditLog`
+   - Recommendation: Option B for transition, then A long-term
+
+6. **Deleted entity access**
+   - Currently `atTransaction` returns null for deleted entities
+   - Should there be a way to retrieve pre-deletion state + DEL marker?
+   - Envers supports this via `includeDeletions` parameter
+
+== Open Questions
+
+=== Write-side
+
+* How should `@Audited` interact with entity inheritance hierarchies?
+  (Envers handles single-table, joined, table-per-class — does core?)
+* What is the current state of relationship auditing (ManyToOne, OneToMany, ManyToMany)?
+  Need to inventory which association types already create audit rows in core.
+* Does core already handle embeddable/component auditing, or only simple properties?
+* Does `@Audited.Excluded` work on `@Version` fields, or do we need a separate setting
+  like envers' `DO_NOT_AUDIT_OPTIMISTIC_LOCKING_FIELD`?
+* ValidityAuditStrategy: is the start/end revision interval approach worth implementing in core?
+  It trades write performance for read performance — may not be needed if the MAX-subquery
+  approach performs well enough with proper indexing.
+* Should `TransactionIdentifierSupplier.getTransactionIdentifier()` receive a richer context
+  (e.g. list of entities being modified in this transaction) to support `EntityTrackingRevisionListener`-like
+  functionality?
+* How should the supplier handle the case where `session.flush()` hasn't been called yet?
+  The revision entity needs its generated ID before audit rows are written. Should the framework
+  handle the flush automatically?
+
+=== Read-side
+
+* Should `AuditLog` support `StatelessSession` or only `Session`?
+* Performance: `getRevisions()` on entities with many revisions — pagination?
+
+=== Schema & Migration
+
+* Case sensitivity: envers default suffix is `_AUD` (uppercase), core default is `_aud` (lowercase).
+  On case-sensitive databases/filesystems this matters. Should core default to `_AUD` for envers compat,
+  or should the migration guide tell users to configure `@Audited(tableName=...)` explicitly?
+* Envers uses `originalId` as a composite-id component property name — verify this doesn't affect
+  core's column-level reads.
+* Envers' `OrderedSequenceGenerator` uses specific sequence names (`REVISION_GENERATOR`).
+  When mapping REVINFO as a regular entity, the `@GeneratedValue` strategy must use the same
+  sequence to ensure continuity. Document this clearly.
+* Should we provide an automated migration validator that checks schema compatibility?
