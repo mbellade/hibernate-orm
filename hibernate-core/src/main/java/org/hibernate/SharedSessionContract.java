@@ -11,6 +11,7 @@ import java.util.function.Function;
 
 import jakarta.persistence.EntityGraph;
 import jakarta.persistence.PersistenceException;
+import org.hibernate.audit.AuditLog;
 import org.hibernate.graph.RootGraph;
 import org.hibernate.jdbc.ReturningWork;
 import org.hibernate.jdbc.Work;
@@ -45,6 +46,18 @@ public interface SharedSessionContract extends QueryProducer, AutoCloseable, Ser
 	 * @return the session builder
 	 */
 	SharedSessionBuilder sessionWithOptions();
+
+	/**
+	 * Obtain the {@linkplain AuditLog audit log} for querying audit metadata of
+	 * {@linkplain org.hibernate.annotations.Audited audited} entities.
+	 *
+	 * @return the session-scoped audit log
+	 *
+	 * @since envers-rewrite
+	 */
+	@Incubating
+	AuditLog getAuditLog();
+
 
 	/**
 	 * Obtain the tenant identifier associated with this session, as a string.

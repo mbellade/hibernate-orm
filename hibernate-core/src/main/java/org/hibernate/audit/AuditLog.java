@@ -18,7 +18,11 @@ import org.hibernate.Incubating;
  * atTransaction()} sessions.
  * <p>
  * Obtain an instance via
- * {@link org.hibernate.SessionFactory#getAuditLog()}.
+ * {@link org.hibernate.SharedSessionContract#getAuditLog()}.
+ * The returned instance is session-scoped: all queries reuse
+ * the underlying session, so loaded entities remain managed
+ * and support lazy association loading (when using a stateful
+ * {@link org.hibernate.Session}).
  *
  * @author Marco Belladelli
  *
@@ -45,6 +49,8 @@ public interface AuditLog {
 	 *         .getResultList();
 	 * }
 	 * </pre>
+	 *
+	 * @see #getHistory(Class, Object)
 	 */
 	Object ALL_REVISIONS = org.hibernate.engine.spi.LoadQueryInfluencers.ALL_REVISIONS;
 
@@ -105,8 +111,6 @@ public interface AuditLog {
 	/**
 	 * Find all entity snapshots of the given type that
 	 * were modified at a specific transaction.
-	 * <p>
-	 * Deleted entities are excluded from the result.
 	 *
 	 * @param entityClass the audited entity class
 	 * @param transactionId the transaction identifier

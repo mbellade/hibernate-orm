@@ -851,6 +851,11 @@ abstract class AbstractSharedSessionContract implements SharedSessionContractImp
 	}
 
 	@Override
+	public org.hibernate.audit.AuditLog getAuditLog() {
+		return new org.hibernate.audit.internal.AuditLogImpl( this );
+	}
+
+	@Override
 	public EntityKey generateEntityKey(Object id, EntityPersister persister) {
 		final Object temporalId = getLoadQueryInfluencers().getTemporalIdentifier();
 		// Include the temporal identifier as a revision in the key when it's a

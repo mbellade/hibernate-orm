@@ -126,7 +126,7 @@ projections, joins, and aggregations.
 | 5
 | Revision history for entity (`getRevisions(Class, id)`)
 | Done
-| `AuditLog.getRevisions(Class, id)` — SQL AST query against audit table
+| `AuditLog.getRevisions(Class, id)` — HQL query against audit table
 | [green]#DONE#
 
 | 6
@@ -163,7 +163,7 @@ projections, joins, and aggregations.
 
 | 10
 | `forEntitiesModifiedAtRevision` — entities changed IN a specific revision (exact match, not point-in-time)
-| `AuditLog.getEntitiesModifiedAt()` / `findEntitiesModifiedAt()` — SQL AST query + `atTransaction` reads
+| `AuditLog.getEntitiesModifiedAt()` / `findEntitiesModifiedAt()` — HQL queries (session-scoped)
 | [green]#DONE#
 
 | 11
@@ -216,11 +216,9 @@ projections, joins, and aggregations.
 | 19
 | First-level cache for audit reads
 | For point-in-time reads (`atTransaction(txId)`), the session's PC handles caching naturally.
-  For `AuditLog` (SessionFactory-scoped singleton), no cache — each call is self-contained.
-  Users needing repeated reads of the same entity@revision within a unit of work should use
-  `atTransaction` sessions directly. A dedicated `AuditLog`-scoped cache could be added later
-  if performance demands it.
-| [green]#DONE# — via session PC for `atTransaction`; `AuditLog` deferred by design
+  `AuditLog` is now session-scoped (`session.getAuditLog()`) — entities loaded via the audit log
+  remain managed in the session's PC, supporting lazy associations and natural caching.
+| [green]#DONE# — session-scoped `AuditLog` with session PC
 
 | 20
 | `RelationTargetAuditMode.NOT_AUDITED` (mixed audited/non-audited relations)
@@ -627,13 +625,13 @@ Goal: Fill the essential gaps that standard `atTransaction` sessions cannot cove
 
 ==== 1.2 `AuditLog` interface
 
-New interface in hibernate-core, obtainable from `SessionFactory`:
+New interface in hibernate-core, obtainable from `Session` or `StatelessSession`:
 
 [source,java]
 ----
 @Incubating
 public interface AuditLog {
-    // --- metadata queries (SQL AST against audit tables) ---
+    // --- metadata queries (HQL against audit tables) ---
 
     List<Object> getRevisions(Class<?> entityClass, Object id);
     ModificationType getModificationType(Class<?> entityClass, Object id, Object transactionId);
@@ -648,8 +646,8 @@ public interface AuditLog {
 ----
 
 * [x] Define `AuditLog` interface in `org.hibernate.audit`
-* [x] Implement using SQL AST queries against audit tables (leverage `AuditMapping` metamodel)
-* [x] Make obtainable from `SessionFactory` (`sessionFactory.getAuditLog()`)
+* [x] Implement using HQL queries with `transactionId()`/`modificationType()` functions
+* [x] Make session-scoped, obtainable from `Session`/`StatelessSession` (`session.getAuditLog()`)
 * [x] Add convenience methods `find()` and `findEntitiesModifiedAt()` combining metadata with `atTransaction` reads
 
 NOTE: The `AuditLog` API provides both thin metadata queries (revision lists, modification
@@ -774,8 +772,7 @@ Associations between `@Audited` entities work transparently in both point-in-tim
 * [x] Fix entity identity deduplication in all-revisions mode
   (`EntityInitializerImpl`: skip PC, fresh instance per row — see `isAllRevisions()` + `initializeAllRevisionsInstance()`)
 * [x] Add `AuditLog.getHistory()` convenience method
-  (HQL internally via `ALL_REVISIONS` mode; no dedicated cache — `AuditLog` is SessionFactory-scoped,
-  so each call is self-contained. Users needing caching should use `atTransaction` sessions directly.)
+  (HQL internally via `ALL_REVISIONS` mode; session-scoped, so entities stay managed in the session PC)
 * [ ] Criteria-based restrictions for `AuditLog` queries
   (envers' `AuditQuery` accepted custom `AuditCriterion` restrictions — e.g. `AuditEntity.property("name").eq("x")`;
   the JPA Criteria API is the natural replacement, giving programmatic access to arbitrary predicates.
@@ -789,6 +786,8 @@ Associations between `@Audited` entities work transparently in both point-in-tim
 * [x] Lazy to-one proxy with captured revision (`AbstractLazyInitializer.temporalIdentifier`)
 * [x] Simplify `AuditLogImpl` — all queries now use HQL (no SQL AST), revision entity join in `getHistory()`
 * [x] `AuditColumnFunction` return type: `UnknownBasicJavaType` bypasses SQM type checks
+* [x] Session-scoped `AuditLog` — moved from `SessionFactory` to `SharedSessionContract`
+  (entities stay managed in the session PC; `withTemporalIdentifier()` save/restore pattern)
 * [ ] Tests for deleted entity access
 * [ ] Criteria-based restrictions for `AuditLog` queries
 
@@ -830,7 +829,7 @@ and by `allRevisions()` mode with HQL filter `where transactionId(e) = :txId`.
 | Envers Pattern | Core Replacement
 
 | `AuditReaderFactory.get(em)`
-| `sf.withOptions().atTransaction(txId)` or `sf.getAuditLog()`
+| `sf.withOptions().atTransaction(txId)` or `session.getAuditLog()`
 
 | `reader.find(Foo.class, id, rev)`
 | `session.find(Foo.class, id)` (in `atTransaction` session)
@@ -1203,8 +1202,10 @@ public class RevisionInfoSupplier extends RevisionEntitySupplier<Integer> {
 
 === Read-side
 
-* `AuditLog.getHistory()` uses stateful `Session` (not `StatelessSession`) to support lazy proxy
-  initialization on returned entities. `StatelessSession` clears its PC after loading, detaching proxies.
+* `AuditLog` is session-scoped (obtainable from `Session` or `StatelessSession` via `getAuditLog()`).
+  All queries reuse the underlying session, so entities remain managed and support lazy associations.
+  Internally uses `withTemporalIdentifier()` save/restore pattern to temporarily set the temporal
+  identifier for each query.
 * Performance: `getRevisions()` on entities with many revisions — pagination?
 * **Audited associations**: [green]#RESOLVED# — associations work transparently via revision-aware
   `EntityKey`, per-row temporal identifier, and lazy proxy temporal capture. See architecture section above.

@@ -74,7 +74,7 @@ class DefaultRevisionEntityTest {
 
 		// Verify REVINFO rows for this test (book id=1)
 		scope.getSessionFactory().inTransaction( session -> {
-			final var auditLog = scope.getSessionFactory().getAuditLog();
+			final var auditLog = session.getAuditLog();
 			final var revisionIds = auditLog.getRevisions( Book.class, 1L );
 			assertEquals( 3, revisionIds.size() );
 
@@ -138,22 +138,23 @@ class DefaultRevisionEntityTest {
 		} );
 
 		// getHistory() should return DefaultRevisionEntity instances as the revision member
-		var history = scope.getSessionFactory().getAuditLog()
-				.getHistory( Book.class, 2L );
+		scope.inSession( session -> {
+			var history = session.getAuditLog().getHistory( Book.class, 2L );
 
-		assertEquals( 2, history.size() );
+			assertEquals( 2, history.size() );
 
-		// Verify revision is a DefaultRevisionEntity, not a plain Integer
-		var entry1 = history.get( 0 );
-		assertInstanceOf( DefaultRevisionEntity.class, entry1.revision(),
-				"Revision should be a DefaultRevisionEntity instance" );
-		var rev1 = (DefaultRevisionEntity) entry1.revision();
-		assertTrue( rev1.getTimestamp() > 0, "Revision should have a timestamp" );
+			// Verify revision is a DefaultRevisionEntity, not a plain Integer
+			var entry1 = history.get( 0 );
+			assertInstanceOf( DefaultRevisionEntity.class, entry1.revision(),
+					"Revision should be a DefaultRevisionEntity instance" );
+			var rev1 = (DefaultRevisionEntity) entry1.revision();
+			assertTrue( rev1.getTimestamp() > 0, "Revision should have a timestamp" );
 
-		var entry2 = history.get( 1 );
-		assertInstanceOf( DefaultRevisionEntity.class, entry2.revision() );
-		var rev2 = (DefaultRevisionEntity) entry2.revision();
-		assertTrue( rev2.getId() > rev1.getId(), "Revisions should be sequential" );
+			var entry2 = history.get( 1 );
+			assertInstanceOf( DefaultRevisionEntity.class, entry2.revision() );
+			var rev2 = (DefaultRevisionEntity) entry2.revision();
+			assertTrue( rev2.getId() > rev1.getId(), "Revisions should be sequential" );
+		} );
 	}
 
 }

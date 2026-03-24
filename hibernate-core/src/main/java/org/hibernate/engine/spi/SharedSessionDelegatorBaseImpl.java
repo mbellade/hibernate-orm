@@ -78,6 +78,11 @@ public class SharedSessionDelegatorBaseImpl implements SharedSessionContractImpl
 	}
 
 	@Override
+	public org.hibernate.audit.AuditLog getAuditLog() {
+		return delegate.getAuditLog();
+	}
+
+	@Override
 	public SharedStatelessSessionBuilder statelessWithOptions() {
 		return delegate.statelessWithOptions();
 	}

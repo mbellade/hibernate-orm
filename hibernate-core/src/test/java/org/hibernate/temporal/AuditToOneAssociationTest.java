@@ -78,8 +78,10 @@ class AuditToOneAssociationTest {
 			session.find( Book.class, 1L ).setAuthor( null )
 		);
 
-		assertEquals( 3, scope.getSessionFactory().getAuditLog()
-				.getRevisions( Book.class, 1L ).size() );
+		scope.inSession( session ->
+			assertEquals( 3, session.getAuditLog()
+					.getRevisions( Book.class, 1L ).size() )
+		);
 	}
 
 	// ---- 2. Null association ----
@@ -200,16 +202,18 @@ class AuditToOneAssociationTest {
 			session.find( Book.class, 20L ).setTitle( "History Book v2" );
 		} );
 
-		var history = scope.getSessionFactory().getAuditLog().getHistory( Book.class, 20L );
-		assertEquals( 2, history.size() );
+		scope.inSession( session -> {
+			var history = session.getAuditLog().getHistory( Book.class, 20L );
+			assertEquals( 2, history.size() );
 
-		assertEquals( ModificationType.ADD, history.get( 0 ).modificationType() );
-		assertEquals( "History Book", history.get( 0 ).entity().getTitle() );
-		assertEquals( "Author V1", history.get( 0 ).entity().getAuthor().getName() );
+			assertEquals( ModificationType.ADD, history.get( 0 ).modificationType() );
+			assertEquals( "History Book", history.get( 0 ).entity().getTitle() );
+			assertEquals( "Author V1", history.get( 0 ).entity().getAuthor().getName() );
 
-		assertEquals( ModificationType.MOD, history.get( 1 ).modificationType() );
-		assertEquals( "History Book v2", history.get( 1 ).entity().getTitle() );
-		assertEquals( "Author V2", history.get( 1 ).entity().getAuthor().getName() );
+			assertEquals( ModificationType.MOD, history.get( 1 ).modificationType() );
+			assertEquals( "History Book v2", history.get( 1 ).entity().getTitle() );
+			assertEquals( "Author V2", history.get( 1 ).entity().getAuthor().getName() );
+		} );
 	}
 
 	// ---- 6. All-revisions via getHistory() (select-fetch, nested) ----
@@ -232,16 +236,18 @@ class AuditToOneAssociationTest {
 			session.find( Book.class, 80L ).setTitle( "Hist Book v2" );
 		} );
 
-		var history = scope.getSessionFactory().getAuditLog().getHistory( Book.class, 80L );
-		assertEquals( 2, history.size() );
+		scope.inSession( session -> {
+			var history = session.getAuditLog().getHistory( Book.class, 80L );
+			assertEquals( 2, history.size() );
 
-		assertEquals( "Hist Book", history.get( 0 ).entity().getTitle() );
-		assertEquals( "Hist Author V1", history.get( 0 ).entity().getAuthor().getName() );
-		assertEquals( "Hist Pub V1", history.get( 0 ).entity().getAuthor().getPublisher().getName() );
+			assertEquals( "Hist Book", history.get( 0 ).entity().getTitle() );
+			assertEquals( "Hist Author V1", history.get( 0 ).entity().getAuthor().getName() );
+			assertEquals( "Hist Pub V1", history.get( 0 ).entity().getAuthor().getPublisher().getName() );
 
-		assertEquals( "Hist Book v2", history.get( 1 ).entity().getTitle() );
-		assertEquals( "Hist Author V2", history.get( 1 ).entity().getAuthor().getName() );
-		assertEquals( "Hist Pub V2", history.get( 1 ).entity().getAuthor().getPublisher().getName() );
+			assertEquals( "Hist Book v2", history.get( 1 ).entity().getTitle() );
+			assertEquals( "Hist Author V2", history.get( 1 ).entity().getAuthor().getName() );
+			assertEquals( "Hist Pub V2", history.get( 1 ).entity().getAuthor().getPublisher().getName() );
+		} );
 	}
 
 	// ---- 7. Join-fetch in all-revisions mode (single level) ----

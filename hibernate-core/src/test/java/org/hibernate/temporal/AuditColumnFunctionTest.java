@@ -155,28 +155,29 @@ class AuditColumnFunctionTest {
 			session.remove( book );
 		} );
 
-		var history = scope.getSessionFactory().getAuditLog()
-				.getHistory( Book.class, 2L );
+		scope.inSession( session -> {
+			var history = session.getAuditLog().getHistory( Book.class, 2L );
 
-		assertEquals( 3, history.size() );
+			assertEquals( 3, history.size() );
 
-		// ADD
-		AuditEntry<Book> add = history.get( 0 );
-		assertEquals( "First", add.entity().title );
-		assertEquals( ModificationType.ADD, add.modificationType() );
+			// ADD
+			AuditEntry<Book> add = history.get( 0 );
+			assertEquals( "First", add.entity().title );
+			assertEquals( ModificationType.ADD, add.modificationType() );
 
-		// MOD
-		AuditEntry<Book> mod = history.get( 1 );
-		assertEquals( "Second", mod.entity().title );
-		assertEquals( ModificationType.MOD, mod.modificationType() );
+			// MOD
+			AuditEntry<Book> mod = history.get( 1 );
+			assertEquals( "Second", mod.entity().title );
+			assertEquals( ModificationType.MOD, mod.modificationType() );
 
-		// DEL
-		AuditEntry<Book> del = history.get( 2 );
-		assertEquals( ModificationType.DEL, del.modificationType() );
+			// DEL
+			AuditEntry<Book> del = history.get( 2 );
+			assertEquals( ModificationType.DEL, del.modificationType() );
 
-		// Each entity should be a distinct instance
-		assertTrue( add.entity() != mod.entity() );
-		assertTrue( mod.entity() != del.entity() );
+			// Each entity should be a distinct instance
+			assertTrue( add.entity() != mod.entity() );
+			assertTrue( mod.entity() != del.entity() );
+		} );
 	}
 
 	@Audited

@@ -115,11 +115,6 @@ public class SessionFactoryDelegatingImpl implements SessionFactoryImplementor, 
 	}
 
 	@Override
-	public org.hibernate.audit.AuditLog getAuditLog() {
-		return delegate.getAuditLog();
-	}
-
-	@Override
 	public StatisticsImplementor getStatistics() {
 		return delegate.getStatistics();
 	}
