@@ -11,6 +11,7 @@ import jakarta.persistence.ManyToOne;
 import org.hibernate.annotations.Audited;
 import org.hibernate.audit.ModificationType;
 import org.hibernate.cfg.StateManagementSettings;
+import org.hibernate.audit.AuditLog;
 import org.hibernate.engine.spi.SharedSessionContractImplementor;
 import org.hibernate.temporal.spi.TransactionIdentifierSupplier;
 import org.hibernate.testing.orm.junit.DomainModel;
@@ -18,6 +19,7 @@ import org.hibernate.testing.orm.junit.ServiceRegistry;
 import org.hibernate.testing.orm.junit.SessionFactory;
 import org.hibernate.testing.orm.junit.SessionFactoryScope;
 import org.hibernate.testing.orm.junit.Setting;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -222,6 +224,66 @@ class AuditAssociationTest {
 				"Author should be loaded from audit table" );
 		assertEquals( "Author V2", history.get( 1 ).entity().author.name,
 				"Author should reflect the name at tx 202" );
+	}
+
+	/**
+	 * Test ManyToOne with explicit join fetch in all-revisions mode:
+	 * the joined association should be loaded from the audit table
+	 * at the correct revision for each row, not from the current table.
+	 */
+	@Test
+	@Disabled("Needs correlated temporal predicate on join-fetched associations in all-revisions mode")
+	void testManyToOneJoinFetchAllRevisions(SessionFactoryScope scope) {
+		currentTxId = 500;
+
+		// tx 501: create author and book
+		scope.getSessionFactory().inTransaction( session -> {
+			var author = new Author();
+			author.id = 50L;
+			author.name = "JF Author V1";
+			session.persist( author );
+
+			var book = new Book();
+			book.id = 50L;
+			book.title = "JF Book";
+			book.author = author;
+			session.persist( book );
+		} );
+
+		// tx 502: update author name + book title
+		scope.getSessionFactory().inTransaction( session -> {
+			var author = session.find( Author.class, 50L );
+			author.name = "JF Author V2";
+
+			var book = session.find( Book.class, 50L );
+			book.title = "JF Book v2";
+		} );
+
+		// All-revisions query with explicit join fetch
+		try ( var session = scope.getSessionFactory().withOptions()
+				.atTransaction( AuditLog.ALL_REVISIONS ).openSession() ) {
+			final var rows = session.createSelectionQuery(
+					"select e, transactionId(e), modificationType(e)"
+							+ " from AuditBook e join fetch e.author"
+							+ " where e.id = :id"
+							+ " order by transactionId(e)",
+					Object[].class
+			).setParameter( "id", 50L ).getResultList();
+
+			assertEquals( 2, rows.size(), "Should have 2 revision rows" );
+
+			// Row 0 (tx 501): author should be V1
+			var book1 = (Book) rows.get( 0 )[0];
+			assertNotNull( book1.author, "Author should be join-fetched" );
+			assertEquals( "JF Author V1", book1.author.name,
+					"Join-fetched author should reflect name at tx 501" );
+
+			// Row 1 (tx 502): author should be V2
+			var book2 = (Book) rows.get( 1 )[0];
+			assertNotNull( book2.author );
+			assertEquals( "JF Author V2", book2.author.name,
+					"Join-fetched author should reflect name at tx 502" );
+		}
 	}
 
 	/**

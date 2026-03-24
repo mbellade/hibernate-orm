@@ -18,6 +18,7 @@ import org.hibernate.testing.orm.junit.Setting;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -71,11 +72,16 @@ class DefaultRevisionEntityTest {
 			session.remove( book );
 		} );
 
-		// Verify REVINFO rows
+		// Verify REVINFO rows for this test (book id=1)
 		scope.getSessionFactory().inTransaction( session -> {
+			final var auditLog = scope.getSessionFactory().getAuditLog();
+			final var revisionIds = auditLog.getRevisions( Book.class, 1L );
+			assertEquals( 3, revisionIds.size() );
+
 			final var revisions = session.createSelectionQuery(
-					"from DefaultRevisionEntity order by id", DefaultRevisionEntity.class
-			).getResultList();
+					"from DefaultRevisionEntity where id in :ids order by id",
+					DefaultRevisionEntity.class
+			).setParameter( "ids", revisionIds ).getResultList();
 			assertEquals( 3, revisions.size() );
 
 			for ( var rev : revisions ) {
@@ -115,6 +121,39 @@ class DefaultRevisionEntityTest {
 				assertNull( book );
 			}
 		} );
+	}
+
+	@Test
+	void testGetHistoryReturnsRevisionEntity(SessionFactoryScope scope) {
+		// Create and update a book
+		scope.getSessionFactory().inTransaction( session -> {
+			var book = new Book();
+			book.id = 2L;
+			book.title = "History Book";
+			session.persist( book );
+		} );
+		scope.getSessionFactory().inTransaction( session -> {
+			var book = session.find( Book.class, 2L );
+			book.title = "Updated History Book";
+		} );
+
+		// getHistory() should return DefaultRevisionEntity instances as the revision member
+		var history = scope.getSessionFactory().getAuditLog()
+				.getHistory( Book.class, 2L );
+
+		assertEquals( 2, history.size() );
+
+		// Verify revision is a DefaultRevisionEntity, not a plain Integer
+		var entry1 = history.get( 0 );
+		assertInstanceOf( DefaultRevisionEntity.class, entry1.revision(),
+				"Revision should be a DefaultRevisionEntity instance" );
+		var rev1 = (DefaultRevisionEntity) entry1.revision();
+		assertTrue( rev1.getTimestamp() > 0, "Revision should have a timestamp" );
+
+		var entry2 = history.get( 1 );
+		assertInstanceOf( DefaultRevisionEntity.class, entry2.revision() );
+		var rev2 = (DefaultRevisionEntity) entry2.revision();
+		assertTrue( rev2.getId() > rev1.getId(), "Revisions should be sequential" );
 	}
 
 }

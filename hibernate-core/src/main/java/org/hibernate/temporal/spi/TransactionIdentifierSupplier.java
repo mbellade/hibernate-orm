@@ -24,7 +24,8 @@ import org.hibernate.engine.spi.SharedSessionContractImplementor;
  * most once per transaction.
  * <p>
  * Configure via the
- * {@value org.hibernate.cfg.StateManagementSettings#TRANSACTION_ID_SUPPLIER}
+ * {@link TransactionIdentifierService} or the
+ * {@link org.hibernate.cfg.StateManagementSettings#TRANSACTION_ID_SUPPLIER TRANSACTION_ID_SUPPLIER}
  * setting.
  *
  * @param <T> the type of transaction identifier produced

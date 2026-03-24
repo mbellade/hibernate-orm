@@ -27,7 +27,9 @@ import org.hibernate.query.sqm.tree.SqmTypedNode;
 import org.hibernate.query.sqm.tree.domain.SqmPath;
 import org.hibernate.sql.ast.tree.expression.ColumnReference;
 import org.hibernate.sql.ast.tree.expression.Expression;
-import org.hibernate.type.JavaObjectType;
+import org.hibernate.type.descriptor.java.spi.UnknownBasicJavaType;
+import org.hibernate.type.descriptor.jdbc.ObjectJdbcType;
+import org.hibernate.type.internal.BasicTypeImpl;
 
 import static java.util.Collections.singletonList;
 
@@ -62,7 +64,11 @@ public class AuditColumnFunction extends AbstractSqmFunctionDescriptor {
 		super(
 				name,
 				StandardArgumentsValidators.exactly( 1 ),
-				StandardFunctionReturnTypeResolvers.invariant( JavaObjectType.INSTANCE ),
+				// todo (envers-rewrite) : this bypasses the type check for sqm expressions
+				//  is there a cleaner way of resolving the actual type ?
+				StandardFunctionReturnTypeResolvers.invariant(
+						new BasicTypeImpl<>( new UnknownBasicJavaType<>( Object.class ), ObjectJdbcType.INSTANCE )
+				),
 				null
 		);
 		this.transactionId = transactionId;
