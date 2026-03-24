@@ -5,6 +5,7 @@
 package org.hibernate.temporal;
 
 import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
 import jakarta.persistence.ManyToOne;
 import org.hibernate.annotations.Audited;
@@ -31,7 +32,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 @SessionFactory
 @DomainModel(annotatedClasses = {
 		AuditAssociationTest.Author.class,
-		AuditAssociationTest.Book.class
+		AuditAssociationTest.Book.class,
+		AuditAssociationTest.LazyBook.class
 })
 @ServiceRegistry(settings = @Setting(name = StateManagementSettings.TRANSACTION_ID_SUPPLIER,
 		value = "org.hibernate.temporal.AuditAssociationTest$TxIdSupplier"))
@@ -247,12 +249,71 @@ class AuditAssociationTest {
 		}
 	}
 
+	/**
+	 * Test lazy ManyToOne in point-in-time mode: the proxy should
+	 * initialize from the audit table at the captured revision,
+	 * not from the current table.
+	 */
+	@Test
+	void testLazyManyToOnePointInTimeRead(SessionFactoryScope scope) {
+		currentTxId = 400;
+
+		// tx 401: create author and lazy book
+		scope.getSessionFactory().inTransaction( session -> {
+			var author = new Author();
+			author.id = 40L;
+			author.name = "Lazy Author V1";
+			session.persist( author );
+
+			var book = new LazyBook();
+			book.id = 40L;
+			book.title = "Lazy Book";
+			book.author = author;
+			session.persist( book );
+		} );
+
+		// tx 402: update the author's name
+		scope.getSessionFactory().inTransaction( session -> {
+			var author = session.find( Author.class, 40L );
+			author.name = "Lazy Author V2";
+		} );
+
+		// Read lazy book at tx 401: proxy should load author from audit table at tx 401
+		try ( var s = scope.getSessionFactory().withOptions()
+				.atTransaction( 401 ).openSession() ) {
+			var book = s.find( LazyBook.class, 40L );
+			assertNotNull( book, "LazyBook should exist at tx 401" );
+			// Accessing getAuthor().getName() triggers proxy initialization —
+			// the proxy should use the captured temporal identifier (401)
+			// to load from the audit table, getting "Lazy Author V1"
+			var author = book.getAuthor();
+			assertNotNull( author, "Author should not be null" );
+			assertEquals( "Lazy Author V1", author.getName(),
+					"Lazy proxy should load author at tx 401, not current state" );
+		}
+
+		// Read lazy book at tx 402: author name should reflect update
+		try ( var s = scope.getSessionFactory().withOptions()
+				.atTransaction( 402 ).openSession() ) {
+			var book = s.find( LazyBook.class, 40L );
+			assertNotNull( book );
+			var author = book.getAuthor();
+			assertNotNull( author );
+			assertEquals( "Lazy Author V2", author.getName(),
+					"Lazy proxy should load author at tx 402" );
+		}
+	}
+
 	@Audited
 	@Entity(name = "AuditAuthor")
 	static class Author {
 		@Id
 		long id;
 		String name;
+
+		String getName() {
+			return name;
+		}
 	}
 
 	@Audited
@@ -263,5 +324,23 @@ class AuditAssociationTest {
 		String title;
 		@ManyToOne
 		Author author;
+
+		Author getAuthor() {
+			return author;
+		}
+	}
+
+	@Audited
+	@Entity(name = "AuditLazyBook")
+	static class LazyBook {
+		@Id
+		long id;
+		String title;
+		@ManyToOne(fetch = FetchType.LAZY)
+		Author author;
+
+		Author getAuthor() {
+			return author;
+		}
 	}
 }

@@ -47,6 +47,10 @@ import java.util.function.BiConsumer;
  * @since envers-rewrite
  */
 public class AuditLogImpl implements AuditLog {
+	// todo (envers-rewrite) : all operations (or most) seem to involve having to act on a session
+	//  - the old envers' `AuditReader` used to be session-scoped, perhaps it's best if we do that here as well?
+	//  - we risk not being able to load lazy associations if we just always create on demand sessions for some of this queries
+	//    (at least ones that don't only return scalar values)
 	private final SessionFactoryImplementor sessionFactory;
 
 	public AuditLogImpl(SessionFactoryImplementor sessionFactory) {
@@ -55,6 +59,7 @@ public class AuditLogImpl implements AuditLog {
 
 	@Override
 	public List<Object> getRevisions(Class<?> entityClass, Object id) {
+		// todo (envers-rewrite) : with the new HQL revision functions, maybe we can simplify this a lot
 		final var persister = getEntityPersister( entityClass );
 		final var auditMapping = requireAuditMapping( persister );
 
@@ -95,6 +100,7 @@ public class AuditLogImpl implements AuditLog {
 
 	@Override
 	public ModificationType getModificationType(Class<?> entityClass, Object id, Object transactionId) {
+		// todo (envers-rewrite) : with the new HQL revision functions, maybe we can simplify this a lot
 		final var persister = getEntityPersister( entityClass );
 		final var auditMapping = requireAuditMapping( persister );
 
@@ -154,6 +160,7 @@ public class AuditLogImpl implements AuditLog {
 
 	@Override
 	public List<Object> getEntitiesModifiedAt(Class<?> entityClass, Object transactionId) {
+		// todo (envers-rewrite) : with the new HQL revision functions, maybe we can simplify this a lot
 		final var persister = getEntityPersister( entityClass );
 		final var auditMapping = requireAuditMapping( persister );
 
@@ -228,8 +235,8 @@ public class AuditLogImpl implements AuditLog {
 		requireAuditMapping( persister );
 		final var entityName = persister.getEntityName();
 
-		try ( var session = sessionFactory.withStatelessOptions()
-				.atTransaction( ALL_REVISIONS ).openStatelessSession() ) {
+		try ( var session = sessionFactory.withOptions()
+				.atTransaction( ALL_REVISIONS ).openSession() ) {
 			final List<Object[]> rows = session.createSelectionQuery(
 					"select e, transactionId(e), modificationType(e)" +
 							" from " + entityName + " e" +

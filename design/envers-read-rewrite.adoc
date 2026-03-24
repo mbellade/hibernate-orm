@@ -169,7 +169,7 @@ projections, joins, and aggregations.
 | 11
 | `forRevisionsOfEntity` — full revision history with entity snapshots
 | `allRevisions()` mode + `transactionId()`/`modificationType()` HQL functions + revision entity join
-| [yellow]#PARTIAL# — HQL functions + entity dedup fix done; `AuditLog.getHistory()` + association tests pending
+| [green]#DONE# — HQL functions, entity dedup, `AuditLog.getHistory()`, associations (eager + lazy proxy)
 
 | 12
 | Modified property tracking (`withModifiedFlag`, `hasChanged()`)
@@ -735,20 +735,28 @@ The `AuditLog` API can provide convenience methods that use `allRevisions()` int
 <T> List<AuditEntry<T>> getHistory(Class<T> entityClass, Object id);
 ----
 
-NOTE: In all-revisions mode, `EntityInitializerImpl` skips the `PersistenceContext` entirely.
-Each result set row produces a fresh, detached entity instance — no identity deduplication,
-no managed state, no dirty tracking or flush. This ensures multiple audit rows for the same
-primary key return distinct snapshots reflecting the entity state at each revision.
-The three interception points are: (1) skip `previousRowReuse` shortcut, (2) always instantiate
-a new entity in `resolveInstance()`, (3) simplified initialization via `initializeAllRevisionsInstance()`
-that just sets property values without PC registration.
+NOTE: In all-revisions mode, revision-aware `EntityKey` (with revision in `equals`/`hashCode`)
+ensures the `PersistenceContext` naturally isolates the same entity at different revisions.
+Each audit row produces a distinct entity instance keyed by `(entityClass, id, revision)`.
+All temporal entities are forced `Status.READ_ONLY` (via `EntityKey.isTemporal()`) — no dirty
+tracking, no flush, no 2LC caching.
 
-WARNING: The behavior of audited *associations* in all-revisions mode needs investigation.
-When an audited entity has associations (ManyToOne, OneToMany, etc.), the associated entities
-are currently initialized through the normal PC flow. This works for non-audited associations
-(they read from the current table, not audit tables), but audited associations (where both sides
-are `@Audited`) may need special handling to ensure the associated entity reflects the correct
-historical state at the queried revision, not just the current state.
+===== Audited associations
+
+Associations between `@Audited` entities work transparently in both point-in-time and all-revisions modes:
+
+* **Point-in-time**: The session's `temporalIdentifier` is fixed — association loads automatically
+  use the audit table at the correct revision.
+* **All-revisions**: `AbstractEntityResultGraphNode` implicitly selects the `REV_TXN` column for
+  audited entities (like discriminator columns). `EntityInitializerImpl` reads this per row and
+  sets it as the temporal identifier on `LoadQueryInfluencers`, so association loaders generate
+  SQL with the correct temporal predicate.
+* **Lazy to-one proxies**: `AbstractLazyInitializer` captures the `temporalIdentifier` from the
+  session at proxy creation time. When the proxy is later initialized via `immediateLoad()`, the
+  captured revision is temporarily set on the session's `LoadQueryInfluencers` (then restored).
+  This mirrors envers' `ToOneDelegateSessionImplementor` pattern but without session wrapping.
+* **Revision-aware EntityKey**: `EntityKey` includes an optional `revision` field in `equals()`/
+  `hashCode()`, preventing PC deduplication across revisions (e.g. Author#20@rev201 ≠ Author#20@rev202).
 
 ===== Implementation tasks
 
@@ -770,9 +778,9 @@ historical state at the queried revision, not just the current state.
   Consider accepting `Predicate` or `CriteriaQuery` fragments in `AuditLog` methods like `getHistory()`,
   `getRevisions()`, `getEntitiesModifiedAt()`, etc. to allow filtering by entity properties,
   transaction ID ranges, modification types, and more — without users having to drop down to raw HQL.)
-* [ ] Investigate audited associations in all-revisions mode
-  (ManyToOne/OneToMany where both sides are `@Audited` — does the associated entity
-  read from the audit table at the correct revision, or the current table?)
+* [x] Audited associations in point-in-time + all-revisions modes
+  (revision-aware EntityKey + per-row temporal identifier + implicit REV_TXN selection)
+* [x] Lazy to-one proxy with captured revision (`AbstractLazyInitializer.temporalIdentifier`)
 * [ ] Tests for deleted entity access, revision entity joins
 
 === Phase 2: Enhanced Read Capabilities (Tier 2)
@@ -1186,17 +1194,11 @@ public class RevisionInfoSupplier extends RevisionEntitySupplier<Integer> {
 
 === Read-side
 
-* Should `AuditLog` support `StatelessSession` or only `Session`?
+* `AuditLog.getHistory()` uses stateful `Session` (not `StatelessSession`) to support lazy proxy
+  initialization on returned entities. `StatelessSession` clears its PC after loading, detaching proxies.
 * Performance: `getRevisions()` on entities with many revisions — pagination?
-* **Audited associations in all-revisions mode**: When entity A has a `@ManyToOne` to entity B,
-  and both are `@Audited`, the all-revisions query for A should ideally load B's state at the
-  same revision — not B's current state. Currently, the `EntityInitializerImpl` all-revisions
-  bypass applies to ALL entity initializers in the session (since `isAllRevisions()` is session-scoped),
-  but sub-initializers for associations still resolve against the current table unless the association
-  itself participates in the audit table join. This needs investigation:
-  ** Does the audit table for A store B's FK value at the time of the audit row?
-  ** If yes, does `atTransaction` mode resolve B from B's audit table at that revision?
-  ** How does envers handle this? (envers has `RelationTargetAuditMode` and special relation handling)
+* **Audited associations**: [green]#RESOLVED# — associations work transparently via revision-aware
+  `EntityKey`, per-row temporal identifier, and lazy proxy temporal capture. See architecture section above.
 
 === Schema & Migration
 

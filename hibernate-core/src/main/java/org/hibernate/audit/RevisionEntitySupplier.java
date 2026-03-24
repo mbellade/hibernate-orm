@@ -47,6 +47,11 @@ import org.hibernate.temporal.spi.TransactionIdentifierSupplier;
 @Incubating
 public class RevisionEntitySupplier<T> implements TransactionIdentifierSupplier<T> {
 	private final Class<T> identifierType;
+
+	// todo (envers-rewrite): couldn't we detect the revision entity class by looking at entities annotated with `@RevisionEntity`?
+	//  - we should look at how "old" envers did that (as well as the revision listener while we're at it)
+	//  - we should have a way to make this entity type known to `AuditLog`, so it knows if there's a configured rev entity
+
 	private final Class<?> revisionEntityClass;
 	private final RevisionListener listener;
 

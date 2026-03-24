@@ -856,10 +856,9 @@ abstract class AbstractSharedSessionContract implements SharedSessionContractImp
 		// Include the temporal identifier as a revision in the key when it's a
 		// real value (not null, not ALL_REVISIONS sentinel), so that the PC can
 		// distinguish the same entity at different points in time.
-		if ( temporalId != null && temporalId != LoadQueryInfluencers.ALL_REVISIONS ) {
-			return new EntityKey( id, persister, temporalId );
-		}
-		return new EntityKey( id, persister );
+		return temporalId != null && temporalId != LoadQueryInfluencers.ALL_REVISIONS
+				? new EntityKey( id, persister, temporalId )
+				: new EntityKey( id, persister );
 	}
 
 	@Override
