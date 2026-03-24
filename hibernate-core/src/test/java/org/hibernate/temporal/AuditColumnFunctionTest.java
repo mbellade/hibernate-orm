@@ -1,0 +1,127 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright Red Hat Inc. and Hibernate Authors
+ */
+package org.hibernate.temporal;
+
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import org.hibernate.annotations.Audited;
+import org.hibernate.audit.AuditLog;
+import org.hibernate.audit.ModificationType;
+import org.hibernate.cfg.StateManagementSettings;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.temporal.spi.TransactionIdentifierSupplier;
+import org.hibernate.testing.orm.junit.DomainModel;
+import org.hibernate.testing.orm.junit.ServiceRegistry;
+import org.hibernate.testing.orm.junit.SessionFactory;
+import org.hibernate.testing.orm.junit.SessionFactoryScope;
+import org.hibernate.testing.orm.junit.Setting;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+@SessionFactory
+@DomainModel(annotatedClasses = AuditColumnFunctionTest.Book.class)
+@ServiceRegistry(settings = @Setting(name = StateManagementSettings.TRANSACTION_ID_SUPPLIER,
+		value = "org.hibernate.temporal.AuditColumnFunctionTest$TxIdSupplier"))
+class AuditColumnFunctionTest {
+	private static int currentTxId;
+
+	public static class TxIdSupplier implements TransactionIdentifierSupplier<Integer> {
+		@Override
+		public Integer getTransactionIdentifier(SharedSessionContractImplementor session) {
+			return ++currentTxId;
+		}
+
+		@Override
+		public Class<Integer> getIdentifierType() {
+			return Integer.class;
+		}
+	}
+
+	@Test
+	void testAuditColumnFunctions(SessionFactoryScope scope) {
+		currentTxId = 0;
+
+		// tx 1: insert
+		scope.getSessionFactory().inTransaction( session -> {
+			var book = new Book();
+			book.id = 1L;
+			book.title = "Original";
+			session.persist( book );
+		} );
+
+		// tx 2: update
+		scope.getSessionFactory().inTransaction( session -> {
+			var book = session.find( Book.class, 1L );
+			book.title = "Updated";
+		} );
+
+		// tx 3: delete
+		scope.getSessionFactory().inTransaction( session -> {
+			var book = session.find( Book.class, 1L );
+			session.remove( book );
+		} );
+
+		// Query all revisions using the HQL functions with scalar projections
+		// (avoids entity identity caching issues with duplicate PKs)
+		try ( var s = scope.getSessionFactory().withStatelessOptions()
+				.atTransaction( AuditLog.ALL_REVISIONS ).openStatelessSession() ) {
+
+			List<Object[]> results = s.createSelectionQuery(
+					"select e.title, transactionId(e), modificationType(e) " +
+							"from Book e where e.id = :id " +
+							"order by transactionId(e)",
+					Object[].class
+			).setParameter( "id", 1L ).getResultList();
+
+			assertEquals( 3, results.size(), "Should have 3 audit rows (ADD, MOD, DEL)" );
+
+			// First revision: ADD
+			assertEquals( "Original", results.get( 0 )[0] );
+			assertEquals( 1, results.get( 0 )[1] );
+			assertEquals( ModificationType.ADD.ordinal(), ((Number) results.get( 0 )[2]).intValue() );
+
+			// Second revision: MOD
+			assertEquals( "Updated", results.get( 1 )[0] );
+			assertEquals( 2, results.get( 1 )[1] );
+			assertEquals( ModificationType.MOD.ordinal(), ((Number) results.get( 1 )[2]).intValue() );
+
+			// Third revision: DEL
+			assertEquals( 3, results.get( 2 )[1] );
+			assertEquals( ModificationType.DEL.ordinal(), ((Number) results.get( 2 )[2]).intValue() );
+
+			// Test transactionId() in WHERE clause
+			List<String> titles = s.createSelectionQuery(
+					"select e.title from Book e " +
+							"where e.id = :id and transactionId(e) = :txId",
+					String.class
+			).setParameter( "id", 1L ).setParameter( "txId", 2 ).getResultList();
+
+			assertEquals( 1, titles.size() );
+			assertEquals( "Updated", titles.get( 0 ) );
+
+			// Test modificationType() in WHERE clause — find deletions
+			long delCount = s.createSelectionQuery(
+					"select count(e) from Book e " +
+							"where e.id = :id and modificationType(e) = :delType",
+					Long.class
+			).setParameter( "id", 1L )
+					.setParameter( "delType", ModificationType.DEL.ordinal() )
+					.getSingleResult();
+
+			assertEquals( 1, delCount );
+		}
+	}
+
+	@Audited
+	@Entity(name = "Book")
+	static class Book {
+		@Id
+		long id;
+		String title;
+	}
+}

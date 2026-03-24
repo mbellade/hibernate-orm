@@ -27,6 +27,28 @@ import org.hibernate.Incubating;
 @Incubating
 public interface AuditLog {
 	/**
+	 * A special transaction identifier that selects all
+	 * revisions from the audit table without filtering.
+	 * Pass this to
+	 * {@link org.hibernate.SessionBuilder#atTransaction(Object)
+	 * atTransaction()} to open a session that reads all audit
+	 * rows, including deletions.
+	 * <p>
+	 * Usage:
+	 * <pre>
+	 * try (var s = sf.withOptions()
+	 *         .atTransaction(AuditLog.ALL_REVISIONS).open()) {
+	 *     var history = s.createSelectionQuery(
+	 *             "from MyEntity where id = :id",
+	 *             MyEntity.class)
+	 *         .setParameter("id", entityId)
+	 *         .getResultList();
+	 * }
+	 * </pre>
+	 */
+	Object ALL_REVISIONS = org.hibernate.engine.spi.LoadQueryInfluencers.ALL_REVISIONS;
+
+	/**
 	 * List all transaction identifiers where the given entity
 	 * was modified, ordered chronologically.
 	 *

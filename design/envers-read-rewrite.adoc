@@ -125,9 +125,9 @@ projections, joins, and aggregations.
 
 | 5
 | Revision history for entity (`getRevisions(Class, id)`)
-| Missing
-| New API: query audit table for distinct TX IDs where entity key matches
-| [red]#TODO#
+| Done
+| `AuditLog.getRevisions(Class, id)` — SQL AST query against audit table
+| [green]#DONE#
 
 | 6
 | Revision-to-timestamp mapping (`getRevisionDate()`, `getRevisionNumberForDate()`)
@@ -138,9 +138,10 @@ projections, joins, and aggregations.
 
 | 7
 | RevisionType access (was change ADD/MOD/DEL?)
-| Missing at read time
-| `REVTYPE` column exists but isn't exposed to readers. Need API to surface modification type.
-| [red]#TODO#
+| Partial
+| `AuditLog.getModificationType()` for metadata queries ([green]#DONE#).
+  Full read-time access via `modificationType()` HQL function + `allRevisions()` mode ([red]#TODO#).
+| [yellow]#PARTIAL#
 
 | 8
 | Attribute exclusion (`@NotAudited` equivalent)
@@ -162,13 +163,13 @@ projections, joins, and aggregations.
 
 | 10
 | `forEntitiesModifiedAtRevision` — entities changed IN a specific revision (exact match, not point-in-time)
-| Requires new query: `SELECT ... FROM foo_aud WHERE REV = :txId`
-| [red]#TODO#
+| `AuditLog.getEntitiesModifiedAt()` / `findEntitiesModifiedAt()` — SQL AST query + `atTransaction` reads
+| [green]#DONE#
 
 | 11
 | `forRevisionsOfEntity` — full revision history with entity snapshots
-| Combine #5 (revision list) + `atTransaction` reads for each; or direct audit table query
-| [red]#TODO#
+| `allRevisions()` mode + `transactionId()`/`modificationType()` HQL functions + revision entity join
+| [yellow]#PARTIAL# — `allRevisions` mode + HQL functions implemented, tests pending
 
 | 12
 | Modified property tracking (`withModifiedFlag`, `hasChanged()`)
@@ -209,8 +210,8 @@ projections, joins, and aggregations.
 
 | 18
 | Audit configuration inspection (`isEntityClassAudited()`)
-| Expose via metamodel: `entityPersister.getAuditMapping() != null`
-| [red]#TODO#
+| `AuditLog.isAudited(Class)` — delegates to `entityPersister.getAuditMapping() != null`
+| [green]#DONE#
 
 | 19
 | First-level cache for audit reads
@@ -652,26 +653,112 @@ types, entity IDs) and convenience methods that combine them with `atTransaction
 for full entity snapshot reads. Users can also use the metadata methods directly with
 `atTransaction` sessions for more control (e.g. custom HQL queries at a revision).
 
-==== 1.3 RevisionType exposure during reads
+==== 1.3 RevisionType exposure and audit history reads
 
-* [ ] Investigate whether `REVTYPE` can be surfaced when reading via `atTransaction` sessions
-* [ ] Consider: should a deleted entity be loadable (returning the pre-deletion state + DEL type)?
-  Currently `find()` returns null for deleted entities — this is correct for "current state at revision"
-  but users may want to know "what was the entity before deletion"
+`REVTYPE` and `REV` should be accessible during reads, but not as synthetic entity properties.
+Instead, custom HQL functions provide clean access:
+
+* `transactionId(e)` — resolves to the `REV` column of the audit table
+* `modificationType(e)` — resolves to the `REVTYPE` column of the audit table
+
+These functions only work when querying against the audit table (temporal/audit mode).
+
+===== All-revisions mode via `AuditLog.ALL_REVISIONS`
+
+In addition to `atTransaction(txId)` (point-in-time snapshot with MAX subquery + REVTYPE != DEL filter),
+passing `AuditLog.ALL_REVISIONS` to `atTransaction()` provides raw access to the audit table:
+
+* Reads from the audit table (same as `atTransaction`)
+* Does NOT apply the MAX(REV) subquery — returns ALL audit rows
+* Does NOT filter out REVTYPE = DEL — deleted entity rows are included
+* Enables the `transactionId()` and `modificationType()` HQL functions
+
+This mode solves two problems at once:
+
+1. **History queries** (equivalent to envers' `forRevisionsOfEntity`):
++
+[source,java]
+----
+try (var s = sf.withOptions()
+        .atTransaction(AuditLog.ALL_REVISIONS).open()) {
+    var history = s.createSelectionQuery("""
+            select e, r, modificationType(e)
+            from MyEntity e join RevisionEntity r
+                on transactionId(e) = r.id
+            where e.id = :id
+            order by transactionId(e)
+            """, Object[].class)
+        .setParameter("id", entityId)
+        .getResultList();
+    // Each result: [entity, revisionEntity, ModificationType]
+}
+----
+
+2. **Deleted entity access** (currently `find()` returns null for deleted entities):
++
+[source,java]
+----
+try (var s = sf.withOptions()
+        .atTransaction(AuditLog.ALL_REVISIONS).open()) {
+    var deleted = s.createSelectionQuery("""
+            select e from MyEntity e
+            where e.id = :id and modificationType(e) = 2
+            """, MyEntity.class)
+        .setParameter("id", entityId)
+        .getSingleResultOrNull();
+    // Returns the entity state at the moment of deletion
+}
+----
+
+===== `AuditEntry` result record
+
+A convenience record for audit history results:
+
+[source,java]
+----
+public record AuditEntry<T>(T entity, Object revision, ModificationType modificationType) {}
+----
+
+Where `revision` is:
+
+* The revision entity instance (e.g. `DefaultRevisionEntity`) if a `RevisionEntitySupplier` is configured
+* The plain transaction ID (e.g. `Instant`, `Integer`) otherwise
+
+The `AuditLog` API can provide convenience methods that use `allRevisions()` internally:
+
+[source,java]
+----
+<T> List<AuditEntry<T>> getHistory(Class<T> entityClass, Object id);
+----
+
+NOTE: When selecting whole entities in all-revisions mode, the persistence context deduplicates
+rows with the same primary key — so multiple audit rows for the same entity collapse to one
+instance. Use scalar/tuple projections (e.g. `select e.title, transactionId(e)`) or a
+`StatelessSession` with scalar projections for history queries. Selecting entities directly
+is appropriate only when each row has a unique PK (e.g. "modified at" queries).
+
+===== Implementation tasks
+
+* [x] Register `transactionId()` and `modificationType()` as SQM functions
+  (resolve to `ColumnReference` for REV/REVTYPE columns on the audit table) —
+  `AuditColumnFunction` in `o.h.audit.internal`, registered in `Dialect.initializeFunctionRegistry`
+* [x] Implement `allRevisions` mode via `AuditLog.ALL_REVISIONS` sentinel constant
+  (pass to `atTransaction()` — uses audit table without MAX subquery or REVTYPE filter)
+* [x] Define `AuditEntry<T>` record in `org.hibernate.audit`
+* [x] Test HQL functions (`AuditColumnFunctionTest`) — select, where, order by clauses
+* [ ] Add `AuditLog.getHistory()` convenience method
+* [ ] Tests for deleted entity access, revision entity joins
 
 === Phase 2: Enhanced Read Capabilities (Tier 2)
 
 ==== 2.1 Revision history with snapshots
 
-* [ ] `AuditLog.getRevisions()` returns TX IDs
-* [ ] User opens `atTransaction` sessions to read each snapshot
-* [ ] Consider convenience: `List<AuditEntry<T>>` returning entity + modification type + TX ID
+Covered by `allRevisions()` mode + `transactionId()`/`modificationType()` functions above.
 
 ==== 2.2 "Modified at" queries
 
-* [ ] Entities changed IN a specific transaction (exact `REV = :txId` match)
-* [ ] vs. current behavior: effective at a transaction (`REV \<= :txId` with MAX subquery)
-* [ ] Could be an `AuditLog` method or a mode on the session builder
+Covered by `AuditLog.getEntitiesModifiedAt()` / `findEntitiesModifiedAt()` (SQL AST, [green]#DONE#)
+and by `allRevisions()` mode with HQL filter `where transactionId(e) = :txId`.
 
 ==== 2.3 Diff support
 
@@ -986,6 +1073,10 @@ public class RevisionInfoSupplier extends RevisionEntitySupplier<Integer> {
 * [ ] Test sequence continuity: new revision numbers continue from where envers left off
 * [ ] Document ValidityAuditStrategy migration path and limitations
 * [x] Built-in `RevisionEntitySupplier` for zero-effort migration
+* [x] Built-in `DefaultRevisionEntity` + `DefaultRevisionEntitySupplier` — opt-in envers-compatible REVINFO entity
+* [ ] Other built-in hibernate-envers revision entity types
+* [ ] Auto-contribute revision entity class to domain model when `RevisionEntitySupplier` is configured
+  (currently users must add the revision entity to their annotated classes manually)
 * [ ] Consider: configuration property to specify audit table suffix for envers compatibility
   (case sensitivity: envers default `_AUD` vs core default `_aud`)
 

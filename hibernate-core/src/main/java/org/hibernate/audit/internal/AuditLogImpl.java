@@ -128,7 +128,8 @@ public class AuditLogImpl implements AuditLog {
 		);
 
 		final List<Object> results = executeQuery(
-				querySpec, domainResults,
+				querySpec,
+				domainResults,
 				(bindings, session) -> {
 					bindings.registerParametersForEachJdbcValue(
 							id,

@@ -276,7 +276,7 @@ public class AuditMappingImpl implements AuditMapping {
 			LazyTableGroup lazyTableGroup,
 			NavigablePath navigablePath,
 			SqlAstCreationState creationState) {
-		if ( creationState.getLoadQueryInfluencers().getTemporalIdentifier() != null ) {
+		if ( hasTemporalPredicate( creationState.getLoadQueryInfluencers() ) ) {
 			predicateConsumer.accept( createRestriction(
 					associatedEntityMappingType.getEntityPersister(),
 					lazyTableGroup.resolveTableReference( navigablePath, getTableName() ),
@@ -293,7 +293,7 @@ public class AuditMappingImpl implements AuditMapping {
 			TableGroup tableGroup,
 			SqlAliasBaseGenerator sqlAliasBaseGenerator,
 			LoadQueryInfluencers influencers) {
-		if ( influencers.getTemporalIdentifier() != null ) {
+		if ( hasTemporalPredicate( influencers ) ) {
 			predicateConsumer.accept( createRestriction(
 					associatedEntityDescriptor.getEntityPersister(),
 					tableGroup.resolveTableReference( getTableName() ),
@@ -310,7 +310,7 @@ public class AuditMappingImpl implements AuditMapping {
 			TableGroup tableGroup,
 			SqlAliasBaseGenerator sqlAliasBaseGenerator,
 			LoadQueryInfluencers influencers) {
-		if ( influencers.getTemporalIdentifier() != null ) {
+		if ( hasTemporalPredicate( influencers ) ) {
 			predicateConsumer.accept( createRestriction(
 					collectionDescriptor,
 					tableGroup.resolveTableReference( getTableName() ),
@@ -388,7 +388,7 @@ public class AuditMappingImpl implements AuditMapping {
 			StandardTableGroup tableGroup,
 			NamedTableReference rootTableReference,
 			EntityMappingType entityMappingType) {
-		if ( creationState.getLoadQueryInfluencers().getTemporalIdentifier() != null ) {
+		if ( hasTemporalPredicate( creationState.getLoadQueryInfluencers() ) ) {
 			predicateCollector.get().accept( createRestriction(
 					entityMappingType,
 					tableGroup.resolveTableReference( getTableName() ),
@@ -406,5 +406,15 @@ public class AuditMappingImpl implements AuditMapping {
 	@Override
 	public boolean isAffectedByInfluencers(LoadQueryInfluencers influencers) {
 		return influencers.getTemporalIdentifier() != null;
+	}
+
+	/**
+	 * Whether the influencers require a point-in-time temporal predicate.
+	 * Returns {@code false} for "all revisions" mode, where the audit
+	 * table is used but no filtering is applied.
+	 */
+	private static boolean hasTemporalPredicate(LoadQueryInfluencers influencers) {
+		return influencers.getTemporalIdentifier() != null
+				&& !influencers.isAllRevisions();
 	}
 }

@@ -73,6 +73,14 @@ public class RevisionEntitySupplier<T> implements TransactionIdentifierSupplier<
 		return identifierType;
 	}
 
+	/**
+	 * The revision entity class, or {@code null} if this supplier
+	 * uses a custom {@link #createRevisionEntity()} override.
+	 */
+	public Class<?> getRevisionEntityClass() {
+		return revisionEntityClass;
+	}
+
 	@Override
 	@SuppressWarnings("unchecked")
 	public T getTransactionIdentifier(SharedSessionContractImplementor session) {

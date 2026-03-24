@@ -58,6 +58,12 @@ public class LoadQueryInfluencers implements Serializable {
 
 	private final EffectiveEntityGraph effectiveEntityGraph;
 
+	/**
+	 * Sentinel value for {@link #temporalIdentifier} indicating
+	 * that all audit revisions should be returned without filtering.
+	 */
+	public static final Object ALL_REVISIONS = new Object();
+
 	private Boolean readOnly;
 	private Object temporalIdentifier;
 
@@ -104,6 +110,10 @@ public class LoadQueryInfluencers implements Serializable {
 
 	public void setTemporalIdentifier(Object temporalIdentifier) {
 		this.temporalIdentifier = temporalIdentifier;
+	}
+
+	public boolean isAllRevisions() {
+		return temporalIdentifier == ALL_REVISIONS;
 	}
 
 
