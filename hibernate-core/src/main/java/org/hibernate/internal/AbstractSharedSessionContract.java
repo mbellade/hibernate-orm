@@ -40,6 +40,7 @@ import org.hibernate.engine.jdbc.internal.JdbcCoordinatorImpl;
 import org.hibernate.engine.jdbc.spi.JdbcCoordinator;
 import org.hibernate.engine.jdbc.spi.JdbcServices;
 import org.hibernate.engine.spi.EntityKey;
+import org.hibernate.engine.spi.TemporalEntityKey;
 import org.hibernate.engine.spi.ExceptionConverter;
 import org.hibernate.engine.spi.LoadQueryInfluencers;
 import org.hibernate.engine.spi.SessionEventListenerManager;
@@ -862,7 +863,7 @@ abstract class AbstractSharedSessionContract implements SharedSessionContractImp
 		// real value (not null, not ALL_REVISIONS sentinel), so that the PC can
 		// distinguish the same entity at different points in time.
 		return temporalId != null && temporalId != LoadQueryInfluencers.ALL_REVISIONS
-				? new EntityKey( id, persister, temporalId )
+				? new TemporalEntityKey( id, persister, temporalId )
 				: new EntityKey( id, persister );
 	}
 

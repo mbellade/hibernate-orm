@@ -8,7 +8,6 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.Serializable;
-import java.util.Objects;
 
 import org.hibernate.AssertionFailure;
 import org.hibernate.persister.entity.EntityPersister;
@@ -27,60 +26,55 @@ import static org.hibernate.pretty.MessageHelper.infoString;
  * <p>
  * Performance considerations: lots of instances of this type are created at runtime. Make sure each one is as small as possible
  * by storing just the essential needed.
+ * <p>
+ * For temporal (audit) entities, use {@link TemporalEntityKey} which includes a transaction identifier
+ * to isolate historical snapshots in the persistence context.
  *
  * @author Gavin King
  * @author Sanne Grinovero
+ *
+ * @see TemporalEntityKey
  */
-public final class EntityKey implements Serializable {
+public sealed class EntityKey implements Serializable permits TemporalEntityKey {
 
 	private final Object identifier;
 	private final int hashCode;
 	private final EntityPersister persister;
-	private final @Nullable Object revision;
 
 	/**
 	 * Construct a unique identifier for an entity class instance.
 	 * <p>
-	 * Prefer {@link SharedSessionContractImplementor#generateEntityKey} which
-	 * automatically includes the audit revision when operating in a temporal
-	 * context, ensuring correct persistence-context isolation of historical
-	 * snapshots.
+	 * For temporal (audit) contexts, prefer
+	 * {@link SharedSessionContractImplementor#generateEntityKey} which
+	 * automatically creates a {@link TemporalEntityKey} when operating
+	 * in a temporal context.
 	 *
 	 * @param id The entity id
 	 * @param persister The entity persister
 	 */
 	public EntityKey(@Nullable Object id, EntityPersister persister) {
-		this( id, persister, null );
+		this( id, persister, 0 );
 	}
 
 	/**
-	 * Construct a unique identifier for a temporal snapshot of an entity.
-	 *
-	 * @param id The entity id
-	 * @param persister The entity persister
-	 * @param revision The audit revision (null for non-temporal entities)
-	 *
-	 * @see SharedSessionContractImplementor#generateEntityKey
+	 * @param txIdHashCode hash code contribution from the transaction identifier
 	 */
-	public EntityKey(@Nullable Object id, EntityPersister persister, @Nullable Object revision) {
+	EntityKey(@Nullable Object id, EntityPersister persister, int txIdHashCode) {
 		this.persister = persister;
 		if ( id == null ) {
 			throw new AssertionFailure( "null identifier (" + persister.getEntityName() + ")" );
 		}
 		this.identifier = id;
-		this.revision = revision;
-		this.hashCode = generateHashCode();
+		this.hashCode = generateHashCode( id, persister, txIdHashCode );
 	}
 
-	private int generateHashCode() {
+	private static int generateHashCode(Object id, EntityPersister persister, int txIdHashCode) {
 		int result = 17;
 		final String rootEntityName = persister.getRootEntityName();
 		result = 37 * result + rootEntityName.hashCode();
 		final Type identifierType = persister.getIdentifierType().getTypeForEqualsHashCode();
-		result = 37 * result + ( identifierType == null ? identifier.hashCode() : identifierType.getHashCode( identifier, persister.getFactory() ) );
-		if ( revision != null ) {
-			result = 37 * result + revision.hashCode();
-		}
+		result = 37 * result + ( identifierType == null ? id.hashCode() : identifierType.getHashCode( id, persister.getFactory() ) );
+		result = 37 * result + txIdHashCode;
 		return result;
 	}
 
@@ -105,18 +99,19 @@ public final class EntityKey implements Serializable {
 	}
 
 	/**
-	 * The audit revision for this key, or {@code null} for non-temporal entities.
+	 * The audit transaction identifier for this key, or {@code null} for
+	 * non-temporal entities.
 	 * When non-null, this entity is a read-only historical snapshot.
 	 */
-	public @Nullable Object getRevision() {
-		return revision;
+	public @Nullable Object getTransactionId() {
+		return null;
 	}
 
 	/**
 	 * Whether this key refers to a temporal (historical) snapshot.
 	 */
 	public boolean isTemporal() {
-		return revision != null;
+		return false;
 	}
 
 	@Override
@@ -124,14 +119,13 @@ public final class EntityKey implements Serializable {
 		if ( this == other ) {
 			return true;
 		}
-		if ( other == null || EntityKey.class != other.getClass() ) {
+		if ( other == null || !( other instanceof EntityKey otherKey ) ) {
 			return false;
 		}
 
-		final EntityKey otherKey = (EntityKey) other;
 		return samePersistentType( otherKey )
 			&& sameIdentifier( otherKey )
-			&& Objects.equals( revision, otherKey.revision );
+			&& sameTransactionId( otherKey );
 
 	}
 
@@ -140,6 +134,18 @@ public final class EntityKey implements Serializable {
 		return this.identifier == otherKey.identifier || (
 				(identifierType = persister.getIdentifierType().getTypeForEqualsHashCode()) == null && identifier.equals( otherKey.identifier )
 						|| identifierType != null && identifierType.isEqual( otherKey.identifier, this.identifier, persister.getFactory() ) );
+	}
+
+	/**
+	 * Compare transaction identifiers without virtual dispatch — uses
+	 * instanceof on the sealed hierarchy for optimal JIT performance.
+	 */
+	private boolean sameTransactionId(final EntityKey otherKey) {
+		if ( this instanceof TemporalEntityKey t1 ) {
+			return otherKey instanceof TemporalEntityKey t2
+					&& t1.getTransactionId().equals( t2.getTransactionId() );
+		}
+		return !( otherKey instanceof TemporalEntityKey );
 	}
 
 	private boolean samePersistentType(final EntityKey otherKey) {
@@ -168,7 +174,7 @@ public final class EntityKey implements Serializable {
 	public void serialize(ObjectOutputStream oos) throws IOException {
 		oos.writeObject( identifier );
 		oos.writeObject( persister.getEntityName() );
-		oos.writeObject( revision );
+		oos.writeObject( getTransactionId() );
 	}
 
 	/**
@@ -178,7 +184,7 @@ public final class EntityKey implements Serializable {
 	 * @param ois The stream from which to read the entry.
 	 * @param sessionFactory The SessionFactory owning the Session being deserialized.
 	 *
-	 * @return The deserialized EntityEntry
+	 * @return The deserialized EntityKey
 	 *
 	 * @throws IOException Thrown by Java I/O
 	 * @throws ClassNotFoundException Thrown by Java I/O
@@ -186,10 +192,12 @@ public final class EntityKey implements Serializable {
 	public static EntityKey deserialize(ObjectInputStream ois, SessionFactoryImplementor sessionFactory) throws IOException, ClassNotFoundException {
 		final Object id = ois.readObject();
 		final String entityName = (String) ois.readObject();
-		final Object revision = ois.readObject();
+		final Object txId = ois.readObject();
 		final EntityPersister entityPersister =
 				sessionFactory.getMappingMetamodel()
-						.getEntityDescriptor( entityName);
-		return new EntityKey( id, entityPersister, revision );
+						.getEntityDescriptor( entityName );
+		return txId != null
+				? new TemporalEntityKey( id, entityPersister, txId )
+				: new EntityKey( id, entityPersister );
 	}
 }

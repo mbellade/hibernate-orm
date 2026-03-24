@@ -27,6 +27,7 @@ import org.hibernate.engine.internal.ForeignKeys;
 import org.hibernate.engine.spi.EntityEntry;
 import org.hibernate.engine.spi.EntityHolder;
 import org.hibernate.engine.spi.EntityKey;
+import org.hibernate.engine.spi.TemporalEntityKey;
 import org.hibernate.engine.spi.LoadQueryInfluencers;
 import org.hibernate.engine.spi.EntityUniqueKey;
 import org.hibernate.engine.spi.PersistenceContext;
@@ -806,12 +807,15 @@ public class EntityInitializerImpl
 							discriminatorAssembler, entityDescriptor );
 			assert concreteDescriptor != null;
 		}
-		// For audited entities, include the per-row revision in the key
-		// so the PC distinguishes the same entity at different revisions
-		final Object revision = auditTransactionIdAssembler != null
+		// For audited entities, include the per-row transaction identifier
+		// in the key so the PC distinguishes the same entity at different
+		// points in time
+		final Object txId = auditTransactionIdAssembler != null
 				? auditTransactionIdAssembler.assemble( data.getRowProcessingState() )
 				: null;
-		data.entityKey = new EntityKey( id, concreteDescriptor, revision );
+		data.entityKey = txId != null
+				? new TemporalEntityKey( id, concreteDescriptor, txId )
+				: new EntityKey( id, concreteDescriptor );
 	}
 
 	protected void setMissing(EntityInitializerData data) {

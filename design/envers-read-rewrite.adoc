@@ -733,9 +733,11 @@ The `AuditLog` API can provide convenience methods that use `allRevisions()` int
 <T> List<AuditEntry<T>> getHistory(Class<T> entityClass, Object id);
 ----
 
-NOTE: In all-revisions mode, revision-aware `EntityKey` (with revision in `equals`/`hashCode`)
-ensures the `PersistenceContext` naturally isolates the same entity at different revisions.
-Each audit row produces a distinct entity instance keyed by `(entityClass, id, revision)`.
+NOTE: In all-revisions mode, `TemporalEntityKey` (a sealed subtype of `EntityKey` that includes the
+transaction identifier in `equals`/`hashCode`) ensures the `PersistenceContext` naturally isolates
+the same entity at different points in time. Each audit row produces a distinct entity instance
+keyed by `(entityClass, id, txId)`. The base `EntityKey` remains lightweight (no extra fields) —
+`TemporalEntityKey` is only allocated for entities loaded from audit tables.
 All temporal entities are forced `Status.READ_ONLY` (via `EntityKey.isTemporal()`) — no dirty
 tracking, no flush, no 2LC caching.
 
@@ -757,8 +759,9 @@ Associations between `@Audited` entities work transparently in both point-in-tim
   session at proxy creation time. When the proxy is later initialized via `immediateLoad()`, the
   captured revision is temporarily set on the session's `LoadQueryInfluencers` (then restored).
   This mirrors envers' `ToOneDelegateSessionImplementor` pattern but without session wrapping.
-* **Revision-aware EntityKey**: `EntityKey` includes an optional `revision` field in `equals()`/
-  `hashCode()`, preventing PC deduplication across revisions (e.g. Author#20@rev201 ≠ Author#20@rev202).
+* **`TemporalEntityKey`**: Sealed subtype of `EntityKey` that includes the transaction identifier
+  in `equals()`/`hashCode()`, preventing PC deduplication across revisions (e.g. Author#20@tx201 ≠
+  Author#20@tx202). The base `EntityKey` has no extra fields — zero memory overhead for non-auditing apps.
 
 ===== Implementation tasks
 
@@ -780,7 +783,7 @@ Associations between `@Audited` entities work transparently in both point-in-tim
   `getRevisions()`, `getEntitiesModifiedAt()`, etc. to allow filtering by entity properties,
   transaction ID ranges, modification types, and more — without users having to drop down to raw HQL.)
 * [x] Audited associations in point-in-time + all-revisions modes
-  (revision-aware EntityKey + per-row temporal identifier + implicit REV_TXN selection)
+  (`TemporalEntityKey` + per-row temporal identifier + implicit REV_TXN selection)
 * [x] Correlated temporal predicate for join-fetched associations in all-revisions mode
   (`AuditMappingImpl`: `findParentRevColumn()` + `createRestriction()` with `Expression` upper bound)
 * [x] Lazy to-one proxy with captured revision (`AbstractLazyInitializer.temporalIdentifier`)
@@ -1207,8 +1210,8 @@ public class RevisionInfoSupplier extends RevisionEntitySupplier<Integer> {
   Internally uses `withTemporalIdentifier()` save/restore pattern to temporarily set the temporal
   identifier for each query.
 * Performance: `getRevisions()` on entities with many revisions — pagination?
-* **Audited associations**: [green]#RESOLVED# — associations work transparently via revision-aware
-  `EntityKey`, per-row temporal identifier, and lazy proxy temporal capture. See architecture section above.
+* **Audited associations**: [green]#RESOLVED# — associations work transparently via
+  `TemporalEntityKey`, per-row temporal identifier, and lazy proxy temporal capture. See architecture section above.
 
 === Schema & Migration
 
