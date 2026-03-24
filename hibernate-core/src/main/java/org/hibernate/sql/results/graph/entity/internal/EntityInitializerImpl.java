@@ -599,6 +599,7 @@ public class EntityInitializerImpl
 			if ( oldEntityKey != null
 					&& previousRowReuse
 					&& oldEntityInstance != null
+					&& !isAllRevisions( data )
 					&& areKeysEqual( oldEntityKey.getIdentifier(), id )
 					&& !oldEntityHolder.isDetached() ) {
 				data.setState( State.INITIALIZED );
@@ -1176,6 +1177,13 @@ public class EntityInitializerImpl
 									this
 							);
 
+			if ( isAllRevisions( data ) ) {
+				// In all-revisions mode, always create a fresh detached instance per row.
+				data.entityInstanceForNotify = instantiateEntity( data );
+				data.setInstance( data.entityInstanceForNotify );
+				return;
+			}
+
 			if ( useEmbeddedIdentifierInstanceAsEntity( data ) ) {
 				data.setInstance( data.entityInstanceForNotify = rowProcessingState.getEntityId() );
 			}
@@ -1497,7 +1505,10 @@ public class EntityInitializerImpl
 	@Override
 	public void initializeInstance(EntityInitializerData data) {
 		if ( data.getState() == State.RESOLVED ) {
-			if ( !skipInitialization( data ) ) {
+			if ( isAllRevisions( data ) ) {
+				initializeAllRevisionsInstance( data );
+			}
+			else if ( !skipInitialization( data ) ) {
 				assert consistentInstance( data );
 				initializeEntityInstance( data );
 			}
@@ -1984,6 +1995,18 @@ public class EntityInitializerImpl
 				}
 			}
 		}
+	}
+
+	private boolean isAllRevisions(EntityInitializerData data) {
+		// In all-revisions mode, each row represents a distinct historical snapshot of the entity,
+		// so we must not reuse instances from the PersistenceContext.
+		return data.getRowProcessingState().getSession()
+				.getLoadQueryInfluencers().isAllRevisions();
+	}
+
+	private void initializeAllRevisionsInstance(EntityInitializerData data) {
+		final var resolvedEntityState = extractConcreteTypeStateValues( data );
+		data.concreteDescriptor.setValues( data.entityInstanceForNotify, resolvedEntityState );
 	}
 
 	private boolean isReadOnly(RowProcessingState rowProcessingState, SharedSessionContractImplementor persistenceContext) {

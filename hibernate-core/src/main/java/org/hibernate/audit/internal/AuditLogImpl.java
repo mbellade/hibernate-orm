@@ -4,6 +4,7 @@
  */
 package org.hibernate.audit.internal;
 
+import org.hibernate.audit.AuditEntry;
 import org.hibernate.audit.AuditLog;
 import org.hibernate.audit.ModificationType;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
@@ -213,6 +214,34 @@ public class AuditLogImpl implements AuditLog {
 			return session.getMultiple( entityClass, ids ).stream()
 					.filter( java.util.Objects::nonNull )
 					.toList();
+		}
+	}
+
+	@Override
+	public <T> List<AuditEntry<T>> getHistory(Class<T> entityClass, Object id) {
+		final var persister = getEntityPersister( entityClass );
+		requireAuditMapping( persister );
+		final var entityName = persister.getEntityName();
+
+		try ( var session = sessionFactory.withStatelessOptions()
+				.atTransaction( ALL_REVISIONS ).openStatelessSession() ) {
+			final List<Object[]> rows = session.createSelectionQuery(
+					"select e, transactionId(e), modificationType(e)" +
+							" from " + entityName + " e" +
+							" where e.id = :id" +
+							" order by transactionId(e)",
+					Object[].class
+			).setParameter( "id", id ).getResultList();
+
+			final List<AuditEntry<T>> result = new ArrayList<>( rows.size() );
+			for ( var row : rows ) {
+				@SuppressWarnings("unchecked")
+				final var entity = (T) row[0];
+				final var revision = row[1];
+				final var modType = ModificationType.values()[( (Number) row[2] ).intValue()];
+				result.add( new AuditEntry<>( entity, revision, modType ) );
+			}
+			return result;
 		}
 	}
 

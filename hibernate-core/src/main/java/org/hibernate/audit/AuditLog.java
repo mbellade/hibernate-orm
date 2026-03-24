@@ -115,4 +115,24 @@ public interface AuditLog {
 	 * @param <T> the entity type
 	 */
 	<T> List<T> findEntitiesModifiedAt(Class<T> entityClass, Object transactionId);
+
+	/**
+	 * Get the full audit history for an entity, ordered
+	 * chronologically by transaction identifier.
+	 * <p>
+	 * Each entry contains the entity snapshot, the transaction
+	 * identifier (or revision entity), and the
+	 * {@linkplain ModificationType modification type}
+	 * (ADD/MOD/DEL).
+	 * <p>
+	 * For DEL entries, the entity snapshot reflects the state
+	 * at the moment of deletion.
+	 *
+	 * @param entityClass the audited entity class
+	 * @param id the entity identifier
+	 * @return the audit history as a list of {@link AuditEntry}
+	 *
+	 * @param <T> the entity type
+	 */
+	<T> List<AuditEntry<T>> getHistory(Class<T> entityClass, Object id);
 }

@@ -7,6 +7,7 @@ package org.hibernate.temporal;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import org.hibernate.annotations.Audited;
+import org.hibernate.audit.AuditEntry;
 import org.hibernate.audit.AuditLog;
 import org.hibernate.audit.ModificationType;
 import org.hibernate.cfg.StateManagementSettings;
@@ -22,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SessionFactory
 @DomainModel(annotatedClasses = AuditColumnFunctionTest.Book.class)
@@ -104,6 +106,21 @@ class AuditColumnFunctionTest {
 			assertEquals( 1, titles.size() );
 			assertEquals( "Updated", titles.get( 0 ) );
 
+			// Test plain entity select — each row should be a distinct snapshot
+			List<Book> allBooks = s.createSelectionQuery(
+					"from Book e where e.id = :id order by transactionId(e)",
+					Book.class
+			).setParameter( "id", 1L ).getResultList();
+			assertEquals( 3, allBooks.size() );
+			// Each row should be a distinct entity instance (not deduplicated)
+			assertTrue( allBooks.get( 0 ) != allBooks.get( 1 ),
+					"All-revisions entities should be distinct instances" );
+			assertTrue( allBooks.get( 1 ) != allBooks.get( 2 ),
+					"All-revisions entities should be distinct instances" );
+			// Each instance should reflect the state at its revision
+			assertEquals( "Original", allBooks.get( 0 ).title );
+			assertEquals( "Updated", allBooks.get( 1 ).title );
+
 			// Test modificationType() in WHERE clause — find deletions
 			long delCount = s.createSelectionQuery(
 					"select count(e) from Book e " +
@@ -115,6 +132,51 @@ class AuditColumnFunctionTest {
 
 			assertEquals( 1, delCount );
 		}
+	}
+
+	@Test
+	void testGetHistory(SessionFactoryScope scope) {
+		currentTxId = 0;
+
+		scope.getSessionFactory().inTransaction( session -> {
+			var book = new Book();
+			book.id = 2L;
+			book.title = "First";
+			session.persist( book );
+		} );
+
+		scope.getSessionFactory().inTransaction( session -> {
+			var book = session.find( Book.class, 2L );
+			book.title = "Second";
+		} );
+
+		scope.getSessionFactory().inTransaction( session -> {
+			var book = session.find( Book.class, 2L );
+			session.remove( book );
+		} );
+
+		var history = scope.getSessionFactory().getAuditLog()
+				.getHistory( Book.class, 2L );
+
+		assertEquals( 3, history.size() );
+
+		// ADD
+		AuditEntry<Book> add = history.get( 0 );
+		assertEquals( "First", add.entity().title );
+		assertEquals( ModificationType.ADD, add.modificationType() );
+
+		// MOD
+		AuditEntry<Book> mod = history.get( 1 );
+		assertEquals( "Second", mod.entity().title );
+		assertEquals( ModificationType.MOD, mod.modificationType() );
+
+		// DEL
+		AuditEntry<Book> del = history.get( 2 );
+		assertEquals( ModificationType.DEL, del.modificationType() );
+
+		// Each entity should be a distinct instance
+		assertTrue( add.entity() != mod.entity() );
+		assertTrue( mod.entity() != del.entity() );
 	}
 
 	@Audited

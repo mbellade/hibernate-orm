@@ -138,10 +138,10 @@ projections, joins, and aggregations.
 
 | 7
 | RevisionType access (was change ADD/MOD/DEL?)
-| Partial
-| `AuditLog.getModificationType()` for metadata queries ([green]#DONE#).
-  Full read-time access via `modificationType()` HQL function + `allRevisions()` mode ([red]#TODO#).
-| [yellow]#PARTIAL#
+| Done
+| `AuditLog.getModificationType()` for metadata queries.
+  Full read-time access via `modificationType()` HQL function + `allRevisions()` mode.
+| [green]#DONE#
 
 | 8
 | Attribute exclusion (`@NotAudited` equivalent)
@@ -169,7 +169,7 @@ projections, joins, and aggregations.
 | 11
 | `forRevisionsOfEntity` — full revision history with entity snapshots
 | `allRevisions()` mode + `transactionId()`/`modificationType()` HQL functions + revision entity join
-| [yellow]#PARTIAL# — `allRevisions` mode + HQL functions implemented, tests pending
+| [yellow]#PARTIAL# — HQL functions + entity dedup fix done; `AuditLog.getHistory()` + association tests pending
 
 | 12
 | Modified property tracking (`withModifiedFlag`, `hasChanged()`)
@@ -215,8 +215,12 @@ projections, joins, and aggregations.
 
 | 19
 | First-level cache for audit reads
-| Standard session cache handles this for `atTransaction` sessions
-| [green]#DONE#
+| For point-in-time reads (`atTransaction(txId)`), the session's PC handles caching naturally.
+  For `AuditLog` (SessionFactory-scoped singleton), no cache — each call is self-contained.
+  Users needing repeated reads of the same entity@revision within a unit of work should use
+  `atTransaction` sessions directly. A dedicated `AuditLog`-scoped cache could be added later
+  if performance demands it.
+| [green]#DONE# — via session PC for `atTransaction`; `AuditLog` deferred by design
 
 | 20
 | `RelationTargetAuditMode.NOT_AUDITED` (mixed audited/non-audited relations)
@@ -731,11 +735,20 @@ The `AuditLog` API can provide convenience methods that use `allRevisions()` int
 <T> List<AuditEntry<T>> getHistory(Class<T> entityClass, Object id);
 ----
 
-NOTE: When selecting whole entities in all-revisions mode, the persistence context deduplicates
-rows with the same primary key — so multiple audit rows for the same entity collapse to one
-instance. Use scalar/tuple projections (e.g. `select e.title, transactionId(e)`) or a
-`StatelessSession` with scalar projections for history queries. Selecting entities directly
-is appropriate only when each row has a unique PK (e.g. "modified at" queries).
+NOTE: In all-revisions mode, `EntityInitializerImpl` skips the `PersistenceContext` entirely.
+Each result set row produces a fresh, detached entity instance — no identity deduplication,
+no managed state, no dirty tracking or flush. This ensures multiple audit rows for the same
+primary key return distinct snapshots reflecting the entity state at each revision.
+The three interception points are: (1) skip `previousRowReuse` shortcut, (2) always instantiate
+a new entity in `resolveInstance()`, (3) simplified initialization via `initializeAllRevisionsInstance()`
+that just sets property values without PC registration.
+
+WARNING: The behavior of audited *associations* in all-revisions mode needs investigation.
+When an audited entity has associations (ManyToOne, OneToMany, etc.), the associated entities
+are currently initialized through the normal PC flow. This works for non-audited associations
+(they read from the current table, not audit tables), but audited associations (where both sides
+are `@Audited`) may need special handling to ensure the associated entity reflects the correct
+historical state at the queried revision, not just the current state.
 
 ===== Implementation tasks
 
@@ -746,7 +759,20 @@ is appropriate only when each row has a unique PK (e.g. "modified at" queries).
   (pass to `atTransaction()` — uses audit table without MAX subquery or REVTYPE filter)
 * [x] Define `AuditEntry<T>` record in `org.hibernate.audit`
 * [x] Test HQL functions (`AuditColumnFunctionTest`) — select, where, order by clauses
-* [ ] Add `AuditLog.getHistory()` convenience method
+* [x] Fix entity identity deduplication in all-revisions mode
+  (`EntityInitializerImpl`: skip PC, fresh instance per row — see `isAllRevisions()` + `initializeAllRevisionsInstance()`)
+* [x] Add `AuditLog.getHistory()` convenience method
+  (HQL internally via `ALL_REVISIONS` mode; no dedicated cache — `AuditLog` is SessionFactory-scoped,
+  so each call is self-contained. Users needing caching should use `atTransaction` sessions directly.)
+* [ ] Criteria-based restrictions for `AuditLog` queries
+  (envers' `AuditQuery` accepted custom `AuditCriterion` restrictions — e.g. `AuditEntity.property("name").eq("x")`;
+  the JPA Criteria API is the natural replacement, giving programmatic access to arbitrary predicates.
+  Consider accepting `Predicate` or `CriteriaQuery` fragments in `AuditLog` methods like `getHistory()`,
+  `getRevisions()`, `getEntitiesModifiedAt()`, etc. to allow filtering by entity properties,
+  transaction ID ranges, modification types, and more — without users having to drop down to raw HQL.)
+* [ ] Investigate audited associations in all-revisions mode
+  (ManyToOne/OneToMany where both sides are `@Audited` — does the associated entity
+  read from the audit table at the correct revision, or the current table?)
 * [ ] Tests for deleted entity access, revision entity joins
 
 === Phase 2: Enhanced Read Capabilities (Tier 2)
@@ -1110,7 +1136,20 @@ public class RevisionInfoSupplier extends RevisionEntitySupplier<Integer> {
    - Option A: SQL AST queries (like `AuditMappingImpl.applyPredicate()`)
    - Option B: HQL against audit tables
    - Option C: Direct JDBC
-   - Recommendation: SQL AST for consistency with existing infrastructure
+   - Current: metadata queries (getRevisions, getModificationType, getEntitiesModifiedAt) use SQL AST;
+     entity-returning queries (getHistory, find, findEntitiesModifiedAt) use HQL via `ALL_REVISIONS` sessions
+
+4. **Criteria-based restrictions for `AuditLog` API**
+   - Envers' `AuditQuery` accepted `AuditCriterion` restrictions (custom DSL: `AuditEntity.property("x").eq(...)`)
+   - Core should use the standard JPA Criteria API instead of a custom DSL
+   - Options for API shape:
+     * Accept `CriteriaQuery` fragments / `Predicate` instances in `AuditLog` methods
+     * Provide an `AuditLog.createQuery(Class)` returning a Criteria-like builder that
+       pre-configures the all-revisions context and exposes `transactionId` / `modificationType`
+     * Return a `CriteriaQuery` pre-configured for all-revisions mode that users can add predicates to
+   - Key question: how to expose `transactionId()` and `modificationType()` in the Criteria API?
+     These are HQL functions — they could be surfaced via `CriteriaBuilder.function()` or via
+     dedicated helper methods on an `AuditLog`-specific criteria builder
 
 4. **Modified property tracking (`withModifiedFlag`)**
    - Requires `_MOD` boolean columns per audited property
@@ -1149,6 +1188,15 @@ public class RevisionInfoSupplier extends RevisionEntitySupplier<Integer> {
 
 * Should `AuditLog` support `StatelessSession` or only `Session`?
 * Performance: `getRevisions()` on entities with many revisions — pagination?
+* **Audited associations in all-revisions mode**: When entity A has a `@ManyToOne` to entity B,
+  and both are `@Audited`, the all-revisions query for A should ideally load B's state at the
+  same revision — not B's current state. Currently, the `EntityInitializerImpl` all-revisions
+  bypass applies to ALL entity initializers in the session (since `isAllRevisions()` is session-scoped),
+  but sub-initializers for associations still resolve against the current table unless the association
+  itself participates in the audit table join. This needs investigation:
+  ** Does the audit table for A store B's FK value at the time of the audit row?
+  ** If yes, does `atTransaction` mode resolve B from B's audit table at that revision?
+  ** How does envers handle this? (envers has `RelationTargetAuditMode` and special relation handling)
 
 === Schema & Migration
 
