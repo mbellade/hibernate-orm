@@ -219,6 +219,11 @@ public class AuditLogImpl implements AuditLog {
 
 	@Override
 	public <T> List<AuditEntry<T>> getHistory(Class<T> entityClass, Object id) {
+		// todo (envers-rewrite) : we need to figure out:
+		// 	- how to detect there's a revision entity configured
+		//  - when we detect it, join it, instantiate it and return it as the second member
+		//    of the AuditEntry tuple instead of the transaction id
+
 		final var persister = getEntityPersister( entityClass );
 		requireAuditMapping( persister );
 		final var entityName = persister.getEntityName();

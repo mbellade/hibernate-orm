@@ -27,6 +27,7 @@ import org.hibernate.engine.internal.ForeignKeys;
 import org.hibernate.engine.spi.EntityEntry;
 import org.hibernate.engine.spi.EntityHolder;
 import org.hibernate.engine.spi.EntityKey;
+import org.hibernate.engine.spi.LoadQueryInfluencers;
 import org.hibernate.engine.spi.EntityUniqueKey;
 import org.hibernate.engine.spi.PersistenceContext;
 import org.hibernate.engine.spi.PersistentAttributeInterceptor;
@@ -116,6 +117,7 @@ public class EntityInitializerImpl
 	private final @Nullable BasicResultAssembler<?> discriminatorAssembler;
 	private final @Nullable DomainResultAssembler<?> versionAssembler;
 	private final @Nullable DomainResultAssembler<Object> rowIdAssembler;
+	private final @Nullable DomainResultAssembler<?> auditTransactionIdAssembler;
 
 	private final DomainResultAssembler<?>[][] assemblers;
 	private final @Nullable Initializer<?>[] allInitializers;
@@ -143,6 +145,7 @@ public class EntityInitializerImpl
 		protected @Nullable EntityKey entityKey;
 		protected @Nullable Object entityInstanceForNotify;
 		protected @Nullable EntityHolder entityHolder;
+		protected boolean allRevisions;
 
 		public EntityInitializerData(EntityInitializerImpl initializer, RowProcessingState rowProcessingState) {
 			super( rowProcessingState );
@@ -207,6 +210,7 @@ public class EntityInitializerImpl
 			@Nullable Fetch discriminatorFetch,
 			@Nullable DomainResult<?> keyResult,
 			@Nullable DomainResult<Object> rowIdResult,
+			@Nullable DomainResult<?> auditTransactionIdResult,
 			NotFoundAction notFoundAction,
 			boolean affectedByFilter,
 			@Nullable InitializerParent<?> parent,
@@ -277,6 +281,11 @@ public class EntityInitializerImpl
 				rowIdResult == null
 						? null :
 						rowIdResult.createResultAssembler( this, creationState );
+
+		auditTransactionIdAssembler =
+				auditTransactionIdResult == null
+						? null
+						: auditTransactionIdResult.createResultAssembler( this, creationState );
 
 		final int fetchableCount = entityDescriptor.getNumberOfFetchables();
 		final var subMappingTypes = rootEntityDescriptor.getSubMappingTypes();
@@ -797,7 +806,12 @@ public class EntityInitializerImpl
 							discriminatorAssembler, entityDescriptor );
 			assert concreteDescriptor != null;
 		}
-		data.entityKey = new EntityKey( id, concreteDescriptor );
+		// For audited entities, include the per-row revision in the key
+		// so the PC distinguishes the same entity at different revisions
+		final Object revision = auditTransactionIdAssembler != null
+				? auditTransactionIdAssembler.assemble( data.getRowProcessingState() )
+				: null;
+		data.entityKey = new EntityKey( id, concreteDescriptor, revision );
 	}
 
 	protected void setMissing(EntityInitializerData data) {
@@ -1178,10 +1192,20 @@ public class EntityInitializerImpl
 							);
 
 			if ( isAllRevisions( data ) ) {
-				// In all-revisions mode, always create a fresh detached instance per row.
-				data.entityInstanceForNotify = instantiateEntity( data );
-				data.setInstance( data.entityInstanceForNotify );
-				return;
+				data.allRevisions = true;
+				// Set the per-row temporal identifier so that association loads
+				// (e.g. EntitySelectFetchInitializer) use the correct revision.
+				// The revision is already baked into the EntityKey by resolveEntityKey(),
+				// which ensures PC dedup works correctly per-revision.
+				if ( auditTransactionIdAssembler != null ) {
+					final Object txnId = auditTransactionIdAssembler.assemble(
+							data.getRowProcessingState() );
+					if ( txnId != null ) {
+						data.getRowProcessingState().getSession()
+								.getLoadQueryInfluencers()
+								.setTemporalIdentifier( txnId );
+					}
+				}
 			}
 
 			if ( useEmbeddedIdentifierInstanceAsEntity( data ) ) {
@@ -1505,11 +1529,8 @@ public class EntityInitializerImpl
 	@Override
 	public void initializeInstance(EntityInitializerData data) {
 		if ( data.getState() == State.RESOLVED ) {
-			if ( isAllRevisions( data ) ) {
-				initializeAllRevisionsInstance( data );
-			}
-			else if ( !skipInitialization( data ) ) {
-				assert consistentInstance( data );
+			if ( !skipInitialization( data ) ) {
+				assert data.allRevisions || consistentInstance( data );
 				initializeEntityInstance( data );
 			}
 			else {
@@ -1525,6 +1546,12 @@ public class EntityInitializerImpl
 				}
 			}
 			data.setState( State.INITIALIZED );
+			if ( data.allRevisions ) {
+				// Restore ALL_REVISIONS sentinel after this row is fully processed
+				data.getRowProcessingState().getSession()
+						.getLoadQueryInfluencers()
+						.setTemporalIdentifier( LoadQueryInfluencers.ALL_REVISIONS );
+			}
 		}
 	}
 
@@ -1678,7 +1705,9 @@ public class EntityInitializerImpl
 		if ( data.concreteDescriptor.canWriteToCache()
 				// No need to put into the entity cache if this is coming from the query cache already
 				&& !data.getRowProcessingState().isQueryCacheHit()
-				&& session.getCacheMode().isPutEnabled() ) {
+				&& session.getCacheMode().isPutEnabled()
+				// Don't cache temporal snapshots in the 2LC
+				&& ( data.entityKey == null || !data.entityKey.isTemporal() ) ) {
 			final var cacheAccess = data.concreteDescriptor.getCacheAccessStrategy();
 			if ( cacheAccess != null  ) {
 				putInCache( data, session, persistenceContext, resolvedEntityState, version, cacheAccess );
@@ -1720,6 +1749,10 @@ public class EntityInitializerImpl
 	}
 
 	private boolean isReallyReadOnly(EntityInitializerData data, SharedSessionContractImplementor session) {
+		// Temporal entities (loaded from audit tables) are always read-only snapshots
+		if ( data.entityKey != null && data.entityKey.isTemporal() ) {
+			return true;
+		}
 		if ( !data.concreteDescriptor.isMutable() ) {
 			return true;
 		}
@@ -2002,11 +2035,6 @@ public class EntityInitializerImpl
 		// so we must not reuse instances from the PersistenceContext.
 		return data.getRowProcessingState().getSession()
 				.getLoadQueryInfluencers().isAllRevisions();
-	}
-
-	private void initializeAllRevisionsInstance(EntityInitializerData data) {
-		final var resolvedEntityState = extractConcreteTypeStateValues( data );
-		data.concreteDescriptor.setValues( data.entityInstanceForNotify, resolvedEntityState );
 	}
 
 	private boolean isReadOnly(RowProcessingState rowProcessingState, SharedSessionContractImplementor persistenceContext) {
