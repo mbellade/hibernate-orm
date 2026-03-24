@@ -14,6 +14,7 @@ import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.hibernate.mapping.Stateful;
 import org.hibernate.metamodel.mapping.AuditMapping;
 import org.hibernate.metamodel.mapping.EntityMappingType;
+import org.hibernate.metamodel.mapping.EntityValuedModelPart;
 import org.hibernate.metamodel.mapping.JdbcMapping;
 import org.hibernate.metamodel.mapping.PluralAttributeMapping;
 import org.hibernate.metamodel.mapping.SelectableMapping;
@@ -149,35 +150,29 @@ public class AuditMappingImpl implements AuditMapping {
 			TableReference tableReference,
 			List<SelectableMapping> keySelectables,
 			SqlAliasBaseGenerator sqlAliasBaseGenerator) {
-		final var subQueryExpression =
-				new SelectStatement( buildSubquery( tableGroupProducer, tableReference, keySelectables, sqlAliasBaseGenerator ) );
-		final var revisionPredicate =
-				new ComparisonPredicate(
-						new ColumnReference( tableReference, transactionIdMapping ),
-						EQUAL,
-						subQueryExpression
-				);
-		final var modificationTypePredicate =
-				new ComparisonPredicate(
-						new ColumnReference( tableReference, modificationTypeMapping ),
-						NOT_EQUAL,
-						new JdbcLiteral<>(
-								ModificationType.DEL.ordinal(),
-								modificationTypeMapping.getJdbcMapping()
-						)
-				);
-
-		final var auditPredicate = new Junction( Junction.Nature.CONJUNCTION );
-		auditPredicate.add( revisionPredicate );
-		auditPredicate.add( modificationTypePredicate );
-		return auditPredicate;
+		return createRestriction(
+				tableGroupProducer, tableReference, keySelectables, sqlAliasBaseGenerator,
+				currentTimestampFunctionName != null
+						? new SelfRenderingSqlFragmentExpression( currentTimestampFunctionName, jdbcMapping )
+						: new TemporalJdbcParameter( transactionIdMapping )
+		);
 	}
 
-	private QuerySpec buildSubquery(
+	/**
+	 * Build the temporal restriction predicate:
+	 * {@code REV = (SELECT MAX(REV) ... WHERE REV <= upperBound) AND REVTYPE <> 2}
+	 *
+	 * @param upperBound the upper bound expression for the MAX subquery — either a
+	 *                   {@link TemporalJdbcParameter} (point-in-time) or a
+	 *                   {@link ColumnReference} to a parent entity's REV column
+	 *                   (correlated, for join-fetched associations in all-revisions mode)
+	 */
+	private Predicate createRestriction(
 			TableGroupProducer tableGroupProducer,
 			TableReference tableReference,
 			List<SelectableMapping> keySelectables,
-			SqlAliasBaseGenerator sqlAliasBaseGenerator) {
+			SqlAliasBaseGenerator sqlAliasBaseGenerator,
+			org.hibernate.sql.ast.tree.expression.Expression upperBound) {
 		final var subQuerySpec = new QuerySpec( false, 1 );
 		final String stem = tableGroupProducer.getSqlAliasStem();
 		final String aliasStem = stem == null ? SUBQUERY_ALIAS_STEM : stem;
@@ -201,33 +196,31 @@ public class AuditMappingImpl implements AuditMapping {
 		subQuerySpec.getSelectClause()
 				.addSqlSelection( new SqlSelectionImpl( buildMaxExpression( transactionId ) ) );
 
-		subQuerySpec.applyPredicate(
-				buildSubqueryPredicate( tableReference, keySelectables, subTableReference, transactionId ) );
-
-		return subQuerySpec;
-	}
-
-	private Junction buildSubqueryPredicate(
-			TableReference tableReference,
-			List<SelectableMapping> keySelectables,
-			NamedTableReference subTableReference,
-			ColumnReference transactionId) {
-		final var predicate = new Junction( Junction.Nature.CONJUNCTION );
+		// Subquery WHERE: id columns match + REV <= upperBound
+		final var subPredicate = new Junction( Junction.Nature.CONJUNCTION );
 		for ( var selectableMapping : keySelectables ) {
-			predicate.add( new ComparisonPredicate(
+			subPredicate.add( new ComparisonPredicate(
 					new ColumnReference( subTableReference, selectableMapping ),
 					EQUAL,
 					new ColumnReference( tableReference, selectableMapping )
 			) );
 		}
-		predicate.add( new ComparisonPredicate(
-				transactionId,
-				LESS_THAN_OR_EQUAL,
-				currentTimestampFunctionName != null
-						? new SelfRenderingSqlFragmentExpression( currentTimestampFunctionName, jdbcMapping )
-						: new TemporalJdbcParameter( transactionIdMapping )
+		subPredicate.add( new ComparisonPredicate( transactionId, LESS_THAN_OR_EQUAL, upperBound ) );
+		subQuerySpec.applyPredicate( subPredicate );
+
+		// Main predicate: REV = (subquery) AND REVTYPE <> DEL
+		final var auditPredicate = new Junction( Junction.Nature.CONJUNCTION );
+		auditPredicate.add( new ComparisonPredicate(
+				new ColumnReference( tableReference, transactionIdMapping ),
+				EQUAL,
+				new SelectStatement( subQuerySpec )
 		) );
-		return predicate;
+		auditPredicate.add( new ComparisonPredicate(
+				new ColumnReference( tableReference, modificationTypeMapping ),
+				NOT_EQUAL,
+				new JdbcLiteral<>( ModificationType.DEL.ordinal(), modificationTypeMapping.getJdbcMapping() )
+		) );
+		return auditPredicate;
 	}
 
 	private AggregateFunctionExpression buildMaxExpression(ColumnReference expression) {
@@ -276,13 +269,28 @@ public class AuditMappingImpl implements AuditMapping {
 			LazyTableGroup lazyTableGroup,
 			NavigablePath navigablePath,
 			SqlAstCreationState creationState) {
-		if ( hasTemporalPredicate( creationState.getLoadQueryInfluencers() ) ) {
+		final var influencers = creationState.getLoadQueryInfluencers();
+		if ( hasTemporalPredicate( influencers ) ) {
 			predicateConsumer.accept( createRestriction(
 					associatedEntityMappingType.getEntityPersister(),
 					lazyTableGroup.resolveTableReference( navigablePath, getTableName() ),
 					collectEntityKeySelectables( associatedEntityMappingType ),
 					creationState.getSqlAliasBaseGenerator()
 			) );
+		}
+		else if ( influencers.isAllRevisions() ) {
+			// In all-revisions mode, join-fetched associations need a correlated
+			// predicate: REV = (SELECT MAX(REV) ... WHERE REV <= parent.REV)
+			final var parentRevColumn = findParentRevColumn( navigablePath, creationState );
+			if ( parentRevColumn != null ) {
+				predicateConsumer.accept( createRestriction(
+						associatedEntityMappingType.getEntityPersister(),
+						lazyTableGroup.resolveTableReference( navigablePath, getTableName() ),
+						collectEntityKeySelectables( associatedEntityMappingType ),
+						creationState.getSqlAliasBaseGenerator(),
+						parentRevColumn
+				) );
+			}
 		}
 	}
 
@@ -323,6 +331,32 @@ public class AuditMappingImpl implements AuditMapping {
 	@Override
 	public void applyPredicate(TableGroupJoin tableGroupJoin, LoadQueryInfluencers loadQueryInfluencers) {
 		//TODO!!
+	}
+
+	/**
+	 * Walk up the navigable path to find a parent table group with an
+	 * audit mapping, and return a column reference to its REV column.
+	 */
+	private static ColumnReference findParentRevColumn(
+			NavigablePath navigablePath,
+			SqlAstCreationState creationState) {
+		final var parentPath = navigablePath.getParent();
+		if ( parentPath == null ) {
+			return null;
+		}
+		final var parentTableGroup = creationState.getFromClauseAccess()
+				.findTableGroup( parentPath );
+		if ( parentTableGroup != null
+				&& parentTableGroup.getModelPart() instanceof EntityValuedModelPart entityPart ) {
+			final var parentAuditMapping = entityPart.getEntityMappingType().getAuditMapping();
+			if ( parentAuditMapping != null ) {
+				return new ColumnReference(
+						parentTableGroup.resolveTableReference( parentAuditMapping.getTableName() ),
+						parentAuditMapping.getTransactionIdMapping()
+				);
+			}
+		}
+		return null;
 	}
 
 	private static List<SelectableMapping> collectEntityKeySelectables(EntityMappingType entityDescriptor) {

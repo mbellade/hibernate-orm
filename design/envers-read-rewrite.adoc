@@ -747,10 +747,14 @@ Associations between `@Audited` entities work transparently in both point-in-tim
 
 * **Point-in-time**: The session's `temporalIdentifier` is fixed — association loads automatically
   use the audit table at the correct revision.
-* **All-revisions**: `AbstractEntityResultGraphNode` implicitly selects the `REV_TXN` column for
-  audited entities (like discriminator columns). `EntityInitializerImpl` reads this per row and
-  sets it as the temporal identifier on `LoadQueryInfluencers`, so association loaders generate
-  SQL with the correct temporal predicate.
+* **All-revisions (select-fetch)**: `AbstractEntityResultGraphNode` implicitly selects the `REV_TXN`
+  column for audited entities (like discriminator columns). `EntityInitializerImpl` reads this per
+  row and sets it as the temporal identifier on `LoadQueryInfluencers`, so association loaders
+  generate SQL with the correct temporal predicate.
+* **All-revisions (join-fetch)**: `AuditMappingImpl.applyPredicate()` detects all-revisions mode
+  and builds a correlated predicate: `REV = (SELECT MAX(REV) ... WHERE REV \<= parent.REV)`.
+  The parent's REV column is found by walking `navigablePath.getParent()` and checking for
+  `EntityValuedModelPart` with an audit mapping. Works for nested associations at any depth.
 * **Lazy to-one proxies**: `AbstractLazyInitializer` captures the `temporalIdentifier` from the
   session at proxy creation time. When the proxy is later initialized via `immediateLoad()`, the
   captured revision is temporarily set on the session's `LoadQueryInfluencers` (then restored).
@@ -780,8 +784,13 @@ Associations between `@Audited` entities work transparently in both point-in-tim
   transaction ID ranges, modification types, and more — without users having to drop down to raw HQL.)
 * [x] Audited associations in point-in-time + all-revisions modes
   (revision-aware EntityKey + per-row temporal identifier + implicit REV_TXN selection)
+* [x] Correlated temporal predicate for join-fetched associations in all-revisions mode
+  (`AuditMappingImpl`: `findParentRevColumn()` + `createRestriction()` with `Expression` upper bound)
 * [x] Lazy to-one proxy with captured revision (`AbstractLazyInitializer.temporalIdentifier`)
-* [ ] Tests for deleted entity access, revision entity joins
+* [x] Simplify `AuditLogImpl` — all queries now use HQL (no SQL AST), revision entity join in `getHistory()`
+* [x] `AuditColumnFunction` return type: `UnknownBasicJavaType` bypasses SQM type checks
+* [ ] Tests for deleted entity access
+* [ ] Criteria-based restrictions for `AuditLog` queries
 
 === Phase 2: Enhanced Read Capabilities (Tier 2)
 
@@ -791,7 +800,7 @@ Covered by `allRevisions()` mode + `transactionId()`/`modificationType()` functi
 
 ==== 2.2 "Modified at" queries
 
-Covered by `AuditLog.getEntitiesModifiedAt()` / `findEntitiesModifiedAt()` (SQL AST, [green]#DONE#)
+Covered by `AuditLog.getEntitiesModifiedAt()` / `findEntitiesModifiedAt()` (HQL, [green]#DONE#)
 and by `allRevisions()` mode with HQL filter `where transactionId(e) = :txId`.
 
 ==== 2.3 Diff support
