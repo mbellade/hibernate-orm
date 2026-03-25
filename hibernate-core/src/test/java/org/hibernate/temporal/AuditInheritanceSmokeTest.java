@@ -84,7 +84,6 @@ class AuditInheritanceSmokeTest {
 	class SingleTableTest {
 
 		@Test
-		@Disabled("SINGLE_TABLE: discriminator column not populated in audit INSERT")
 		void testSingleTableInheritance(SessionFactoryScope scope) {
 			TxIdSupplier.currentTxId = 500;
 
@@ -231,7 +230,6 @@ class AuditInheritanceSmokeTest {
 	class TablePerClassTest {
 
 		@Test
-		@Disabled("TABLE_PER_CLASS inheritance: audit tables per concrete class not created")
 		void testTablePerClassInheritance(SessionFactoryScope scope) {
 			TxIdSupplier.currentTxId = 700;
 

@@ -217,9 +217,28 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 	public UnionTableReference createPrimaryTableReference(
 			SqlAliasBase sqlAliasBase,
 			SqlAstCreationState creationState) {
-		return new UnionTableReference(
-				getTableName(),
-				subclassTableExpressions,
+		final var loadQueryInfluencers = creationState.getLoadQueryInfluencers();
+		final var auxMapping = getAuxiliaryMapping();
+		final boolean useAuxiliaryTable =
+				auxMapping != null
+						&& auxMapping.useAuxiliaryTable( loadQueryInfluencers );
+		final String tableName = useAuxiliaryTable
+				? auxMapping.getTableName()
+				: getTableName();
+		final String[] tableExpressions;
+		if ( useAuxiliaryTable ) {
+			tableExpressions = Arrays.copyOf(
+					subclassTableExpressions,
+					subclassTableExpressions.length + 1
+			);
+			tableExpressions[subclassTableExpressions.length] = auxMapping.getTableName();
+		}
+		else {
+			tableExpressions = subclassTableExpressions;
+		}
+		final var tableReference = new UnionTableReference(
+				tableName,
+				tableExpressions,
 				SqlAliasBase.from(
 						sqlAliasBase,
 						null,
@@ -227,6 +246,8 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 						creationState.getSqlAliasBaseGenerator()
 				).generateNewAlias()
 		);
+		tableReference.applyAuxiliaryTable( auxMapping, loadQueryInfluencers );
+		return tableReference;
 	}
 
 	@Override
@@ -244,16 +265,29 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 				this,
 				explicitSourceAlias
 		);
-		final var softDeleteMapping = getSoftDeleteMapping();
-		if ( additionalPredicateCollectorAccess != null && softDeleteMapping != null ) {
-			final var tableReference =
-					tableGroup.resolveTableReference( getSoftDeleteTableDetails().getTableName() );
-			additionalPredicateCollectorAccess.get().accept(
-					softDeleteMapping.createNonDeletedRestriction(
-							tableReference,
-							creationState.getSqlExpressionResolver()
-					)
-			);
+		if ( additionalPredicateCollectorAccess != null ) {
+			final var softDeleteMapping = getSoftDeleteMapping();
+			if ( softDeleteMapping != null ) {
+				final var tableReference =
+						tableGroup.resolveTableReference( getSoftDeleteTableDetails().getTableName() );
+				additionalPredicateCollectorAccess.get().accept(
+						softDeleteMapping.createNonDeletedRestriction(
+								tableReference,
+								creationState.getSqlExpressionResolver()
+						)
+				);
+			}
+
+			final var auxMapping = getAuxiliaryMapping();
+			if ( auxMapping != null ) {
+				auxMapping.applyPredicate(
+						additionalPredicateCollectorAccess,
+						creationState,
+						tableGroup,
+						tableGroup.getPrimaryTableReference(),
+						this
+				);
+			}
 		}
 		return tableGroup;
 	}

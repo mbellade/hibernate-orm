@@ -24,7 +24,6 @@ import org.hibernate.sql.ast.tree.expression.Expression;
 import org.hibernate.sql.ast.tree.expression.SelfRenderingSqlFragmentExpression;
 import org.hibernate.sql.ast.tree.from.LazyTableGroup;
 import org.hibernate.sql.ast.tree.from.NamedTableReference;
-import org.hibernate.sql.ast.tree.from.StandardTableGroup;
 import org.hibernate.sql.ast.tree.from.TableGroup;
 import org.hibernate.sql.ast.tree.from.TableGroupJoin;
 import org.hibernate.sql.ast.tree.from.TableReference;
@@ -312,7 +311,7 @@ public class TemporalMappingImpl implements TemporalMapping {
 	public void applyPredicate(
 			Supplier<Consumer<Predicate>> predicateCollector,
 			SqlAstCreationState creationState,
-			StandardTableGroup tableGroup,
+			TableGroup tableGroup,
 			NamedTableReference rootTableReference,
 			EntityMappingType entityMappingType) {
 		if ( useTemporalRestriction( creationState ) ) {

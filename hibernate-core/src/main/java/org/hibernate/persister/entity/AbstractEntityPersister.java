@@ -4924,8 +4924,8 @@ public abstract class AbstractEntityPersister
 				: creationProcess.processSubPart( rowIdName,
 						(role, process) -> new EntityRowIdMappingImpl( rowIdName, getTableName(), this ) );
 		discriminatorMapping = generateDiscriminatorMapping( bootEntityDescriptor );
+		auxiliaryMapping = stateManagement.createAuxiliaryMapping( this, bootEntityDescriptor, creationProcess );
 		final var rootClass = bootEntityDescriptor.getRootClass();
-		auxiliaryMapping = stateManagement.createAuxiliaryMapping( this, rootClass, creationProcess );
 		if ( auxiliaryMapping instanceof SoftDeleteMapping && rootClass.getCustomSQLDelete() != null ) {
 			throw new UnsupportedMappingException( "Entity may not define both @SoftDelete and @SQLDelete" );
 		}

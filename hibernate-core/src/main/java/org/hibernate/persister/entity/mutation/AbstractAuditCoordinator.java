@@ -17,6 +17,7 @@ import org.hibernate.MappingException;
 import org.hibernate.generator.Generator;
 import org.hibernate.generator.OnExecutionGenerator;
 import org.hibernate.metamodel.mapping.AttributeMapping;
+import org.hibernate.metamodel.mapping.DiscriminatorValue;
 import org.hibernate.metamodel.mapping.PluralAttributeMapping;
 import org.hibernate.metamodel.mapping.SelectableMapping;
 import org.hibernate.persister.entity.EntityPersister;
@@ -153,6 +154,16 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator {
 					}
 				}
 			}
+		}
+
+		// add discriminator column if applicable (SINGLE_TABLE, JOINED with explicit discriminator)
+		final var discriminatorMapping = entityPersister().getDiscriminatorMapping();
+		if ( discriminatorMapping != null && discriminatorMapping.hasPhysicalColumn()
+				&& entityPersister().getDiscriminatorValue() instanceof DiscriminatorValue.Literal ) {
+			insertBuilder.addValueColumn(
+					entityPersister().getDiscriminatorSQLValue(),
+					discriminatorMapping
+			);
 		}
 
 		if ( useServerTransactionTimestamps ) {

@@ -56,7 +56,6 @@ public final class RootClass extends PersistentClass implements TableOwner, Soft
 	private SoftDeleteType softDeleteStrategy;
 
 	private Class<? extends StateManagement> stateManagementType;
-	private Table auxiliaryTable;
 	private boolean partitioned;
 	private Map<String, Column> auxiliaryColumns;
 	private String auxiliaryColumnInPrimaryKey;
@@ -494,14 +493,6 @@ public final class RootClass extends PersistentClass implements TableOwner, Soft
 
 	public Class<? extends StateManagement> getStateManagementType() {
 		return stateManagementType;
-	}
-
-	public Table getAuxiliaryTable() {
-		return auxiliaryTable;
-	}
-
-	public void setAuxiliaryTable(Table auxiliaryTable) {
-		this.auxiliaryTable = auxiliaryTable;
 	}
 
 	public Column getAuxiliaryColumn(String column) {

@@ -12,7 +12,6 @@ import org.hibernate.sql.ast.spi.SqlAliasBaseGenerator;
 import org.hibernate.sql.ast.spi.SqlAstCreationState;
 import org.hibernate.sql.ast.tree.from.LazyTableGroup;
 import org.hibernate.sql.ast.tree.from.NamedTableReference;
-import org.hibernate.sql.ast.tree.from.StandardTableGroup;
 import org.hibernate.sql.ast.tree.from.TableGroup;
 import org.hibernate.sql.ast.tree.from.TableGroupJoin;
 import org.hibernate.sql.ast.tree.predicate.Predicate;
@@ -63,7 +62,7 @@ public interface AuxiliaryMapping {
 	void applyPredicate(
 			Supplier<Consumer<Predicate>> predicateCollector,
 			SqlAstCreationState creationState,
-			StandardTableGroup tableGroup,
+			TableGroup tableGroup,
 			NamedTableReference rootTableReference, EntityMappingType entityMappingType);
 
 	JdbcMapping getJdbcMapping();

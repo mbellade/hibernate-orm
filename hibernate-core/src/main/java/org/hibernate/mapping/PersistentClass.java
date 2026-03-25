@@ -100,6 +100,7 @@ public abstract sealed class PersistentClass
 	private boolean hasSubselectLoadableCollections;
 	private Component identifierMapper;
 	private List<CallbackDefinition> callbackDefinitions;
+	private Table auxiliaryTable;
 
 	private final List<CheckConstraint> checkConstraints = new ArrayList<>();
 
@@ -300,6 +301,14 @@ public abstract sealed class PersistentClass
 	}
 
 	public abstract Table getTable();
+
+	public Table getAuxiliaryTable() {
+		return auxiliaryTable;
+	}
+
+	public void setAuxiliaryTable(Table auxiliaryTable) {
+		this.auxiliaryTable = auxiliaryTable;
+	}
 
 	public String getEntityName() {
 		return entityName;

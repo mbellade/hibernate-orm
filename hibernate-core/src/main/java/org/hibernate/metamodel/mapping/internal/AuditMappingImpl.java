@@ -419,7 +419,7 @@ public class AuditMappingImpl implements AuditMapping {
 	public void applyPredicate(
 			Supplier<Consumer<Predicate>> predicateCollector,
 			SqlAstCreationState creationState,
-			StandardTableGroup tableGroup,
+			TableGroup tableGroup,
 			NamedTableReference rootTableReference,
 			EntityMappingType entityMappingType) {
 		if ( hasTemporalPredicate( creationState.getLoadQueryInfluencers() ) ) {

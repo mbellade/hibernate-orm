@@ -80,8 +80,11 @@ public class AuditColumnFunction extends AbstractSqmFunctionDescriptor {
 			ReturnableType<T> impliedResultType,
 			QueryEngine queryEngine) {
 		return new AuditColumnSqmFunction<>(
-				this, transactionId, arguments,
-				impliedResultType, queryEngine
+				this,
+				transactionId,
+				arguments,
+				impliedResultType,
+				queryEngine
 		);
 	}
 

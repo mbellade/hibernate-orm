@@ -19,6 +19,7 @@ import org.hibernate.mapping.Column;
 import org.hibernate.mapping.RootClass;
 import org.hibernate.mapping.Stateful;
 import org.hibernate.mapping.Table;
+import org.hibernate.mapping.TableOwner;
 import org.hibernate.persister.state.internal.AuditStateManagement;
 import org.hibernate.temporal.spi.TransactionIdentifierService;
 
@@ -44,6 +45,7 @@ public final class AuditHelper {
 			MetadataBuildingContext context) {
 		bindAuditTable( audited, rootClass, context,
 				resolveExcludedColumns( rootClass ) );
+		bindSubclassAuditTables( audited, rootClass, context );
 	}
 
 	static void bindAuditTable(
@@ -93,6 +95,43 @@ public final class AuditHelper {
 			auditTable.addColumn( transactionIdColumn );
 			auditTable.addColumn( modificationTypeColumn );
 			enableAudit( auditable, auditTable, transactionIdColumn, modificationTypeColumn );
+		} );
+	}
+
+	private static void bindSubclassAuditTables(
+			Audited audited,
+			RootClass rootClass,
+			MetadataBuildingContext context) {
+		final var collector = context.getMetadataCollector();
+		final String txIdColumnName = audited.transactionId();
+		final String modTypeColumnName = audited.modificationType();
+		// Defer to second pass — subclasses haven't been added to rootClass yet
+		collector.addSecondPass( (OptionalDeterminationSecondPass) ignored -> {
+			for ( var subclass : rootClass.getSubclasses() ) {
+				if ( subclass instanceof TableOwner ) {
+					final var subTable = subclass.getTable();
+					final var subAuditTable = collector.addTable(
+							subTable.getSchema(),
+							subTable.getCatalog(),
+							collector.getLogicalTableName( subTable )
+									+ DEFAULT_TABLE_SUFFIX,
+							subTable.getSubselect(),
+							subTable.isAbstract(),
+							context,
+							subTable.getNameIdentifier().isExplicit()
+					);
+					copyTableColumns( subTable, subAuditTable, Set.of() );
+					final var transactionIdColumn =
+							createAuditColumn( txIdColumnName,
+									getTransactionIdType( context ), subAuditTable, context );
+					final var modificationTypeColumn =
+							createAuditColumn( modTypeColumnName,
+									Byte.class, subAuditTable, context );
+					subAuditTable.addColumn( transactionIdColumn );
+					subAuditTable.addColumn( modificationTypeColumn );
+					subclass.setAuxiliaryTable( subAuditTable );
+				}
+			}
 		} );
 	}
 

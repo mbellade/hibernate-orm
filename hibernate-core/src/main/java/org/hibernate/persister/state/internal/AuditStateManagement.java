@@ -5,7 +5,7 @@
 package org.hibernate.persister.state.internal;
 
 import org.hibernate.mapping.Collection;
-import org.hibernate.mapping.RootClass;
+import org.hibernate.mapping.PersistentClass;
 import org.hibernate.metamodel.mapping.AuditMapping;
 import org.hibernate.metamodel.mapping.PluralAttributeMapping;
 import org.hibernate.metamodel.mapping.internal.AuditMappingImpl;
@@ -156,9 +156,12 @@ public class AuditStateManagement implements StateManagement {
 	@Override
 	public AuditMapping createAuxiliaryMapping(
 			EntityPersister persister,
-			RootClass rootClass,
+			PersistentClass bootDescriptor,
 			MappingModelCreationProcess creationProcess) {
-		final var auditTable = rootClass.getAuxiliaryTable();
+		final var rootClass = bootDescriptor.getRootClass();
+		final var auditTable = bootDescriptor.getAuxiliaryTable() != null
+				? bootDescriptor.getAuxiliaryTable()
+				: rootClass.getAuxiliaryTable();
 		final String tableName = auditTable == null
 				? persister.getIdentifierTableName()
 				: ( (AbstractEntityPersister) persister )
