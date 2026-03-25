@@ -10,17 +10,14 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.Audited;
-import org.hibernate.audit.RevisionEntitySupplier;
+import org.hibernate.audit.RevisionEntity;
 import org.hibernate.audit.RevisionListener;
-import org.hibernate.cfg.StateManagementSettings;
+import org.hibernate.audit.RevisionNumber;
+import org.hibernate.audit.RevisionTimestamp;
 import org.hibernate.testing.orm.junit.DomainModel;
-import org.hibernate.testing.orm.junit.ServiceRegistry;
 import org.hibernate.testing.orm.junit.SessionFactory;
 import org.hibernate.testing.orm.junit.SessionFactoryScope;
-import org.hibernate.testing.orm.junit.Setting;
 import org.junit.jupiter.api.Test;
-
-import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -28,31 +25,32 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Test demonstrating the {@link RevisionEntitySupplier} with a
- * custom revision entity and {@link RevisionListener}, similar
- * to the Envers {@code @RevisionEntity} + {@code RevisionListener}
- * pattern.
+ * Test demonstrating {@link RevisionEntity @RevisionEntity}
+ * auto-detection with a custom revision entity and
+ * {@link RevisionListener}.
  */
 @SessionFactory
 @DomainModel(annotatedClasses = {
 		AuditRevisionEntityTest.MyEntity.class,
 		AuditRevisionEntityTest.RevisionInfo.class
 })
-@ServiceRegistry(settings = @Setting(name = StateManagementSettings.TRANSACTION_ID_SUPPLIER,
-		value = "org.hibernate.temporal.AuditRevisionEntityTest$RevisionInfoSupplier"))
 class AuditRevisionEntityTest {
 
 	/**
-	 * Custom revision entity — maps to a REVINFO-like table.
+	 * Custom revision entity with a {@link RevisionListener}
+	 * that populates the {@code username} field.
 	 */
+	@RevisionEntity(listener = UsernameRevisionListener.class)
 	@Entity(name = "RevisionInfo")
 	@Table(name = "REVINFO")
 	static class RevisionInfo {
 		@Id
 		@GeneratedValue
+		@RevisionNumber
 		@Column(name = "REV")
 		int id;
 
+		@RevisionTimestamp
 		@Column(name = "REVTSTMP")
 		long timestamp;
 
@@ -60,17 +58,10 @@ class AuditRevisionEntityTest {
 		String username;
 	}
 
-	/**
-	 * Built-in supplier subclass with a {@link RevisionListener}
-	 * that populates the revision entity's custom fields.
-	 */
-	public static class RevisionInfoSupplier extends RevisionEntitySupplier<Integer> {
-		public RevisionInfoSupplier() {
-			super( Integer.class, RevisionInfo.class, rev -> {
-				final var revInfo = (RevisionInfo) rev;
-				revInfo.timestamp = Instant.now().toEpochMilli();
-				revInfo.username = "test-user";
-			} );
+	public static class UsernameRevisionListener implements RevisionListener {
+		@Override
+		public void newRevision(Object revisionEntity) {
+			((RevisionInfo) revisionEntity).username = "test-user";
 		}
 	}
 

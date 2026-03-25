@@ -2279,5 +2279,6 @@ abstract public class DialectFeatureChecks {
 		public Type getReferencedPropertyType(String className, String propertyName) throws MappingException {
 			return null;
 		}
+
 	}
 }

@@ -59,6 +59,12 @@ import org.hibernate.annotations.SQLUpdate;
 import org.hibernate.annotations.SecondaryRow;
 import org.hibernate.annotations.SecondaryRows;
 import org.hibernate.annotations.Audited;
+import org.hibernate.audit.RevisionEntity;
+import org.hibernate.audit.RevisionEntitySupplier;
+import org.hibernate.temporal.spi.TransactionIdentifierService;
+import org.hibernate.audit.spi.RevisionEntityDescriptor;
+import org.hibernate.audit.RevisionNumber;
+import org.hibernate.audit.RevisionTimestamp;
 import org.hibernate.annotations.SoftDelete;
 import org.hibernate.annotations.Temporal;
 import org.hibernate.annotations.Subselect;
@@ -261,6 +267,7 @@ public class EntityBinder {
 			collector.addSecondPass( new CreateKeySecondPass( rootClass ) );
 			bindSoftDelete( clazzToProcess, rootClass, context );
 			bindTemporal( clazzToProcess, rootClass, context );
+			detectRevisionEntity( clazzToProcess, context );
 			bindAudited( clazzToProcess, rootClass, context );
 		}
 		if ( persistentClass instanceof Subclass subclass ) {
@@ -352,6 +359,63 @@ public class EntityBinder {
 					context
 			);
 		}
+	}
+
+	private static void detectRevisionEntity(
+			ClassDetails classDetails,
+			MetadataBuildingContext context) {
+		final var revisionEntity = classDetails.getDirectAnnotationUsage( RevisionEntity.class );
+		if ( revisionEntity == null ) {
+			return;
+		}
+
+		final var modelsContext = context.getBootstrapContext().getModelsContext();
+
+		// todo (envers-rewrite) : @RevisionEntity currently requires @Entity;
+		//  could we automatically imply @Entity for @RevisionEntity classes
+		//  so users don't need both annotations?
+
+		// The entity must not be audited
+		if ( classDetails.hasAnnotationUsage( Audited.class, modelsContext ) ) {
+			throw new MappingException( "The @RevisionEntity entity cannot be audited" );
+		}
+
+		// Find @RevisionNumber and @RevisionTimestamp fields
+		MemberDetails revisionNumberMember = null;
+		MemberDetails revisionTimestampMember = null;
+		for ( var member : classDetails.getFields() ) {
+			if ( member.hasDirectAnnotationUsage( RevisionNumber.class ) ) {
+				revisionNumberMember = member;
+			}
+			if ( member.hasDirectAnnotationUsage( RevisionTimestamp.class ) ) {
+				revisionTimestampMember = member;
+			}
+		}
+		if ( revisionNumberMember == null ) {
+			throw new MappingException(
+					"@RevisionEntity '" + classDetails.getName()
+							+ "' must have a field annotated with @RevisionNumber"
+			);
+		}
+		if ( revisionTimestampMember == null ) {
+			throw new MappingException(
+					"@RevisionEntity '" + classDetails.getName()
+							+ "' must have a field annotated with @RevisionTimestamp"
+			);
+		}
+
+		// Configure the transaction identifier service with a RevisionEntitySupplier
+		final var descriptor = new RevisionEntityDescriptor(
+				classDetails,
+				revisionNumberMember,
+				revisionTimestampMember,
+				revisionEntity.listener()
+		);
+		final var serviceRegistry = context.getBootstrapContext().getServiceRegistry();
+		serviceRegistry.requireService( TransactionIdentifierService.class )
+				.contributeIdentifierSupplier(
+						RevisionEntitySupplier.fromDescriptor( descriptor, serviceRegistry )
+				);
 	}
 
 	private static void bindAudited(

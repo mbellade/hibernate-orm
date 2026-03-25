@@ -8,13 +8,9 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import org.hibernate.annotations.Audited;
 import org.hibernate.audit.DefaultRevisionEntity;
-import org.hibernate.audit.DefaultRevisionEntitySupplier;
-import org.hibernate.cfg.StateManagementSettings;
 import org.hibernate.testing.orm.junit.DomainModel;
-import org.hibernate.testing.orm.junit.ServiceRegistry;
 import org.hibernate.testing.orm.junit.SessionFactory;
 import org.hibernate.testing.orm.junit.SessionFactoryScope;
-import org.hibernate.testing.orm.junit.Setting;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -24,20 +20,15 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests the built-in {@link DefaultRevisionEntity} and
- * {@link DefaultRevisionEntitySupplier}, which provide
- * backwards-compatible behavior matching envers'
- * {@code DefaultRevisionEntity}.
+ * Tests the built-in {@link DefaultRevisionEntity}, which is
+ * auto-detected via {@link org.hibernate.audit.RevisionEntity @RevisionEntity}
+ * — no explicit supplier configuration needed.
  */
 @SessionFactory
 @DomainModel(annotatedClasses = {
 		DefaultRevisionEntityTest.Book.class,
 		DefaultRevisionEntity.class
 })
-@ServiceRegistry(settings = @Setting(
-		name = StateManagementSettings.TRANSACTION_ID_SUPPLIER,
-		value = "org.hibernate.audit.DefaultRevisionEntitySupplier"
-))
 class DefaultRevisionEntityTest {
 
 	@Audited

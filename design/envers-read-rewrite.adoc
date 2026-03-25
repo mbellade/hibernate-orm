@@ -550,11 +550,20 @@ a straightforward migration path:
   — plain `Supplier<?>` instances are auto-wrapped for backward compatibility
 * [x] Update `AbstractSharedSessionContract.getCurrentTransactionIdentifier()` to pass session to supplier
 * [x] Add test with custom revision entity + supplier (`AuditRevisionEntityTest`)
-* [x] Add built-in `RevisionEntitySupplier` — persists revision entity via child `StatelessSession`
-  (uses `statelessWithOptions().connection().open()` to avoid polluting user's persistence context)
+* [x] Add built-in `RevisionEntitySupplier` — persists revision entity via child `StatelessSession`,
+  uses `EntityPersister` for instantiation and property access (no reflection)
 * [x] Add `RevisionListener` callback interface in `org.hibernate.audit`
 * [x] Make transaction ID initialization on-demand (lazy) instead of eager at `afterTransactionBegin()`
   — prevents empty revisions for transactions that don't modify audited entities
+* [x] Auto-detect `@RevisionEntity` annotation — `@RevisionEntity`, `@RevisionNumber`,
+  `@RevisionTimestamp` annotations in `o.h.audit`; detected during entity binding, supplier
+  auto-configured via `TransactionIdentifierService.contributeIdentifierSupplier()`
+* [x] `RevisionEntityDescriptor` SPI record in `o.h.audit.spi` (holds `ClassDetails`/`MemberDetails`)
+* [x] `AuditException` in `o.h.audit` for audit-specific errors
+* [x] Audit table column creation deferred to second pass (supports `@RevisionEntity` from mapping contributors)
+* [x] `DefaultRevisionEntity` annotated with `@RevisionEntity`/`@RevisionNumber`/`@RevisionTimestamp`
+  — auto-detected, no explicit supplier config needed; `DefaultRevisionEntitySupplier` removed
+* [x] `RevisionListener` resolved via `ManagedBeanRegistry` (CDI/Spring support)
 * [ ] Document migration from envers `@RevisionEntity` / `RevisionListener`
 * [ ] Consider: `EntityTrackingRevisionListener` equivalent (per-entity-change callback)
 
@@ -568,10 +577,15 @@ audit concerns clearly separated from the existing `org.hibernate.temporal` SPI 
 | Package | Contents
 
 | `org.hibernate.audit`
-| Public API: `ModificationType` enum, `AuditLog` service interface, `RevisionEntitySupplier`, `RevisionListener`
+| Public API: `ModificationType` enum, `AuditLog` interface, `AuditEntry` record, `AuditException`,
+  `RevisionEntitySupplier`, `RevisionListener`, `DefaultRevisionEntity`,
+  `@RevisionEntity`, `@RevisionNumber`, `@RevisionTimestamp`
+
+| `org.hibernate.audit.spi`
+| SPI: `RevisionEntityDescriptor` (detected `@RevisionEntity` metadata)
 
 | `org.hibernate.temporal.spi`
-| SPI: `TransactionIdentifierSupplier<T>` (replaces plain `Supplier<?>`)
+| SPI: `TransactionIdentifierSupplier<T>`, `TransactionIdentifierService`
 
 | `org.hibernate.temporal.internal`
 | Internal: `TransactionIdentifierServiceImpl` (updated for new SPI)
@@ -1118,7 +1132,7 @@ public class RevisionInfoSupplier extends RevisionEntitySupplier<Integer> {
 * [ ] Test sequence continuity: new revision numbers continue from where envers left off
 * [ ] Document ValidityAuditStrategy migration path and limitations
 * [x] Built-in `RevisionEntitySupplier` for zero-effort migration
-* [x] Built-in `DefaultRevisionEntity` + `DefaultRevisionEntitySupplier` — opt-in envers-compatible REVINFO entity
+* [x] Built-in `DefaultRevisionEntity` with `@RevisionEntity` — opt-in envers-compatible REVINFO entity (auto-detected)
 * [ ] Other built-in hibernate-envers revision entity types
 * [ ] Auto-contribute revision entity class to domain model when `RevisionEntitySupplier` is configured
   (currently users must add the revision entity to their annotated classes manually)

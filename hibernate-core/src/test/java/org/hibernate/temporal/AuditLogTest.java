@@ -417,4 +417,76 @@ class AuditLogTest {
 			assertTrue( modified.isEmpty() );
 		} );
 	}
+
+	// --- getHistory ---
+
+	@Test
+	@Order(21)
+	void testGetHistoryIncludesAllModificationTypes(SessionFactoryScope scope) {
+		scope.inSession( session -> {
+			// Entity 1: created (rev1), updated (rev2), deleted (rev4)
+			final var history = session.getAuditLog().getHistory( AuditedEntity.class, 1L );
+			assertEquals( 3, history.size() );
+
+			assertEquals( ModificationType.ADD, history.get( 0 ).modificationType() );
+			assertEquals( ModificationType.MOD, history.get( 1 ).modificationType() );
+			assertEquals( ModificationType.DEL, history.get( 2 ).modificationType() );
+		} );
+	}
+
+	@Test
+	@Order(22)
+	void testGetHistoryEntityStateAtEachRevision(SessionFactoryScope scope) {
+		scope.inSession( session -> {
+			final var history = session.getAuditLog().getHistory( AuditedEntity.class, 1L );
+
+			// ADD: entity was created with "first"
+			assertEquals( "first", history.get( 0 ).entity().name );
+
+			// MOD: entity was updated to "first-updated"
+			assertEquals( "first-updated", history.get( 1 ).entity().name );
+
+			// DEL: entity snapshot preserves the last state before deletion
+			assertNotNull( history.get( 2 ).entity() );
+			assertEquals( "first-updated", history.get( 2 ).entity().name );
+		} );
+	}
+
+	@Test
+	@Order(23)
+	void testGetHistoryRevisionValues(SessionFactoryScope scope) {
+		scope.inSession( session -> {
+			final var history = session.getAuditLog().getHistory( AuditedEntity.class, 1L );
+
+			// Without a RevisionEntitySupplier, revision should be the plain txId
+			assertEquals( revCreate1, history.get( 0 ).revision() );
+			assertEquals( revCreate2, history.get( 1 ).revision() );
+			assertEquals( revDelete, history.get( 2 ).revision() );
+		} );
+	}
+
+	@Test
+	@Order(24)
+	void testGetHistoryForEntityWithNoDeletes(SessionFactoryScope scope) {
+		scope.inSession( session -> {
+			// Entity 2: created (rev2), updated (rev3) — no delete
+			final var history = session.getAuditLog().getHistory( AuditedEntity.class, 2L );
+			assertEquals( 2, history.size() );
+
+			assertEquals( ModificationType.ADD, history.get( 0 ).modificationType() );
+			assertEquals( "second", history.get( 0 ).entity().name );
+
+			assertEquals( ModificationType.MOD, history.get( 1 ).modificationType() );
+			assertEquals( "second-updated", history.get( 1 ).entity().name );
+		} );
+	}
+
+	@Test
+	@Order(25)
+	void testGetHistoryForNonExistentEntity(SessionFactoryScope scope) {
+		scope.inSession( session -> {
+			final var history = session.getAuditLog().getHistory( AuditedEntity.class, 999L );
+			assertTrue( history.isEmpty() );
+		} );
+	}
 }

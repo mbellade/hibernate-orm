@@ -63,4 +63,17 @@ public interface TransactionIdentifierService extends Service {
 	 * Whether the transaction identifiers are actually timestamps.
 	 */
 	boolean isIdentifierTypeInstant();
+
+	/**
+	 * Programmatically contribute a {@link TransactionIdentifierSupplier},
+	 * overriding any previously configured supplier.
+	 * <p>
+	 * Called during bootstrap (e.g. from the session factory) when
+	 * a supplier is derived from metadata rather than from explicit
+	 * configuration.
+	 *
+	 * @param supplier the supplier to use
+	 */
+	default void contributeIdentifierSupplier(TransactionIdentifierSupplier<?> supplier) {
+	}
 }

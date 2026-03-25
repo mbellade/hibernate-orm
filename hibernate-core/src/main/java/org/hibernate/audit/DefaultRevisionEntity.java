@@ -27,28 +27,31 @@ import org.hibernate.Incubating;
  *   <li>{@code REVTSTMP} — Unix epoch timestamp in milliseconds</li>
  * </ul>
  * <p>
- * To use this entity, add it to the domain model and configure
- * {@link DefaultRevisionEntitySupplier} as the transaction ID
- * supplier:
- * <pre>
- * hibernate.temporal.transaction_id_supplier=org.hibernate.audit.DefaultRevisionEntitySupplier
- * </pre>
+ * To use this entity, add it to the domain model. The
+ * {@link RevisionEntity @RevisionEntity} annotation enables
+ * automatic detection — no explicit
+ * {@code hibernate.temporal.transaction_id_supplier} setting
+ * is required.
  *
- * @see DefaultRevisionEntitySupplier
+ * @see RevisionEntity
+ * @see RevisionEntitySupplier
  *
  * @author Marco Belladelli
  *
  * @since envers-rewrite
  */
 @Incubating
+@RevisionEntity
 @Entity(name = "DefaultRevisionEntity")
 @Table(name = "REVINFO")
 public class DefaultRevisionEntity implements Serializable {
 	@Id
 	@GeneratedValue
+	@RevisionNumber
 	@Column(name = "REV")
 	private int id;
 
+	@RevisionTimestamp
 	@Column(name = "REVTSTMP")
 	private long timestamp;
 

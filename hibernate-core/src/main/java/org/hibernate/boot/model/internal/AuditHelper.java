@@ -76,19 +76,24 @@ public final class AuditHelper {
 						|| table.getNameIdentifier().isExplicit()
 		);
 		collector.addTableNameBinding( table.getNameIdentifier(), auditTable );
-		copyTableColumns( table, auditTable, excludedColumns );
-		final var transactionIdColumn =
-				createAuditColumn( audited.transactionId(),
-						getTransactionIdType( context ), auditTable, context );
-		final var modificationTypeColumn =
-				createAuditColumn( audited.modificationType(),
-						Byte.class, auditTable, context );
-		auditTable.addColumn( transactionIdColumn );
-		auditTable.addColumn( modificationTypeColumn );
-		enableAudit( auditable, auditTable, transactionIdColumn, modificationTypeColumn );
 
-		collector.addSecondPass( (OptionalDeterminationSecondPass) ignored ->
-				copyTableColumns( table, auditTable, excludedColumns ) );
+		// Defer audit column creation to a second pass so the transaction
+		// ID type is resolved after all entities are bound — including any
+		// @RevisionEntity contributed by mapping contributors
+		final String txIdColumnName = audited.transactionId();
+		final String modTypeColumnName = audited.modificationType();
+		collector.addSecondPass( (OptionalDeterminationSecondPass) ignored -> {
+			copyTableColumns( table, auditTable, excludedColumns );
+			final var transactionIdColumn =
+					createAuditColumn( txIdColumnName,
+							getTransactionIdType( context ), auditTable, context );
+			final var modificationTypeColumn =
+					createAuditColumn( modTypeColumnName,
+							Byte.class, auditTable, context );
+			auditTable.addColumn( transactionIdColumn );
+			auditTable.addColumn( modificationTypeColumn );
+			enableAudit( auditable, auditTable, transactionIdColumn, modificationTypeColumn );
+		} );
 	}
 
 	static void enableAudit(
