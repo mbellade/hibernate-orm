@@ -7,7 +7,7 @@ package org.hibernate.audit.internal;
 import org.hibernate.audit.AuditEntry;
 import org.hibernate.audit.AuditLog;
 import org.hibernate.audit.ModificationType;
-import org.hibernate.audit.RevisionEntitySupplier;
+import org.hibernate.audit.spi.RevisionEntitySupplier;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.hibernate.engine.spi.SharedSessionContractImplementor;
 import org.hibernate.persister.entity.EntityPersister;

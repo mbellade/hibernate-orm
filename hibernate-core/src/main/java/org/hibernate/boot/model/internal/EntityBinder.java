@@ -60,9 +60,10 @@ import org.hibernate.annotations.SecondaryRow;
 import org.hibernate.annotations.SecondaryRows;
 import org.hibernate.annotations.Audited;
 import org.hibernate.audit.RevisionEntity;
-import org.hibernate.audit.RevisionEntitySupplier;
+import org.hibernate.audit.RevisionListener;
+import org.hibernate.audit.spi.RevisionEntitySupplier;
+import org.hibernate.resource.beans.spi.ManagedBeanRegistry;
 import org.hibernate.temporal.spi.TransactionIdentifierService;
-import org.hibernate.audit.spi.RevisionEntityDescriptor;
 import org.hibernate.audit.RevisionNumber;
 import org.hibernate.audit.RevisionTimestamp;
 import org.hibernate.annotations.SoftDelete;
@@ -394,28 +395,37 @@ public class EntityBinder {
 		if ( revisionNumberMember == null ) {
 			throw new MappingException(
 					"@RevisionEntity '" + classDetails.getName()
-							+ "' must have a field annotated with @RevisionNumber"
+					+ "' must have a field annotated with @RevisionNumber"
 			);
 		}
 		if ( revisionTimestampMember == null ) {
 			throw new MappingException(
 					"@RevisionEntity '" + classDetails.getName()
-							+ "' must have a field annotated with @RevisionTimestamp"
+					+ "' must have a field annotated with @RevisionTimestamp"
 			);
 		}
 
 		// Configure the transaction identifier service with a RevisionEntitySupplier
-		final var descriptor = new RevisionEntityDescriptor(
-				classDetails,
-				revisionNumberMember,
-				revisionTimestampMember,
-				revisionEntity.listener()
-		);
+		final Class<?> revNumberType = revisionNumberMember.getType().determineRawClass().toJavaClass();
 		final var serviceRegistry = context.getBootstrapContext().getServiceRegistry();
-		serviceRegistry.requireService( TransactionIdentifierService.class )
-				.contributeIdentifierSupplier(
-						RevisionEntitySupplier.fromDescriptor( descriptor, serviceRegistry )
-				);
+		final Class<? extends RevisionListener> listenerClass = revisionEntity.listener();
+		final RevisionListener listener;
+		if ( listenerClass == RevisionListener.class ) {
+			listener = null;
+		}
+		else {
+			listener = serviceRegistry.requireService( ManagedBeanRegistry.class )
+					.getBean( listenerClass )
+					.getBeanInstance();
+		}
+		final var supplier = new RevisionEntitySupplier<>(
+				revNumberType,
+				classDetails.toJavaClass(),
+				revisionNumberMember.getName(),
+				revisionTimestampMember.getName(),
+				listener
+		);
+		serviceRegistry.requireService( TransactionIdentifierService.class ).contributeIdentifierSupplier( supplier );
 	}
 
 	private static void bindAudited(

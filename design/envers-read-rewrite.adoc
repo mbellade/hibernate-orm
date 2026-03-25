@@ -315,13 +315,14 @@ See <<Custom Revision Entity Support>> section below.
 
 | W13
 | `DO_NOT_AUDIT_OPTIMISTIC_LOCKING_FIELD` (skip `@Version`)
-| [yellow]#TODO# — investigate current behavior
+| [yellow]#DIFFERS# — core includes `@Version` in audit table (use `@Audited.Excluded` to exclude).
+  Auto-exclusion requires coordinating boot-time column exclusion, write-side mask, AND read-side SQL generation.
 | Low
 
 | W14
 | `STORE_DATA_AT_DELETE` (preserve entity state on deletion)
-| [yellow]#TODO# — core stores full state on DEL, need to verify
-| Low
+| [green]#DONE# — core always stores full state on DEL (better default than envers)
+| —
 
 | W15
 | `REVISION_ON_COLLECTION_CHANGE` (audit non-owned collection changes)
@@ -330,8 +331,8 @@ See <<Custom Revision Entity Support>> section below.
 
 | W16
 | ManyToOne / OneToOne relationship auditing
-| [yellow]#TODO# — investigate current support
-| High
+| [green]#DONE# — ManyToOne tested (eager, lazy, nested); OneToOne (FK-based) verified via smoke test
+| —
 
 | W17
 | ManyToMany / OneToMany owned relationship auditing (join tables)
@@ -345,12 +346,13 @@ See <<Custom Revision Entity Support>> section below.
 
 | W19
 | Embeddable/component auditing
-| [yellow]#TODO# — investigate current support
-| High
+| [green]#DONE# — simple `@Embedded` verified via smoke test (columns copied from source table)
+| —
 
 | W20
 | Entity inheritance (single-table, joined, table-per-class)
-| [yellow]#TODO# — investigate current support
+| [red]#BROKEN# — SINGLE_TABLE fails: discriminator column not populated in audit INSERT.
+  `bindAudited()` only called on `RootClass`. JOINED/TABLE_PER_CLASS untested.
 | High
 
 | W21
@@ -375,7 +377,7 @@ See <<Custom Revision Entity Support>> section below.
 
 | W25
 | Collection type support (bags, sets, lists, maps, sorted variants)
-| [yellow]#TODO# — investigate beyond `@ElementCollection`
+| [yellow]#TODO# — only `Set<String>` ElementCollection tested; lists, maps, sorted variants need verification
 | High
 |===
 
@@ -578,11 +580,12 @@ audit concerns clearly separated from the existing `org.hibernate.temporal` SPI 
 
 | `org.hibernate.audit`
 | Public API: `ModificationType` enum, `AuditLog` interface, `AuditEntry` record, `AuditException`,
-  `RevisionEntitySupplier`, `RevisionListener`, `DefaultRevisionEntity`,
+  `RevisionListener`, `DefaultRevisionEntity`,
   `@RevisionEntity`, `@RevisionNumber`, `@RevisionTimestamp`
 
 | `org.hibernate.audit.spi`
-| SPI: `RevisionEntityDescriptor` (detected `@RevisionEntity` metadata)
+| SPI: `RevisionEntitySupplier` (revision entity persistence + ID return),
+  `RevisionEntityDescriptor` (detected `@RevisionEntity` metadata)
 
 | `org.hibernate.temporal.spi`
 | SPI: `TransactionIdentifierSupplier<T>`, `TransactionIdentifierService`
@@ -1199,42 +1202,243 @@ public class RevisionInfoSupplier extends RevisionEntitySupplier<Integer> {
    - Should there be a way to retrieve pre-deletion state + DEL marker?
    - Envers supports this via `includeDeletions` parameter
 
+== Envers Feature Parity — Comprehensive Gap Analysis
+
+=== Verified via Smoke Tests
+
+The following capabilities were verified with dedicated smoke tests (`AuditSmokeTest`,
+`AuditInheritanceSmokeTest`):
+
+[cols="2,1,3"]
+|===
+| Feature | Result | Notes
+
+| Simple `@Embedded` properties
+| [green]#WORKS#
+| Columns copied from source table. Write + read at multiple revisions verified.
+
+| `@OneToOne` (FK-based, owning side)
+| [green]#WORKS#
+| Same mechanism as `@ManyToOne`. Association changes tracked correctly.
+
+| Versioned entity (`@Version`)
+| [green]#WORKS#
+| Version column included in audit table. Write + point-in-time read verified.
+
+| `@EmbeddedId` composite key
+| [red]#BROKEN#
+| Entity table not created properly. Needs investigation in boot model binding.
+
+| SINGLE_TABLE inheritance
+| [red]#BROKEN#
+| Discriminator column not populated in audit INSERT. `bindAudited()` only called on `RootClass`.
+|===
+
+=== Features Covered Differently
+
+[cols="2,2,3"]
+|===
+| Envers Feature | Core Equivalent | Notes
+
+| `AuditQuery` / `AuditEntity` DSL
+| Standard HQL/Criteria in `atTransaction` session
+| Simpler — no custom DSL to learn. All HQL features (joins, subqueries, projections, pagination) work.
+
+| `AuditReaderFactory.get(em)`
+| `session.getAuditLog()`
+| Session-scoped, no factory indirection.
+
+| Auto-increment integer revisions
+| Opaque comparable TX IDs
+| More flexible (any `Comparable` type). Loses integer next/prev navigation.
+
+| hbm.xml audit entity mappings
+| `AuxiliaryMapping` on same entity class
+| No separate entity class needed.
+
+| Event listeners + WorkUnit queuing
+| Inline in mutation coordinators
+| Simpler — no deferred queuing at before-transaction-completion.
+
+| `traverseRelation()`
+| HQL: `join fetch e.rel` / `join e.rel r where ...`
+| Standard HQL joins are more powerful and familiar.
+|===
+
+=== Remaining Gaps — High Priority
+
+[cols="1,3,3"]
+|===
+| # | Gap | What's Needed
+
+| G1
+| **Entity inheritance** (SINGLE_TABLE, JOINED, TABLE_PER_CLASS)
+| Handle `@Audited` across inheritance hierarchies. SINGLE_TABLE: include discriminator in audit INSERT.
+  JOINED: create audit tables for subclass tables. TABLE_PER_CLASS: audit tables per concrete class.
+
+| G2
+| **OneToMany collection auditing** (join table + inverse FK)
+| `AuditStateManagement` throws `UnsupportedOperationException` for `isOneToMany()`.
+  Implement OneToMany audit coordinators.
+
+| G3
+| **ManyToMany collection auditing** (join tables)
+| Untested — may partially work since ManyToMany uses join tables like ElementCollection.
+  Test and verify.
+
+| G4
+| **`@EmbeddedId` / `@IdClass` composite keys**
+| Boot-time table creation fails for `@EmbeddedId` entities. Needs investigation.
+
+| G5
+| **Cross-type revision queries**
+| `AuditLog.getEntityTypesModifiedAt(txId)` — iterate all audited entity persisters for rows
+  matching the given transaction ID.
+|===
+
+=== Remaining Gaps — Medium Priority
+
+[cols="1,3,3"]
+|===
+| # | Gap | What's Needed
+
+| G6
+| **ValidityAuditStrategy** (REVEND / REVEND_TSTMP columns)
+| Performance optimization (range query vs MAX subquery). Not a functional gap.
+  Existing envers validity data is compatible with core's MAX-subquery reads.
+
+| G7
+| **`RelationTargetAuditMode.NOT_AUDITED`**
+| Audit FK column without requiring target entity to be `@Audited`.
+  `atTransaction` session should load FK from audit table but target from main table.
+
+| G8
+| **`@Version` auto-exclusion**
+| Core includes `@Version` in audit tables (users can use `@Audited.Excluded`).
+  Auto-exclusion requires coordinating boot-time column exclusion, write-side mask, AND
+  read-side SQL generation — non-trivial.
+
+| G9
+| **`EntityTrackingRevisionListener`** (per-entity-change callback)
+| Only `RevisionListener.newRevision()` exists (once per transaction).
+  Need per-entity callback with entityClass, entityId, modificationType.
+
+| G10
+| **`@AuditOverride`** for inherited properties
+| Depends on G1 (inheritance support). Override audit settings on subclass.
+
+| G11
+| **Criteria-based restrictions for `AuditLog`**
+| Consider accepting JPA `Predicate` fragments. HQL is a viable workaround.
+
+| G12
+| **Schema case sensitivity**: envers `_AUD` vs core `_aud`
+| Decide on default or document for case-sensitive databases.
+|===
+
+=== Envers Annotations — Migration Analysis
+
+Envers exposes several annotations for customizing audit table/column structure. Not all need
+direct equivalents in core, but all need a clear migration path.
+
+[cols="2,1,3"]
+|===
+| Envers Annotation | Priority | Core Status / Migration Path
+
+| `@AuditMappedBy(mappedBy, positionMappedBy)`
+| Medium
+| Solves `@OneToMany` + `@JoinColumn` with read-only `@ManyToOne(insertable=false, updatable=false)`
+  back-reference ("fake bidirectional"). Tells envers which child property maps back to the parent
+  so it can track changes without a join table.
+  **Core**: Since core uses the same entity mappings (not separate audit entities), the FK column
+  and its relationship are already resolved by Hibernate's metamodel. Whether this "just works"
+  must be verified when implementing OneToMany auditing (G2). If not, an equivalent annotation
+  or auto-detection is needed.
+
+| `@AuditJoinTable(name, schema, catalog, inverseJoinColumns)`
+| Low
+| Customizes audit join table for many-to-many and element collection associations.
+  **Core**: `@Audited(tableName=...)` covers the table name. Schema/catalog not yet supported
+  (see `@Audited` attribute gap). Column-level customization (`inverseJoinColumns`) not supported.
+  **Migration**: Users can migrate table names via `@Audited(tableName=...)`. Schema/catalog and
+  column customization need attributes on `@Audited` or a dedicated annotation.
+
+| `@CollectionAuditTable(name, schema, catalog)`
+| Low
+| Newer, simpler alternative to `@AuditJoinTable` (no column customization). `@Incubating` in envers.
+  **Core**: Same coverage as `@AuditJoinTable` above — table name works, schema/catalog don't.
+
+| `@AuditOverride(name, isAudited, forClass, auditJoinTable)`
+| Medium
+| Override audit settings on inherited properties from `@MappedSuperclass` or superclasses.
+  Key use case: audit/un-audit specific inherited properties without re-declaring them.
+  **Core**: If `@Audited.Excluded` works when applied to properties in subclasses, that covers
+  the common case (un-audit inherited property). The `forClass` pattern (override without
+  re-declaring) has no equivalent yet. Depends on G1 (inheritance) and G10.
+
+| `@SecondaryAuditTable(secondaryTableName, secondaryAuditTableName)`
+| Low
+| Maps `@SecondaryTable` to its audit counterpart.
+  **Core**: Not supported. `AuditHelper` only processes `getMainTable()`. Low priority since
+  `@SecondaryTable` usage is itself uncommon, but should not be forgotten.
+
+| `@ModifiedEntityNames`
+| Low
+| Auto-populates a `Set<String>` field on the revision entity with entity type names changed
+  in each revision. Backed by `@ElementCollection` + `REVCHANGES` table.
+  Mechanism: `EntityTrackingRevisionListener.entityChanged()` adds entity names automatically.
+  **Core**: Depends on G9 (`EntityTrackingRevisionListener`). Once that exists, auto-populating
+  a marked field is straightforward. Migration guide should explain manual alternative
+  (application-level listener that populates the set).
+|===
+
+=== Deferrable / Low Priority
+
+[cols="2,3"]
+|===
+| Feature | Why Defer
+
+| Modified property flags (`_MOD` columns, `hasChanged()`)
+| Significant schema + complexity. `diff()` alternative is simpler.
+
+| `AuditStrategy` SPI (pluggable)
+| Premature until ValidityAuditStrategy is implemented.
+
+| `CASCADE_DELETE_REVISION`
+| Anti-pattern for audit data.
+
+| Revision number navigation (next/prev)
+| Opaque IDs; query `getRevisions()` and navigate the list.
+
+| `NotAuditedException` / `RevisionDoesNotExistException`
+| Can add specific exception types later if needed.
+|===
+
 == Open Questions
 
-=== Write-side
+=== Resolved
 
-* How should `@Audited` interact with entity inheritance hierarchies?
-  (Envers handles single-table, joined, table-per-class — does core?)
-* What is the current state of relationship auditing (ManyToOne, OneToMany, ManyToMany)?
-  Need to inventory which association types already create audit rows in core.
-* Does core already handle embeddable/component auditing, or only simple properties?
-* Does `@Audited.Excluded` work on `@Version` fields, or do we need a separate setting
-  like envers' `DO_NOT_AUDIT_OPTIMISTIC_LOCKING_FIELD`?
-* ValidityAuditStrategy: is the start/end revision interval approach worth implementing in core?
-  It trades write performance for read performance — may not be needed if the MAX-subquery
-  approach performs well enough with proper indexing.
-* Should `TransactionIdentifierSupplier.getTransactionIdentifier()` receive a richer context
-  (e.g. list of entities being modified in this transaction) to support `EntityTrackingRevisionListener`-like
-  functionality?
+* [green]#RESOLVED#: **Relationship auditing** — ManyToOne fully tested (eager, lazy, nested).
+  OneToOne (FK-based) verified. OneToMany/ManyToMany still TODO (see G2/G3).
+* [green]#RESOLVED#: **Embeddable auditing** — simple `@Embedded` works. Nested embeddables likely work.
+  `@EmbeddedId` broken (see G4).
+* [green]#RESOLVED#: **`@Version` fields** — included in audit tables by default. Users can use
+  `@Audited.Excluded`. Auto-exclusion is non-trivial (requires coordinating 3 layers).
+* [green]#RESOLVED#: **Audited associations** — work transparently via `TemporalEntityKey`,
+  per-row temporal identifier, and lazy proxy temporal capture.
 
-=== Read-side
+=== Still Open
 
-* `AuditLog` is session-scoped (obtainable from `Session` or `StatelessSession` via `getAuditLog()`).
-  All queries reuse the underlying session, so entities remain managed and support lazy associations.
-  Internally uses `withTemporalIdentifier()` save/restore pattern to temporarily set the temporal
-  identifier for each query.
-* Performance: `getRevisions()` on entities with many revisions — pagination?
-* **Audited associations**: [green]#RESOLVED# — associations work transparently via
-  `TemporalEntityKey`, per-row temporal identifier, and lazy proxy temporal capture. See architecture section above.
-
-=== Schema & Migration
-
-* Case sensitivity: envers default suffix is `_AUD` (uppercase), core default is `_aud` (lowercase).
-  On case-sensitive databases/filesystems this matters. Should core default to `_AUD` for envers compat,
-  or should the migration guide tell users to configure `@Audited(tableName=...)` explicitly?
-* Envers uses `originalId` as a composite-id component property name — verify this doesn't affect
-  core's column-level reads.
-* Envers' `OrderedSequenceGenerator` uses specific sequence names (`REVISION_GENERATOR`).
-  When mapping REVINFO as a regular entity, the `@GeneratedValue` strategy must use the same
-  sequence to ensure continuity. Document this clearly.
-* Should we provide an automated migration validator that checks schema compatibility?
+* **Inheritance**: How should `@Audited` interact with entity inheritance hierarchies?
+  SINGLE_TABLE discriminator not populated in audit INSERT. JOINED/TABLE_PER_CLASS untested.
+* **`REVISION_ON_COLLECTION_CHANGE`**: Should changes to non-owned collections create a revision
+  for the owning entity? Core currently only creates audit rows when the entity is explicitly modified.
+* **ValidityAuditStrategy**: Worth implementing in core? Trade-off: write perf vs read perf.
+  May not be needed if MAX-subquery approach performs well with proper indexing.
+* **`EntityTrackingRevisionListener`**: Should `TransactionIdentifierSupplier` receive a richer context?
+* **Performance**: `getRevisions()` pagination for entities with many revisions.
+* **Schema case sensitivity**: envers `_AUD` (uppercase) vs core `_aud` (lowercase).
+  Decide on default or document for case-sensitive databases.
+* **Envers `originalId` mapping**: Verify this doesn't affect core's column-level reads.
+* **Sequence continuity**: Document that `@GeneratedValue` must use the same sequence as envers
+  (`REVISION_GENERATOR`) for migration.

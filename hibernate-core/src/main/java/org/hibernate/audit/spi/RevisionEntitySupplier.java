@@ -2,16 +2,17 @@
  * SPDX-License-Identifier: Apache-2.0
  * Copyright Red Hat Inc. and Hibernate Authors
  */
-package org.hibernate.audit;
+package org.hibernate.audit.spi;
 
 import org.checkerframework.checker.nullness.qual.Nullable;
 import org.hibernate.Incubating;
 import org.hibernate.StatelessSession;
-import org.hibernate.audit.spi.RevisionEntityDescriptor;
+import org.hibernate.audit.AuditException;
+import org.hibernate.audit.RevisionListener;
+import org.hibernate.audit.RevisionNumber;
+import org.hibernate.audit.RevisionTimestamp;
 import org.hibernate.engine.spi.SharedSessionContractImplementor;
 import org.hibernate.persister.entity.EntityPersister;
-import org.hibernate.resource.beans.spi.ManagedBeanRegistry;
-import org.hibernate.service.ServiceRegistry;
 import org.hibernate.temporal.spi.TransactionIdentifierSupplier;
 
 import java.time.Instant;
@@ -172,38 +173,5 @@ public class RevisionEntitySupplier<T> implements TransactionIdentifierSupplier<
 		try (StatelessSession childSession = session.statelessWithOptions().connection().open()) {
 			childSession.insert( revisionEntity );
 		}
-	}
-
-	/**
-	 * Create a {@link RevisionEntitySupplier} from a detected
-	 * {@link RevisionEntityDescriptor}, resolving the
-	 * {@link RevisionListener} via {@link ManagedBeanRegistry}.
-	 */
-	public static RevisionEntitySupplier<?> fromDescriptor(
-			RevisionEntityDescriptor descriptor,
-			ServiceRegistry serviceRegistry) {
-		final Class<?> revNumberType = descriptor.revisionNumberMember()
-				.getType().determineRawClass().toJavaClass();
-		final RevisionListener listener = resolveListener(
-				descriptor.listenerClass(), serviceRegistry
-		);
-		return new RevisionEntitySupplier<>(
-				revNumberType,
-				descriptor.entityClassDetails().toJavaClass(),
-				descriptor.revisionNumberMember().getName(),
-				descriptor.revisionTimestampMember().getName(),
-				listener
-		);
-	}
-
-	private static @Nullable RevisionListener resolveListener(
-			Class<? extends RevisionListener> listenerClass,
-			ServiceRegistry serviceRegistry) {
-		if ( listenerClass == RevisionListener.class ) {
-			return null;
-		}
-		return serviceRegistry.requireService( ManagedBeanRegistry.class )
-				.getBean( listenerClass )
-				.getBeanInstance();
 	}
 }
