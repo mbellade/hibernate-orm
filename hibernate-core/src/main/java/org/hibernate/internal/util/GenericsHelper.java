@@ -182,9 +182,16 @@ public final class GenericsHelper {
 			return null;
 		}
 
-		if ( clazz == genericType
-				&& base instanceof ParameterizedType result ) {
-			return result;
+		if ( clazz == genericType ) {
+			if ( base instanceof ParameterizedType result ) {
+				return result;
+			}
+			// raw type used as-is (e.g. member declared directly on a generic class)
+			// return with type parameters as arguments (identity mapping)
+			final var typeParameters = clazz.getTypeParameters();
+			if ( typeParameters.length > 0 ) {
+				return new SimpleParameterizedType( clazz, typeParameters, null );
+			}
 		}
 
 		final var superclass = clazz.getGenericSuperclass();
