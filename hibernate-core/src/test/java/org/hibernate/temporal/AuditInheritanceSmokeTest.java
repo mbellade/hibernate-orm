@@ -155,7 +155,7 @@ class AuditInheritanceSmokeTest {
 	class JoinedTest {
 
 		@Test
-		@Disabled("JOINED inheritance: subclass audit tables not created")
+		@Disabled("JOINED inheritance read side: per-table temporal predicates not yet implemented")
 		void testJoinedInheritance(SessionFactoryScope scope) {
 			TxIdSupplier.currentTxId = 600;
 

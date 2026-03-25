@@ -5,6 +5,8 @@
 package org.hibernate.persister.entity.mutation;
 
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
 
 import org.hibernate.engine.jdbc.batch.internal.BasicBatchKey;
 import org.hibernate.engine.jdbc.batch.spi.BatchKey;
@@ -24,19 +26,23 @@ import org.hibernate.persister.entity.EntityPersister;
 import org.hibernate.audit.ModificationType;
 import org.hibernate.sql.model.MutationOperationGroup;
 import org.hibernate.sql.model.MutationType;
+import org.hibernate.sql.model.ast.TableMutation;
 import org.hibernate.sql.model.ast.builder.TableInsertBuilderStandard;
 import org.hibernate.sql.model.internal.MutationGroupSingle;
+import org.hibernate.sql.model.internal.MutationGroupStandard;
 
 import static org.hibernate.persister.entity.mutation.InsertCoordinatorStandard.getPropertiesToInsert;
 import static org.hibernate.sql.model.internal.MutationOperationGroupFactory.singleOperation;
 
 /**
  * Base support for audit log insert coordinators.
+ * <p>
+ * Supports all inheritance strategies: for SINGLE_TABLE / TABLE_PER_CLASS
+ * there is one audit table; for JOINED there is one per entity table.
+ * The static operation group is cached for reuse.
  */
 abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator {
-	protected final EntityTableMapping identifierTableMapping;
-	protected final EntityTableMapping auditTableMapping;
-	protected final String auditTableName;
+	private final EntityTableMapping[] auditTableMappings;
 	protected final boolean[] auditedPropertyMask;
 	private final SelectableMapping transactionIdMapping;
 	private final SelectableMapping modificationTypeMapping;
@@ -47,13 +53,11 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator {
 
 	protected AbstractAuditCoordinator(EntityPersister entityPersister, SessionFactoryImplementor factory) {
 		super( entityPersister, factory );
-		this.identifierTableMapping = entityPersister.getIdentifierTableMapping();
 		final var auditMapping = entityPersister.getAuditMapping();
 		if ( auditMapping == null ) {
 			throw new MappingException( "No audit mapping available for " + entityPersister.getEntityName() );
 		}
-		this.auditTableName = auditMapping.getTableName();
-		this.auditTableMapping = createAuxiliaryTableMapping( identifierTableMapping, entityPersister, auditTableName );
+		this.auditTableMappings = buildAuditTableMappings( entityPersister, auditMapping.getTableName() );
 		this.auditedPropertyMask = new boolean[entityPersister.getPropertySpan()];
 		for ( int i = 0; i < this.auditedPropertyMask.length; i++ ) {
 			this.auditedPropertyMask[i] = !entityPersister.isPropertyAuditedExcluded( i );
@@ -66,6 +70,24 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator {
 		this.staticAuditInsertGroup = entityPersister.isDynamicInsert()
 				? null
 				: buildAuditInsertGroup( applyAuditMask( entityPersister.getPropertyInsertability() ), null, null );
+	}
+
+	private EntityTableMapping[] buildAuditTableMappings(EntityPersister persister, String primaryAuditTableName) {
+		final EntityTableMapping[] sourceMappings = persister.getTableMappings();
+		final EntityTableMapping[] result = new EntityTableMapping[sourceMappings.length];
+		for ( int i = 0; i < sourceMappings.length; i++ ) {
+			final EntityTableMapping source = sourceMappings[i];
+			if ( source.isInverse() ) {
+				continue;
+			}
+			// For single-table entities, use the provided audit table name.
+			// For multi-table (JOINED), derive from the source entity table name.
+			final String auditTableName = sourceMappings.length == 1
+					? primaryAuditTableName
+					: source.getTableName() + "_aud";
+			result[i] = createAuxiliaryTableMapping( source, persister, auditTableName );
+		}
+		return result;
 	}
 
 	protected void insertAuditRow(
@@ -108,73 +130,87 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator {
 		}
 	}
 
-	protected BatchKey getAuditBatchKey() {
-		return auditBatchKey;
-	}
-
 	@Override
 	protected BatchKey getBatchKey() {
 		return auditBatchKey;
 	}
 
+	/**
+	 * Build a {@link MutationOperationGroup} with one INSERT per audit table.
+	 * Each table's insert builder gets only the attributes belonging to that
+	 * table via the source table mapping's {@code getAttributeIndexes()}.
+	 */
 	private MutationOperationGroup buildAuditInsertGroup(
 			boolean[] propertyInclusions,
 			Object entity,
 			SharedSessionContractImplementor session) {
-		final var insertBuilder =
-				new TableInsertBuilderStandard( entityPersister(), auditTableMapping, factory() );
-		applyAuditInsertDetails( insertBuilder, propertyInclusions, entity, session );
-		final var tableMutation = insertBuilder.buildMutation();
-		return singleOperation(
-				new MutationGroupSingle( MutationType.INSERT, entityPersister(), tableMutation ),
-				tableMutation.createMutationOperation( null, factory() )
-		);
-	}
-
-	private void applyAuditInsertDetails(
-			TableInsertBuilderStandard insertBuilder,
-			boolean[] propertyInclusions,
-			Object entity,
-			SharedSessionContractImplementor session) {
+		final EntityTableMapping[] sourceMappings = entityPersister().getTableMappings();
 		final var attributeMappings = entityPersister().getAttributeMappings();
-		for ( final int attributeIndex : identifierTableMapping.getAttributeIndexes() ) {
-			final var attributeMapping = attributeMappings.get( attributeIndex );
-			if ( propertyInclusions[attributeIndex] ) {
-				attributeMapping.forEachInsertable( insertBuilder );
+		final List<TableMutation<?>> mutations = new ArrayList<>( auditTableMappings.length );
+
+		for ( int i = 0; i < auditTableMappings.length; i++ ) {
+			if ( auditTableMappings[i] == null ) {
+				continue;
 			}
-			else {
-				final var generator = attributeMapping.getGenerator();
-				if ( isValueGenerated( generator ) ) {
-					if ( entity != null && generator.generatedBeforeExecution( entity, session ) ) {
-						propertyInclusions[attributeIndex] = true;
-						attributeMapping.forEachInsertable( insertBuilder );
-					}
-					else if ( isValueGenerationInSql( generator ) ) {
-						addSqlGeneratedValue( insertBuilder, attributeMapping, (OnExecutionGenerator) generator );
+			final var insertBuilder =
+					new TableInsertBuilderStandard( entityPersister(), auditTableMappings[i], factory() );
+
+			// Route attributes to this builder using the source table's attribute indexes
+			for ( final int attributeIndex : sourceMappings[i].getAttributeIndexes() ) {
+				final var attributeMapping = attributeMappings.get( attributeIndex );
+				if ( propertyInclusions[attributeIndex] ) {
+					attributeMapping.forEachInsertable( insertBuilder );
+				}
+				else {
+					final var generator = attributeMapping.getGenerator();
+					if ( isValueGenerated( generator ) ) {
+						if ( entity != null && generator.generatedBeforeExecution( entity, session ) ) {
+							propertyInclusions[attributeIndex] = true;
+							attributeMapping.forEachInsertable( insertBuilder );
+						}
+						else if ( isValueGenerationInSql( generator ) ) {
+							addSqlGeneratedValue( insertBuilder, attributeMapping, (OnExecutionGenerator) generator );
+						}
 					}
 				}
 			}
+
+			// Discriminator belongs to the identifier table only
+			if ( sourceMappings[i].isIdentifierTable() ) {
+				final var discriminatorMapping = entityPersister().getDiscriminatorMapping();
+				if ( discriminatorMapping != null && discriminatorMapping.hasPhysicalColumn()
+						&& entityPersister().getDiscriminatorValue() instanceof DiscriminatorValue.Literal ) {
+					insertBuilder.addValueColumn(
+							entityPersister().getDiscriminatorSQLValue(),
+							discriminatorMapping
+					);
+				}
+			}
+
+			// Audit columns (on every audit table)
+			if ( useServerTransactionTimestamps ) {
+				insertBuilder.addValueColumn( currentTimestampFunctionName, transactionIdMapping );
+			}
+			else {
+				insertBuilder.addValueColumn( "?", transactionIdMapping );
+			}
+			insertBuilder.addValueColumn( "?", modificationTypeMapping );
+
+			// Key columns
+			sourceMappings[i].getKeyMapping().forEachKeyColumn( insertBuilder::addKeyColumn );
+
+			mutations.add( insertBuilder.buildMutation() );
 		}
 
-		// add discriminator column if applicable (SINGLE_TABLE, JOINED with explicit discriminator)
-		final var discriminatorMapping = entityPersister().getDiscriminatorMapping();
-		if ( discriminatorMapping != null && discriminatorMapping.hasPhysicalColumn()
-				&& entityPersister().getDiscriminatorValue() instanceof DiscriminatorValue.Literal ) {
-			insertBuilder.addValueColumn(
-					entityPersister().getDiscriminatorSQLValue(),
-					discriminatorMapping
+		if ( mutations.size() == 1 ) {
+			return singleOperation(
+					new MutationGroupSingle( MutationType.INSERT, entityPersister(), mutations.get( 0 ) ),
+					mutations.get( 0 ).createMutationOperation( null, factory() )
 			);
 		}
-
-		if ( useServerTransactionTimestamps ) {
-			insertBuilder.addValueColumn( currentTimestampFunctionName, getTransactionIdMapping() );
-		}
-		else {
-			insertBuilder.addValueColumn( "?", getTransactionIdMapping() );
-		}
-		insertBuilder.addValueColumn( "?", getModificationTypeMapping() );
-
-		identifierTableMapping.getKeyMapping().forEachKeyColumn( insertBuilder::addKeyColumn );
+		return createOperationGroup( null,
+				new MutationGroupStandard( MutationType.INSERT, entityPersister(), mutations )
+		);
 	}
 
 	private void bindAuditValues(
@@ -184,59 +220,55 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator {
 			ModificationType modificationType,
 			SharedSessionContractImplementor session,
 			JdbcValueBindings jdbcValueBindings) {
-		final String tableName = auditTableName;
-		auditTableMapping.getKeyMapping().breakDownKeyJdbcValues(
-				id,
-				(jdbcValue, columnMapping) -> jdbcValueBindings.bindValue(
-						jdbcValue,
-						tableName,
-						columnMapping.getColumnName(),
-						ParameterUsage.SET
-				),
-				session
-		);
-
 		final var attributeMappings = entityPersister().getAttributeMappings();
-		for ( final int attributeIndex : identifierTableMapping.getAttributeIndexes() ) {
-			if ( propertyInclusions[attributeIndex] ) {
-				final var attributeMapping = attributeMappings.get( attributeIndex );
-				if ( !(attributeMapping instanceof PluralAttributeMapping) ) {
-					attributeMapping.decompose(
-							values[attributeIndex],
-							0,
-							jdbcValueBindings,
-							null,
-							(valueIndex, bindings, noop, jdbcValue, selectableMapping) -> {
-								if ( selectableMapping.isInsertable() && !selectableMapping.isFormula() ) {
-									bindings.bindValue(
-											jdbcValue,
-											tableName,
-											selectableMapping.getSelectionExpression(),
-											ParameterUsage.SET
-										);
-								}
-							},
-							session
-					);
+		final EntityTableMapping[] sourceMappings = entityPersister().getTableMappings();
+
+		for ( int tableIndex = 0; tableIndex < auditTableMappings.length; tableIndex++ ) {
+			if ( auditTableMappings[tableIndex] == null ) {
+				continue;
+			}
+			final String tableName = auditTableMappings[tableIndex].getTableName();
+
+			// Key columns
+			sourceMappings[tableIndex].getKeyMapping().breakDownKeyJdbcValues(
+					id,
+					(jdbcValue, columnMapping) -> jdbcValueBindings.bindValue(
+							jdbcValue, tableName, columnMapping.getColumnName(), ParameterUsage.SET
+					),
+					session
+			);
+
+			// Attribute values for this table
+			for ( final int attributeIndex : sourceMappings[tableIndex].getAttributeIndexes() ) {
+				if ( propertyInclusions[attributeIndex] ) {
+					final var attributeMapping = attributeMappings.get( attributeIndex );
+					if ( !(attributeMapping instanceof PluralAttributeMapping) ) {
+						attributeMapping.decompose(
+								values[attributeIndex], 0, jdbcValueBindings, null,
+								(valueIndex, bindings, noop, jdbcValue, selectableMapping) -> {
+									if ( selectableMapping.isInsertable() && !selectableMapping.isFormula() ) {
+										bindings.bindValue( jdbcValue, tableName,
+												selectableMapping.getSelectionExpression(), ParameterUsage.SET );
+									}
+								},
+								session
+						);
+					}
 				}
 			}
-		}
 
-		if ( !useServerTransactionTimestamps ) {
+			// Audit columns
+			if ( !useServerTransactionTimestamps ) {
+				jdbcValueBindings.bindValue(
+						session.getCurrentTransactionIdentifier(), tableName,
+						transactionIdMapping.getSelectionExpression(), ParameterUsage.SET
+				);
+			}
 			jdbcValueBindings.bindValue(
-				session.getCurrentTransactionIdentifier(),
-				tableName,
-				getTransactionIdMapping().getSelectionExpression(),
-				ParameterUsage.SET
+					modificationType.ordinal(), tableName,
+					modificationTypeMapping.getSelectionExpression(), ParameterUsage.SET
 			);
 		}
-
-		jdbcValueBindings.bindValue(
-				Integer.valueOf( modificationType.ordinal() ),
-				tableName,
-				getModificationTypeMapping().getSelectionExpression(),
-				ParameterUsage.SET
-		);
 	}
 
 	private boolean[] applyAuditMask(boolean[] propertyInclusions) {
