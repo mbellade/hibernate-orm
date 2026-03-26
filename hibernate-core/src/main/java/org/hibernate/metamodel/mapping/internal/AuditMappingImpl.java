@@ -104,10 +104,11 @@ public class AuditMappingImpl implements AuditMapping {
 				creationContext
 		);
 
+		final var modificationTypeJdbcMapping = resolveJdbcMapping( typeConfiguration, ModificationType.class );
 		modificationTypeMapping = SelectableMappingImpl.from(
 				tableName,
 				modificationTypeColumnName,
-				jdbcMapping,
+				modificationTypeJdbcMapping,
 				typeConfiguration,
 				true,
 				false,
@@ -218,7 +219,7 @@ public class AuditMappingImpl implements AuditMapping {
 		auditPredicate.add( new ComparisonPredicate(
 				new ColumnReference( tableReference, modificationTypeMapping ),
 				NOT_EQUAL,
-				new JdbcLiteral<>( ModificationType.DEL.ordinal(), modificationTypeMapping.getJdbcMapping() )
+				new JdbcLiteral<>( ModificationType.DEL, modificationTypeMapping.getJdbcMapping() )
 		) );
 		return auditPredicate;
 	}

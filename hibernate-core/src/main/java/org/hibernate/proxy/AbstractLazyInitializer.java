@@ -6,11 +6,11 @@ package org.hibernate.proxy;
 
 import org.hibernate.FlushMode;
 import org.hibernate.HibernateException;
+import org.hibernate.audit.AuditLog;
 import org.hibernate.LazyInitializationException;
 import org.hibernate.SessionException;
 import org.hibernate.boot.spi.SessionFactoryOptions;
 import org.hibernate.engine.spi.EntityKey;
-import org.hibernate.engine.spi.LoadQueryInfluencers;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.hibernate.engine.spi.SharedSessionContractImplementor;
 import org.hibernate.internal.SessionFactoryRegistry;
@@ -54,7 +54,8 @@ public abstract class AbstractLazyInitializer implements LazyInitializer {
 		// Capture the temporal identifier for revision-aware proxy initialization
 		if ( session != null ) {
 			final Object tempId = session.getLoadQueryInfluencers().getTemporalIdentifier();
-			this.temporalIdentifier = tempId != LoadQueryInfluencers.ALL_REVISIONS ? tempId : null;
+			assert tempId != AuditLog.ALL_REVISIONS : "Proxy created with ALL_REVISIONS temporal identifier";
+			this.temporalIdentifier = tempId;
 		}
 		// initialize other fields depending on session state
 		if ( session == null ) {

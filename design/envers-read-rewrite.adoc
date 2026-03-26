@@ -351,8 +351,8 @@ See <<Custom Revision Entity Support>> section below.
 
 | W20
 | Entity inheritance (single-table, joined, table-per-class)
-| [red]#BROKEN# — SINGLE_TABLE fails: discriminator column not populated in audit INSERT.
-  `bindAudited()` only called on `RootClass`. JOINED/TABLE_PER_CLASS untested.
+| [yellow]#PARTIAL# — SINGLE_TABLE and TABLE_PER_CLASS write+read done.
+  JOINED write done (multi-table audit coordinator), read TODO (per-table temporal predicates).
 | High
 
 | W21
@@ -805,9 +805,19 @@ Associations between `@Audited` entities work transparently in both point-in-tim
   (`AuditMappingImpl`: `findParentRevColumn()` + `createRestriction()` with `Expression` upper bound)
 * [x] Lazy to-one proxy with captured revision (`AbstractLazyInitializer.temporalIdentifier`)
 * [x] Simplify `AuditLogImpl` — all queries now use HQL (no SQL AST), revision entity join in `getHistory()`
-* [x] `AuditColumnFunction` return type: `UnknownBasicJavaType` bypasses SQM type checks
+* [x] `AuditColumnFunction` return type: `modificationType()` returns `ModificationType` enum directly
+  (resolved via `standardBasicTypeForJavaType()` at function registration, same pattern as other built-in functions)
+* [x] `AuditMappingImpl` modification type mapping uses proper enum JDBC type (not shared with transaction ID mapping)
 * [x] Session-scoped `AuditLog` — moved from `SessionFactory` to `SharedSessionContract`
-  (entities stay managed in the session PC; `withTemporalIdentifier()` save/restore pattern)
+* [x] `AuditLogImpl` child session isolation — lazily-created child session via
+  `session.sessionWithOptions().connection().atTransaction(ALL_REVISIONS).open()`.
+  Shares parent's JDBC connection, has isolated persistence context (audit snapshots don't pollute parent PC).
+  Auto-closed when parent session closes via `ParentSessionObserver`.
+  Lazy proxies work because the child session stays open for the `AuditLog`'s lifetime.
+* [x] `AuditLog.ALL_REVISIONS` is the canonical sentinel (public API in `org.hibernate.audit.AuditLog`);
+  `LoadQueryInfluencers` references it — no longer defines its own constant.
+* [x] `AbstractLazyInitializer` assertion: proxy creation with `ALL_REVISIONS` as temporal identifier
+  is flagged as a bug (should never happen — `EntityInitializerImpl` sets per-row temporal ID before proxy creation)
 * [ ] Tests for deleted entity access
 * [ ] Criteria-based restrictions for `AuditLog` queries
 
@@ -1169,11 +1179,10 @@ public class RevisionInfoSupplier extends RevisionEntitySupplier<Integer> {
    - Do we need navigation helpers? Recommendation: No — keep TX IDs opaque
 
 3. **`AuditLog` query implementation**
-   - Option A: SQL AST queries (like `AuditMappingImpl.applyPredicate()`)
-   - Option B: HQL against audit tables
-   - Option C: Direct JDBC
-   - Current: metadata queries (getRevisions, getModificationType, getEntitiesModifiedAt) use SQL AST;
-     entity-returning queries (getHistory, find, findEntitiesModifiedAt) use HQL via `ALL_REVISIONS` sessions
+   - Current: all queries use HQL via a lazily-created `ALL_REVISIONS` child session
+     (shared JDBC connection, isolated PC, auto-closed when parent closes)
+   - TODO: cache query plans to avoid HQL interpretation overhead on every call
+     (see `AuditLogImpl` TODO comment)
 
 4. **Criteria-based restrictions for `AuditLog` API**
    - Envers' `AuditQuery` accepted `AuditCriterion` restrictions (custom DSL: `AuditEntity.property("x").eq(...)`)
@@ -1197,10 +1206,10 @@ public class RevisionInfoSupplier extends RevisionEntitySupplier<Integer> {
    - Option B: Rewrite as thin adapter over core `@Audited` + `AuditLog`
    - Recommendation: Option B for transition, then A long-term
 
-6. **Deleted entity access**
-   - Currently `atTransaction` returns null for deleted entities
-   - Should there be a way to retrieve pre-deletion state + DEL marker?
-   - Envers supports this via `includeDeletions` parameter
+6. **Deleted entity access** — [green]#DECIDED#: `atTransaction` returns null for deleted entities
+   (correct point-in-time semantics). `ALL_REVISIONS` mode provides raw access including DEL rows.
+   `AuditLog.find()` filters out deletions via `modificationType(e) != DEL`.
+   `AuditLog.getHistory()` includes all modification types.
 
 == Envers Feature Parity — Comprehensive Gap Analysis
 
@@ -1230,8 +1239,20 @@ The following capabilities were verified with dedicated smoke tests (`AuditSmoke
 | Entity table not created properly. Needs investigation in boot model binding.
 
 | SINGLE_TABLE inheritance
-| [red]#BROKEN#
-| Discriminator column not populated in audit INSERT. `bindAudited()` only called on `RootClass`.
+| [green]#WORKS#
+| Write + read verified. Discriminator column included in audit INSERT.
+
+| TABLE_PER_CLASS inheritance
+| [green]#WORKS#
+| Write + read verified. Per-concrete-class audit tables with union-subclass persister.
+
+| JOINED inheritance (write)
+| [green]#WORKS#
+| Multi-table audit coordinator with per-table attribute routing and cached `MutationOperationGroup`.
+
+| JOINED inheritance (read)
+| [red]#TODO#
+| Per-table temporal predicates on joined subclass table references not yet implemented.
 |===
 
 === Features Covered Differently
@@ -1273,8 +1294,9 @@ The following capabilities were verified with dedicated smoke tests (`AuditSmoke
 
 | G1
 | **Entity inheritance** (SINGLE_TABLE, JOINED, TABLE_PER_CLASS)
-| Handle `@Audited` across inheritance hierarchies. SINGLE_TABLE: include discriminator in audit INSERT.
-  JOINED: create audit tables for subclass tables. TABLE_PER_CLASS: audit tables per concrete class.
+| SINGLE_TABLE and TABLE_PER_CLASS: write + read [green]#DONE#.
+  JOINED: write [green]#DONE# (multi-table audit coordinator with per-table attribute routing);
+  read [red]#TODO# (per-table temporal predicates on joined subclass table references).
 
 | G2
 | **OneToMany collection auditing** (join table + inverse FK)
@@ -1429,8 +1451,8 @@ direct equivalents in core, but all need a clear migration path.
 
 === Still Open
 
-* **Inheritance**: How should `@Audited` interact with entity inheritance hierarchies?
-  SINGLE_TABLE discriminator not populated in audit INSERT. JOINED/TABLE_PER_CLASS untested.
+* **JOINED inheritance read side**: Per-table temporal predicates on joined subclass table references.
+  Write side done (multi-table audit coordinator). SINGLE_TABLE and TABLE_PER_CLASS fully working.
 * **`REVISION_ON_COLLECTION_CHANGE`**: Should changes to non-owned collections create a revision
   for the owning entity? Core currently only creates audit rows when the entity is explicitly modified.
 * **ValidityAuditStrategy**: Worth implementing in core? Trade-off: write perf vs read perf.

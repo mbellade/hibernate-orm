@@ -52,7 +52,7 @@ public interface AuditLog {
 	 *
 	 * @see #getHistory(Class, Object)
 	 */
-	Object ALL_REVISIONS = org.hibernate.engine.spi.LoadQueryInfluencers.ALL_REVISIONS;
+	Object ALL_REVISIONS = new Object();
 
 	/**
 	 * List all transaction identifiers where the given entity

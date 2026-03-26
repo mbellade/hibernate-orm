@@ -85,16 +85,16 @@ class AuditColumnFunctionTest {
 			// First revision: ADD
 			assertEquals( "Original", results.get( 0 )[0] );
 			assertEquals( 1, results.get( 0 )[1] );
-			assertEquals( ModificationType.ADD.ordinal(), ((Number) results.get( 0 )[2]).intValue() );
+			assertEquals( ModificationType.ADD, results.get( 0 )[2] );
 
 			// Second revision: MOD
 			assertEquals( "Updated", results.get( 1 )[0] );
 			assertEquals( 2, results.get( 1 )[1] );
-			assertEquals( ModificationType.MOD.ordinal(), ((Number) results.get( 1 )[2]).intValue() );
+			assertEquals( ModificationType.MOD, results.get( 1 )[2] );
 
 			// Third revision: DEL
 			assertEquals( 3, results.get( 2 )[1] );
-			assertEquals( ModificationType.DEL.ordinal(), ((Number) results.get( 2 )[2]).intValue() );
+			assertEquals( ModificationType.DEL, results.get( 2 )[2] );
 
 			// Test transactionId() in WHERE clause
 			List<String> titles = s.createSelectionQuery(
@@ -127,7 +127,7 @@ class AuditColumnFunctionTest {
 							"where e.id = :id and modificationType(e) = :delType",
 					Long.class
 			).setParameter( "id", 1L )
-					.setParameter( "delType", ModificationType.DEL.ordinal() )
+					.setParameter( "delType", ModificationType.DEL )
 					.getSingleResult();
 
 			assertEquals( 1, delCount );

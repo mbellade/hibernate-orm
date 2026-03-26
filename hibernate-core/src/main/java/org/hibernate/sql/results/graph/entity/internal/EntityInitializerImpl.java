@@ -11,6 +11,7 @@ import java.util.function.BiConsumer;
 
 import org.hibernate.EntityFilterException;
 import org.hibernate.FetchNotFoundException;
+import org.hibernate.audit.AuditLog;
 import org.hibernate.Hibernate;
 import org.hibernate.CacheMode;
 import org.hibernate.LockMode;
@@ -28,7 +29,6 @@ import org.hibernate.engine.spi.EntityEntry;
 import org.hibernate.engine.spi.EntityHolder;
 import org.hibernate.engine.spi.EntityKey;
 import org.hibernate.engine.spi.TemporalEntityKey;
-import org.hibernate.engine.spi.LoadQueryInfluencers;
 import org.hibernate.engine.spi.EntityUniqueKey;
 import org.hibernate.engine.spi.PersistenceContext;
 import org.hibernate.engine.spi.PersistentAttributeInterceptor;
@@ -1554,7 +1554,7 @@ public class EntityInitializerImpl
 				// Restore ALL_REVISIONS sentinel after this row is fully processed
 				data.getRowProcessingState().getSession()
 						.getLoadQueryInfluencers()
-						.setTemporalIdentifier( LoadQueryInfluencers.ALL_REVISIONS );
+						.setTemporalIdentifier( AuditLog.ALL_REVISIONS );
 			}
 		}
 	}

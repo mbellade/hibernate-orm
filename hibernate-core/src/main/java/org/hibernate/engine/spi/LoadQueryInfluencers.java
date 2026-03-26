@@ -14,6 +14,7 @@ import java.util.function.Supplier;
 import org.hibernate.Filter;
 import org.hibernate.Internal;
 import org.hibernate.UnknownProfileException;
+import org.hibernate.audit.AuditLog;
 import org.hibernate.graph.GraphSemantic;
 import org.hibernate.graph.spi.RootGraphImplementor;
 import org.hibernate.internal.FilterImpl;
@@ -57,12 +58,6 @@ public class LoadQueryInfluencers implements Serializable {
 	private int batchSize;
 
 	private final EffectiveEntityGraph effectiveEntityGraph;
-
-	/**
-	 * Sentinel value for {@link #temporalIdentifier} indicating
-	 * that all audit revisions should be returned without filtering.
-	 */
-	public static final Object ALL_REVISIONS = new Object();
 
 	private Boolean readOnly;
 	private Object temporalIdentifier;
@@ -113,7 +108,7 @@ public class LoadQueryInfluencers implements Serializable {
 	}
 
 	public boolean isAllRevisions() {
-		return temporalIdentifier == ALL_REVISIONS;
+		return temporalIdentifier == AuditLog.ALL_REVISIONS;
 	}
 
 

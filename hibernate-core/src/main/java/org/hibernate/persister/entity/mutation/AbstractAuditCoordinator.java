@@ -265,7 +265,7 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator {
 				);
 			}
 			jdbcValueBindings.bindValue(
-					modificationType.ordinal(), tableName,
+					modificationType, tableName,
 					modificationTypeMapping.getSelectionExpression(), ParameterUsage.SET
 			);
 		}

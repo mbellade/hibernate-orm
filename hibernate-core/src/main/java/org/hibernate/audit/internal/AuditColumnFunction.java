@@ -7,6 +7,7 @@ package org.hibernate.audit.internal;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.hibernate.audit.ModificationType;
 import org.hibernate.metamodel.mapping.EntityMappingType;
 import org.hibernate.metamodel.mapping.SelectableMapping;
 import org.hibernate.metamodel.model.domain.ReturnableType;
@@ -30,6 +31,7 @@ import org.hibernate.sql.ast.tree.expression.Expression;
 import org.hibernate.type.descriptor.java.spi.UnknownBasicJavaType;
 import org.hibernate.type.descriptor.jdbc.ObjectJdbcType;
 import org.hibernate.type.internal.BasicTypeImpl;
+import org.hibernate.type.spi.TypeConfiguration;
 
 import static java.util.Collections.singletonList;
 
@@ -60,15 +62,19 @@ public class AuditColumnFunction extends AbstractSqmFunctionDescriptor {
 
 	private final boolean transactionId;
 
-	public AuditColumnFunction(String name, boolean transactionId) {
+	public AuditColumnFunction(String name, boolean transactionId, TypeConfiguration typeConfiguration) {
 		super(
 				name,
 				StandardArgumentsValidators.exactly( 1 ),
-				// todo (envers-rewrite) : this bypasses the type check for sqm expressions
-				//  is there a cleaner way of resolving the actual type ?
-				StandardFunctionReturnTypeResolvers.invariant(
-						new BasicTypeImpl<>( new UnknownBasicJavaType<>( Object.class ), ObjectJdbcType.INSTANCE )
-				),
+				transactionId
+						// transactionId: type is unknown at registration time, resolved at SQL AST conversion
+						? StandardFunctionReturnTypeResolvers.invariant(
+								new BasicTypeImpl<>( new UnknownBasicJavaType<>( Object.class ), ObjectJdbcType.INSTANCE )
+						)
+						// modificationType: proper enum type
+						: StandardFunctionReturnTypeResolvers.invariant(
+								typeConfiguration.standardBasicTypeForJavaType( ModificationType.class )
+						),
 				null
 		);
 		this.transactionId = transactionId;

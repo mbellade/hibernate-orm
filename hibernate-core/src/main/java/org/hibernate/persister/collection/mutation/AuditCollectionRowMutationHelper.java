@@ -136,7 +136,7 @@ final class AuditCollectionRowMutationHelper {
 		}
 
 		jdbcValueBindings.bindValue(
-				Integer.valueOf( modificationType.ordinal() ),
+				modificationType,
 				auditTableName,
 				modificationTypeMapping.getSelectionExpression(),
 				ParameterUsage.SET

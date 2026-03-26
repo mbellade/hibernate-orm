@@ -13,6 +13,7 @@ import jakarta.persistence.criteria.CriteriaUpdate;
 import org.checkerframework.checker.nullness.qual.Nullable;
 import org.hibernate.CacheMode;
 import org.hibernate.EntityNameResolver;
+import org.hibernate.audit.AuditLog;
 import org.hibernate.Filter;
 import org.hibernate.HibernateException;
 import org.hibernate.Interceptor;
@@ -862,7 +863,7 @@ abstract class AbstractSharedSessionContract implements SharedSessionContractImp
 		// Include the temporal identifier as a revision in the key when it's a
 		// real value (not null, not ALL_REVISIONS sentinel), so that the PC can
 		// distinguish the same entity at different points in time.
-		return temporalId != null && temporalId != LoadQueryInfluencers.ALL_REVISIONS
+		return temporalId != null && temporalId != AuditLog.ALL_REVISIONS
 				? new TemporalEntityKey( id, persister, temporalId )
 				: new EntityKey( id, persister );
 	}
