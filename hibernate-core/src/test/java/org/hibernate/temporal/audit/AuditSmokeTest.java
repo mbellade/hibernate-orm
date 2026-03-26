@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  * Copyright Red Hat Inc. and Hibernate Authors
  */
-package org.hibernate.temporal;
+package org.hibernate.temporal.audit;
 
 import jakarta.persistence.Embeddable;
 import jakarta.persistence.Embedded;
@@ -41,7 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 		AuditSmokeTest.VersionedEntity.class
 })
 @ServiceRegistry(settings = @Setting(name = StateManagementSettings.TRANSACTION_ID_SUPPLIER,
-		value = "org.hibernate.temporal.AuditSmokeTest$TxIdSupplier"))
+		value = "org.hibernate.temporal.audit.AuditSmokeTest$TxIdSupplier"))
 class AuditSmokeTest {
 	private static int currentTxId;
 

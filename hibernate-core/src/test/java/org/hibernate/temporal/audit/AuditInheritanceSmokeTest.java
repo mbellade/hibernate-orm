@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  * Copyright Red Hat Inc. and Hibernate Authors
  */
-package org.hibernate.temporal;
+package org.hibernate.temporal.audit;
 
 import jakarta.persistence.DiscriminatorColumn;
 import jakarta.persistence.DiscriminatorValue;
@@ -80,7 +80,7 @@ class AuditInheritanceSmokeTest {
 	@SessionFactory
 	@DomainModel(annotatedClasses = { STVehicle.class, STCar.class, STTruck.class })
 	@ServiceRegistry(settings = @Setting(name = StateManagementSettings.TRANSACTION_ID_SUPPLIER,
-			value = "org.hibernate.temporal.AuditInheritanceSmokeTest$TxIdSupplier"))
+			value = "org.hibernate.temporal.audit.AuditInheritanceSmokeTest$TxIdSupplier"))
 	class SingleTableTest {
 
 		@Test
@@ -151,7 +151,7 @@ class AuditInheritanceSmokeTest {
 	@SessionFactory
 	@DomainModel(annotatedClasses = { JVehicle.class, JCar.class, JTruck.class })
 	@ServiceRegistry(settings = @Setting(name = StateManagementSettings.TRANSACTION_ID_SUPPLIER,
-			value = "org.hibernate.temporal.AuditInheritanceSmokeTest$TxIdSupplier"))
+			value = "org.hibernate.temporal.audit.AuditInheritanceSmokeTest$TxIdSupplier"))
 	class JoinedTest {
 
 		@Test
@@ -226,7 +226,7 @@ class AuditInheritanceSmokeTest {
 	@SessionFactory
 	@DomainModel(annotatedClasses = { TPCVehicle.class, TPCCar.class, TPCTruck.class })
 	@ServiceRegistry(settings = @Setting(name = StateManagementSettings.TRANSACTION_ID_SUPPLIER,
-			value = "org.hibernate.temporal.AuditInheritanceSmokeTest$TxIdSupplier"))
+			value = "org.hibernate.temporal.audit.AuditInheritanceSmokeTest$TxIdSupplier"))
 	class TablePerClassTest {
 
 		@Test

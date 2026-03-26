@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  * Copyright Red Hat Inc. and Hibernate Authors
  */
-package org.hibernate.temporal;
+package org.hibernate.temporal.audit;
 
 import jakarta.persistence.ElementCollection;
 import jakarta.persistence.Entity;
@@ -30,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 @SessionFactory
 @DomainModel(annotatedClasses = AuditEntityTest.AuditEntity.class)
 @ServiceRegistry(settings = @Setting(name = StateManagementSettings.TRANSACTION_ID_SUPPLIER,
-		value = "org.hibernate.temporal.AuditEntityTest$TxIdSupplier"))
+		value = "org.hibernate.temporal.audit.AuditEntityTest$TxIdSupplier"))
 class AuditEntityTest {
 	private static int currentTxId;
 

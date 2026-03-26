@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  * Copyright Red Hat Inc. and Hibernate Authors
  */
-package org.hibernate.temporal;
+package org.hibernate.temporal.audit;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -36,7 +36,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 		AuditToOneAssociationTest.LazyBook.class
 })
 @ServiceRegistry(settings = @Setting(name = StateManagementSettings.TRANSACTION_ID_SUPPLIER,
-		value = "org.hibernate.temporal.AuditToOneAssociationTest$TxIdSupplier"))
+		value = "org.hibernate.temporal.audit.AuditToOneAssociationTest$TxIdSupplier"))
 class AuditToOneAssociationTest {
 	private static int currentTxId;
 
