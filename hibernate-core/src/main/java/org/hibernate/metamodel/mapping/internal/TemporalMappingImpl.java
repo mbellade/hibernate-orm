@@ -332,23 +332,28 @@ public class TemporalMappingImpl implements TemporalMapping {
 	}
 
 	private static boolean useTemporalRestriction(LoadQueryInfluencers influencers) {
-		return influencers.getSessionFactory().getJdbcServices().getDialect().getTemporalTableSupport()
-				.useTemporalRestriction( influencers );
+		return !influencers.isAllRevisions()
+				&& influencers.getSessionFactory().getJdbcServices().getDialect().getTemporalTableSupport()
+						.useTemporalRestriction( influencers );
 	}
 
 	private boolean useTemporalRestriction(SqlAstCreationState creationState) {
-		return creationState.getCreationContext().getDialect().getTemporalTableSupport()
-				.useTemporalRestriction( creationState.getLoadQueryInfluencers() );
+		final var influencers = creationState.getLoadQueryInfluencers();
+		return !influencers.isAllRevisions()
+				&& creationState.getCreationContext().getDialect().getTemporalTableSupport()
+						.useTemporalRestriction( influencers );
 	}
 
 	@Override
 	public boolean useAuxiliaryTable(LoadQueryInfluencers influencers) {
 		return temporalTableStrategy == TemporalTableStrategy.HISTORY_TABLE
-			&& influencers.getTemporalIdentifier() != null;
+			&& influencers.getTemporalIdentifier() != null
+			&& !influencers.isAllRevisions();
 	}
 
 	@Override
 	public boolean isAffectedByInfluencers(LoadQueryInfluencers influencers) {
-		return influencers.getTemporalIdentifier() != null;
+		return influencers.getTemporalIdentifier() != null
+				&& !influencers.isAllRevisions();
 	}
 }

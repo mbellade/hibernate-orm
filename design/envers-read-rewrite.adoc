@@ -1451,6 +1451,12 @@ direct equivalents in core, but all need a clear migration path.
 
 === Still Open
 
+* **`ALL_REVISIONS` for `@Temporal` entities**: Currently `ALL_REVISIONS` is audit-specific and
+  `TemporalMappingImpl` explicitly ignores it (guards in `useAuxiliaryTable`, `isAffectedByInfluencers`,
+  `useTemporalRestriction`). Extending it to `@Temporal` would require handling different strategies
+  (SINGLE_TABLE: remove predicate; HISTORY_TABLE: union current + history; NATIVE: `FOR SYSTEM_TIME ALL`)
+  and using `row_start` as the `TemporalEntityKey` discriminator (assumed unique at sufficient precision).
+  Deferred — see discussion on `row_start` uniqueness guarantees.
 * **JOINED inheritance read side**: Per-table temporal predicates on joined subclass table references.
   Write side done (multi-table audit coordinator). SINGLE_TABLE and TABLE_PER_CLASS fully working.
 * **`REVISION_ON_COLLECTION_CHANGE`**: Should changes to non-owned collections create a revision
