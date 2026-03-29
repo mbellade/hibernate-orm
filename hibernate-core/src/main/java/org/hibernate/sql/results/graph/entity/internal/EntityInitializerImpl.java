@@ -1195,21 +1195,13 @@ public class EntityInitializerImpl
 									this
 							);
 
-			if ( isAllRevisions( data ) ) {
+			if ( isAllRevisions( data ) && data.entityKey.isTemporal() ) {
 				data.allRevisions = true;
 				// Set the per-row temporal identifier so that association loads
-				// (e.g. EntitySelectFetchInitializer) use the correct revision.
-				// The revision is already baked into the EntityKey by resolveEntityKey(),
-				// which ensures PC dedup works correctly per-revision.
-				if ( auditTransactionIdAssembler != null ) {
-					final Object txnId = auditTransactionIdAssembler.assemble(
-							data.getRowProcessingState() );
-					if ( txnId != null ) {
-						data.getRowProcessingState().getSession()
-								.getLoadQueryInfluencers()
-								.setTemporalIdentifier( txnId );
-					}
-				}
+				// (e.g. EntitySelectFetchInitializer) use the correct revision
+				data.getRowProcessingState().getSession()
+						.getLoadQueryInfluencers()
+						.setTemporalIdentifier( data.entityKey.getTransactionId() );
 			}
 
 			if ( useEmbeddedIdentifierInstanceAsEntity( data ) ) {
@@ -1550,13 +1542,19 @@ public class EntityInitializerImpl
 				}
 			}
 			data.setState( State.INITIALIZED );
-			if ( data.allRevisions ) {
-				// Restore ALL_REVISIONS sentinel after this row is fully processed
-				data.getRowProcessingState().getSession()
-						.getLoadQueryInfluencers()
-						.setTemporalIdentifier( AuditLog.ALL_REVISIONS );
-			}
 		}
+	}
+
+	@Override
+	public void finishUpRow(EntityInitializerData data) {
+		if ( data.allRevisions ) {
+			// Restore ALL_REVISIONS sentinel after all initializers are done with this row
+			data.getRowProcessingState().getSession()
+					.getLoadQueryInfluencers()
+					.setTemporalIdentifier( AuditLog.ALL_REVISIONS );
+			data.allRevisions = false;
+		}
+		super.finishUpRow( data );
 	}
 
 	protected void updateInitializedEntityInstance(EntityInitializerData data) {

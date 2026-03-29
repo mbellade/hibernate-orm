@@ -779,6 +779,75 @@ Associations between `@Audited` entities work transparently in both point-in-tim
 * **`TemporalEntityKey`**: Sealed subtype of `EntityKey` that includes the transaction identifier
   in `equals()`/`hashCode()`, preventing PC deduplication across revisions (e.g. Author#20@tx201 ≠
   Author#20@tx202). The base `EntityKey` has no extra fields — zero memory overhead for non-auditing apps.
+* **Null associations in ALL_REVISIONS**: Users must use `left join fetch` (not inner `join fetch`)
+  when fetching nullable associations in ALL_REVISIONS mode, otherwise revisions where the
+  association is null will be silently excluded. This is standard HQL join semantics.
+
+===== Per-row temporal identifier: initializer ordering considerations
+
+In ALL_REVISIONS mode, the per-row transaction identifier is set on `LoadQueryInfluencers` during
+`EntityInitializerImpl.resolveInstance()` and restored to `ALL_REVISIONS` during
+`EntityInitializerImpl.finishUpRow()`. The restore was moved from `initializeInstance()` to
+`finishUpRow()` (called by `StandardRowReader` after all phases complete) so that the temporal ID
+remains set across all three row processing phases (`resolveKey` → `resolveInstance` → `initializeInstance`).
+
+Row processing in `StandardRowReader.coordinateInitializers()` is **phase-based across all initializers**:
+all `resolveKey()` calls first, then all `resolveInstance()`, then all `initializeInstance()`.
+Within `resolveInstance()`, entity initializers are sorted first (via `InitializersList.sortedForResolveInstance`),
+but their relative order among themselves is the insertion order from `AssemblerCreationStateImpl`.
+
+Due to constructor recursion in `EntityInitializerImpl`, **child entity initializers (fetched associations)
+are registered before their parent** — the `EntityInitializerImpl` constructor creates child fetch assemblers
+(which register their own initializers) before the constructor returns and the parent is registered.
+
+This means in `resolveInstance()`:
+
+1. Child entity initializer runs first → reads its own REV column, sets temporal ID
+2. Root entity initializer runs last → reads its own REV column, **overwrites** temporal ID
+
+The root's REV is what survives into `initializeInstance()` and `finishUpRow()`.
+This is correct because the root entity drives the temporal context: the child's REV is
+derived from the root's via the correlated join predicate (`MAX(REV) WHERE REV \<= parent.REV`).
+
+Currently, **both root and fetched entity initializers** select and read the `auditTransactionIdResult`
+(the REV column from the audit table). This is set up in `AbstractEntityResultGraphNode.auditTransactionIdResult()`,
+which is called for both `EntityResultImpl` (root results) and `EntityFetchJoinedImpl` (which creates its own
+internal `EntityResultImpl`).
+
+**Execution order (updated analysis):**
+
+The root entity initializer's `resolveKey()` (called in phase 1 on `resultInitializers`) internally
+calls `resolveInstance()` on itself (line 629) AND then `resolveKeySubInitializers()` which triggers
+children's `resolveKey()`. So the actual execution order within a row is:
+
+1. Root's `resolveEntityKey()` → creates root's `TemporalEntityKey` (reads REV from JDBC row directly)
+2. Root's `resolveInstance()` → sets temporal ID to root's REV on `LoadQueryInfluencers`
+3. Children's `resolveKey()` (via `resolveKeySubInitializers`) → creates children's `TemporalEntityKey`
+4. Children's `resolveInstance()` (phase 2) → overwrites temporal ID with child's correlated REV
+
+The temporal ID surviving into phase 3 (`initializeInstance`) is a child's REV (correlated to root's
+via the join predicate). `TemporalEntityKey` creation is unaffected — both root and children read
+directly from the JDBC row, independent of `LoadQueryInfluencers`.
+
+**Known limitations and future considerations:**
+
+* **Non-audited root with audited associations**: If the root (result) entity is not `@Audited` but one
+  or more of its join-fetched associations are, the root has no `auditTransactionIdAssembler` and doesn't
+  set the temporal ID. The child association initializer sets it during phase 2. This case needs
+  investigation: does the child's temporal ID correctly drive association loading for sibling initializers?
+  What is the expected behavior — should `ALL_REVISIONS` mode even be meaningful for a non-audited root?
+* **Unnecessary child tx-id selection**: Currently both root and fetched entity initializers select and
+  read the `auditTransactionIdResult` (via `AbstractEntityResultGraphNode`). Since the root sets the
+  temporal ID first (during phase 1) and `isAllRevisions()` returns false after that (temporal ID is
+  no longer `ALL_REVISIONS`), child initializers' ALL_REVISIONS path in `resolveInstance()` is not
+  entered. This means the child tx-id selection and assembler creation may be unnecessary overhead —
+  we should consider only selecting the tx-id for the root entity (identifiable via `isResultInitializer`).
+* A more robust long-term approach: attach the temporal identifier to `TemporalEntityKey` (which already
+  stores it) or `EntityHolder`, so initializers can read it from the entity they're associated with
+  rather than from the shared mutable `LoadQueryInfluencers` field. This would eliminate ordering concerns.
+* Collection initializers (not yet implemented for `@Audited`) will need similar analysis — their
+  `initializeInstance()` runs after the entity initializer's, and the temporal ID must be correct at that point.
+  The `finishUpRow()` approach ensures this.
 
 ===== Implementation tasks
 

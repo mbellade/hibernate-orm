@@ -391,6 +391,96 @@ class AuditToOneAssociationTest {
 		}
 	}
 
+	// ---- 11. Null association in ALL_REVISIONS (getHistory) ----
+
+	/**
+	 * Root entity created with null association, then updated to set one.
+	 * getHistory() must return both revisions — the null-association one
+	 * must not be lost.
+	 */
+	@Test
+	void testNullAssociationInGetHistory(SessionFactoryScope scope) {
+		currentTxId = 1000;
+
+		// REV 1: book with no author
+		scope.getSessionFactory().inTransaction( session ->
+			session.persist( new Book( 100L, "No Author Book", null ) )
+		);
+
+		// REV 2: set author
+		scope.getSessionFactory().inTransaction( session -> {
+			var author = new Author( 100L, "Late Author" );
+			session.persist( author );
+			session.find( Book.class, 100L ).setAuthor( author );
+		} );
+
+		// REV 3: clear author again
+		scope.getSessionFactory().inTransaction( session ->
+			session.find( Book.class, 100L ).setAuthor( null )
+		);
+
+		scope.inSession( session -> {
+			var history = session.getAuditLog().getHistory( Book.class, 100L );
+			assertEquals( 3, history.size(), "All 3 revisions should be present" );
+
+			// REV 1: no author
+			assertEquals( ModificationType.ADD, history.get( 0 ).modificationType() );
+			assertEquals( "No Author Book", history.get( 0 ).entity().getTitle() );
+			assertNull( history.get( 0 ).entity().getAuthor(), "Author should be null at REV 1" );
+
+			// REV 2: author set
+			assertEquals( ModificationType.MOD, history.get( 1 ).modificationType() );
+			assertEquals( "Late Author", history.get( 1 ).entity().getAuthor().getName() );
+
+			// REV 3: author cleared
+			assertEquals( ModificationType.MOD, history.get( 2 ).modificationType() );
+			assertNull( history.get( 2 ).entity().getAuthor(), "Author should be null at REV 3" );
+		} );
+	}
+
+	// ---- 12. Join-fetch with null association in ALL_REVISIONS ----
+
+	/**
+	 * Verify that join-fetch in ALL_REVISIONS mode does not lose
+	 * root entity revisions where the association is null.
+	 * An inner join would incorrectly exclude those rows.
+	 */
+	@Test
+	void testJoinFetchNullAssociationAllRevisions(SessionFactoryScope scope) {
+		currentTxId = 1100;
+
+		// REV 1: book with no author
+		scope.getSessionFactory().inTransaction( session ->
+			session.persist( new Book( 110L, "JF Null Book", null ) )
+		);
+
+		// REV 2: set author
+		scope.getSessionFactory().inTransaction( session -> {
+			var author = new Author( 110L, "JF Late Author" );
+			session.persist( author );
+			session.find( Book.class, 110L ).setAuthor( author );
+		} );
+
+		try ( var session = scope.getSessionFactory().withOptions()
+				.atTransaction( AuditLog.ALL_REVISIONS ).openSession() ) {
+			final var rows = session.createSelectionQuery(
+					"select e, transactionId(e), modificationType(e)"
+							+ " from AuditBook e left join fetch e.author"
+							+ " where e.id = :id"
+							+ " order by transactionId(e)",
+					Object[].class
+			).setParameter( "id", 110L ).getResultList();
+
+			assertEquals( 2, rows.size(), "Both revisions should be present with left join fetch" );
+
+			// REV 1: no author
+			assertNull( ((Book) rows.get( 0 )[0]).getAuthor(), "Author should be null at REV 1" );
+
+			// REV 2: author set
+			assertEquals( "JF Late Author", ((Book) rows.get( 1 )[0]).getAuthor().getName() );
+		}
+	}
+
 	// ---- Entity classes ----
 
 	@Audited
