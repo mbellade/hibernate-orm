@@ -85,9 +85,9 @@ class AuditManyToManyTest {
 
 		scope.inSession( session -> {
 			var auditLog = session.getAuditLog();
-			// Student: ADD + DEL = 2 revisions
-			assertEquals( 2, auditLog.getRevisions( Student.class, 1L ).size(),
-					"Student should have 2 revisions (ADD + DEL)" );
+			// Student: ADD + 2 collection changes + DEL = 4 revisions
+			assertEquals( 4, auditLog.getRevisions( Student.class, 1L ).size(),
+					"Student should have 4 revisions (ADD + 2 collection changes + DEL)" );
 			assertEquals( 1, auditLog.getRevisions( Course.class, 1L ).size() );
 			assertEquals( 1, auditLog.getRevisions( Course.class, 2L ).size() );
 		} );

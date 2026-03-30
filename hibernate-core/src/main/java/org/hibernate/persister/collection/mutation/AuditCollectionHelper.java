@@ -9,6 +9,7 @@ import java.util.function.UnaryOperator;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.hibernate.metamodel.mapping.AuditMapping;
 import org.hibernate.metamodel.mapping.SelectableMapping;
+import org.hibernate.metamodel.mapping.internal.OneToManyCollectionPart;
 import org.hibernate.sql.model.MutationOperationGroup;
 import org.hibernate.sql.model.MutationType;
 import org.hibernate.sql.model.ast.builder.TableInsertBuilderStandard;
@@ -18,7 +19,7 @@ import static org.hibernate.sql.model.internal.MutationOperationGroupFactory.sin
 /**
  * Support for building audit log mutations for collections.
  */
-final class AuditCollectionHelper {
+public final class AuditCollectionHelper {
 	private final CollectionMutationTarget mutationTarget;
 	private final SessionFactoryImplementor sessionFactory;
 	private final CollectionTableMapping auditTableMapping;
@@ -108,7 +109,16 @@ final class AuditCollectionHelper {
 			}
 		}
 
-		attributeMapping.getElementDescriptor().forEachInsertable( insertBuilder );
+		final var elementDescriptor = attributeMapping.getElementDescriptor();
+		if ( elementDescriptor instanceof OneToManyCollectionPart oneToMany ) {
+			// For @OneToMany @JoinColumn, the middle audit table stores the child entity's ID,
+			// not the FK columns (which are the element's selectables for OneToManyCollectionPart)
+			oneToMany.getAssociatedEntityMappingType().getIdentifierMapping()
+					.forEachInsertable( insertBuilder );
+		}
+		else {
+			elementDescriptor.forEachInsertable( insertBuilder );
+		}
 
 		if ( useServerTransactionTimestamps ) {
 			insertBuilder.addValueColumn( currentTimestampFunctionName, transactionIdMapping );

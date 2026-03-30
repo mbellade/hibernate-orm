@@ -1,0 +1,128 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright Red Hat Inc. and Hibernate Authors
+ */
+package org.hibernate.persister.collection.mutation;
+
+import java.util.function.UnaryOperator;
+
+import org.hibernate.engine.jdbc.batch.internal.BasicBatchKey;
+import org.hibernate.engine.jdbc.mutation.spi.MutationExecutorService;
+import org.hibernate.engine.spi.CollectionKey;
+import org.hibernate.engine.spi.SessionFactoryImplementor;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.audit.ModificationType;
+import org.hibernate.sql.model.MutationOperationGroup;
+
+/**
+ * RemoveCoordinator for audited collections.
+ * Delegates the bulk removal to the standard coordinator, then writes
+ * DEL audit rows to the collection's audit table for each entry that
+ * was in the collection.
+ */
+public class RemoveCoordinatorAudit implements RemoveCoordinator {
+	private final RemoveCoordinator standardCoordinator;
+	private final CollectionMutationTarget mutationTarget;
+	private final SessionFactoryImplementor sessionFactory;
+	private final BasicBatchKey auditBatchKey;
+	private final MutationExecutorService mutationExecutorService;
+	private final boolean[] indexColumnIsSettable;
+	private final boolean[] elementColumnIsSettable;
+	private final UnaryOperator<Object> indexIncrementer;
+
+	private AuditCollectionHelper auditHelper;
+	private MutationOperationGroup auditOperationGroup;
+
+	public RemoveCoordinatorAudit(
+			CollectionMutationTarget mutationTarget,
+			RemoveCoordinator standardCoordinator,
+			boolean[] indexColumnIsSettable,
+			boolean[] elementColumnIsSettable,
+			UnaryOperator<Object> indexIncrementer,
+			SessionFactoryImplementor sessionFactory) {
+		this.mutationTarget = mutationTarget;
+		this.standardCoordinator = standardCoordinator;
+		this.sessionFactory = sessionFactory;
+		this.indexColumnIsSettable = indexColumnIsSettable;
+		this.elementColumnIsSettable = elementColumnIsSettable;
+		this.indexIncrementer = indexIncrementer;
+		this.auditBatchKey = new BasicBatchKey( mutationTarget.getRolePath() + "#AUDIT_REMOVE" );
+		this.mutationExecutorService = sessionFactory.getServiceRegistry()
+				.getService( MutationExecutorService.class );
+	}
+
+	@Override
+	public CollectionMutationTarget getMutationTarget() {
+		return mutationTarget;
+	}
+
+	@Override
+	public String getSqlString() {
+		return standardCoordinator.getSqlString();
+	}
+
+	@Override
+	public void deleteAllRows(Object key, SharedSessionContractImplementor session) {
+		final var collectionDescriptor = mutationTarget.getTargetPart().getCollectionDescriptor();
+
+		// Get the collection from the persistence context BEFORE bulk removal
+		final var collectionKey = new CollectionKey( collectionDescriptor, key );
+		final var collection = session.getPersistenceContextInternal().getCollection( collectionKey );
+		if ( collection != null && !collection.wasInitialized() ) {
+			collection.forceInitialization();
+		}
+
+		// Delegate to standard coordinator
+		standardCoordinator.deleteAllRows( key, session );
+
+		// Write DEL audit rows for each entry
+		if ( collection != null && collection.wasInitialized() ) {
+			if ( auditOperationGroup == null ) {
+				auditOperationGroup = getAuditHelper().getAuditInsertOperationGroup();
+			}
+			if ( auditOperationGroup != null ) {
+				final var mutationExecutor = mutationExecutorService.createExecutor(
+						() -> auditBatchKey,
+						auditOperationGroup,
+						session
+				);
+				try {
+					final var bindings = getAuditHelper().getRowMutationHelper();
+					final var entries = collection.entries( collectionDescriptor );
+					int entryCount = 0;
+					while ( entries.hasNext() ) {
+						final Object entry = entries.next();
+						bindings.bindInsertValues(
+								collection,
+								key,
+								entry,
+								entryCount,
+								ModificationType.DEL,
+								session,
+								mutationExecutor.getJdbcValueBindings()
+						);
+						mutationExecutor.execute( entry, null, null, null, session );
+						entryCount++;
+					}
+				}
+				finally {
+					mutationExecutor.release();
+				}
+			}
+		}
+	}
+
+	private AuditCollectionHelper getAuditHelper() {
+		if ( auditHelper == null ) {
+			auditHelper = new AuditCollectionHelper(
+					mutationTarget,
+					sessionFactory,
+					indexColumnIsSettable,
+					elementColumnIsSettable,
+					indexIncrementer,
+					mutationTarget.getTargetPart().getAuditMapping()
+			);
+		}
+		return auditHelper;
+	}
+}

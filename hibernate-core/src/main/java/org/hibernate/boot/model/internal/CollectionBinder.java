@@ -15,7 +15,6 @@ import java.util.Properties;
 import java.util.function.Supplier;
 
 import org.hibernate.AnnotationException;
-import org.hibernate.persister.state.internal.AuditStateManagement;
 import org.hibernate.AssertionFailure;
 import org.hibernate.FetchMode;
 import org.hibernate.MappingException;
@@ -1570,11 +1569,18 @@ public abstract class CollectionBinder {
 						: foreignJoinColumns.getTable();
 		collection.setCollectionTable( collectionTable );
 
-		// For @OneToMany @JoinColumn on an @Audited entity, set audit state management
-		// so the FK update on the child table is audited.
-		final var audited = extract( Audited.class, property, buildingContext );
-		if ( audited != null ) {
-			collection.setStateManagementType( AuditStateManagement.class );
+		// For @OneToMany @JoinColumn on an @Audited entity, create a middle audit table
+		// to track collection membership changes (same approach as @ManyToMany / @JoinTable)
+		if ( !collection.isInverse() ) {
+			final var audited = extract( Audited.class, property, buildingContext );
+			if ( audited != null ) {
+				AuditHelper.bindOneToManyAuditTable(
+						audited,
+						collection,
+						oneToMany.getReferencedEntityName(),
+						buildingContext
+				);
+			}
 		}
 
 		bindSynchronize();
@@ -2447,6 +2453,11 @@ public abstract class CollectionBinder {
 
 	private void processAudited() {
 		assert collection.getCollectionTable() != null;
+		// Skip inverse collections (mappedBy) — the FK is on the child entity's table,
+		// and auditing is handled by the owning side
+		if ( collection.isInverse() ) {
+			return;
+		}
 		final var audited = extract( Audited.class, property, buildingContext );
 		if ( audited != null ) {
 			AuditHelper.bindAuditTable( audited, collection, buildingContext );

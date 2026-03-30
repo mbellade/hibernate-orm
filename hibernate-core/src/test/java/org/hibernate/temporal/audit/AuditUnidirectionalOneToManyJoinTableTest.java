@@ -87,9 +87,9 @@ class AuditUnidirectionalOneToManyJoinTableTest {
 
 		scope.inSession( session -> {
 			var auditLog = session.getAuditLog();
-			// Team: ADD + DEL = 2 revisions
-			assertEquals( 2, auditLog.getRevisions( Team.class, 1L ).size(),
-					"Team should have 2 revisions (ADD + DEL)" );
+			// Team: ADD + 2 collection changes + DEL = 4 revisions
+			assertEquals( 4, auditLog.getRevisions( Team.class, 1L ).size(),
+					"Team should have 4 revisions (ADD + 2 collection changes + DEL)" );
 			assertEquals( 1, auditLog.getRevisions( Player.class, 1L ).size() );
 			assertEquals( 1, auditLog.getRevisions( Player.class, 2L ).size() );
 		} );

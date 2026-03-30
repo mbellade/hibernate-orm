@@ -144,6 +144,74 @@ public final class AuditHelper {
 		model.setStateManagementType( AuditStateManagement.class );
 	}
 
+	/**
+	 * Create a middle audit table for unidirectional @OneToMany @JoinColumn.
+	 * The table tracks collection membership with (parent_key, child_key, REV, REVTYPE)
+	 * — mirroring the envers {@code @AuditJoinTable} approach.
+	 * <p>
+	 * The child entity's FK column is on the child table, but from an entity model
+	 * perspective the collection is part of the parent entity's state.
+	 */
+	static void bindOneToManyAuditTable(
+			Audited audited,
+			Collection collection,
+			String referencedEntityName,
+			MetadataBuildingContext context) {
+		final var collector = context.getMetadataCollector();
+		final var ownerTable = collection.getOwner().getTable();
+
+		// Table name: {OwnerJpaEntityName}_{ChildJpaEntityName}_aud (envers convention)
+		final String ownerSimpleName = collection.getOwner().getJpaEntityName();
+		final var referencedEntity = collector.getEntityBinding( referencedEntityName );
+		final String childSimpleName = referencedEntity.getJpaEntityName();
+		final String auditTableName = ownerSimpleName + "_" + childSimpleName + DEFAULT_TABLE_SUFFIX;
+
+		final var auditTable = collector.addTable(
+				ownerTable.getSchema(),
+				ownerTable.getCatalog(),
+				auditTableName,
+				null,
+				false,
+				context,
+				false
+		);
+
+		final String txIdColumnName = audited.transactionId();
+		final String modTypeColumnName = audited.modificationType();
+		collector.addSecondPass( (OptionalDeterminationSecondPass) ignored -> {
+			// Copy the FK columns (parent key) from the collection's key
+			for ( var column : collection.getKey().getColumns() ) {
+				final var copy = column.clone();
+				copy.setUnique( false );
+				copy.setUniqueKeyName( null );
+				auditTable.addColumn( copy );
+			}
+			// Copy the child identifier columns from the referenced entity
+			for ( var column : referencedEntity.getKey().getColumns() ) {
+				final var copy = column.clone();
+				copy.setUnique( false );
+				copy.setUniqueKeyName( null );
+				auditTable.addColumn( copy );
+			}
+			// Audit columns
+			final var transactionIdColumn = createAuditColumn(
+					txIdColumnName,
+					getTransactionIdType( context ),
+					auditTable,
+					context
+			);
+			final var modificationTypeColumn = createAuditColumn(
+					modTypeColumnName,
+					Byte.class,
+					auditTable,
+					context
+			);
+			auditTable.addColumn( transactionIdColumn );
+			auditTable.addColumn( modificationTypeColumn );
+			enableAudit( collection, auditTable, transactionIdColumn, modificationTypeColumn );
+		} );
+	}
+
 	private static Class<?> getTransactionIdType(MetadataBuildingContext context) {
 		return context.getBootstrapContext().getServiceRegistry()
 				.requireService( TransactionIdentifierService.class )

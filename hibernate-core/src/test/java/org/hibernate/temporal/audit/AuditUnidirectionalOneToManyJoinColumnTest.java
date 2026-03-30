@@ -59,7 +59,7 @@ class AuditUnidirectionalOneToManyJoinColumnTest {
 	void testWriteSide(SessionFactoryScope scope) {
 		currentTxId = 0;
 
-		// REV 1: department + one employee (ADD for employee + MOD for FK set)
+		// REV 1: department + one employee
 		scope.inTransaction( session -> {
 			var emp = new Employee( 1L, "Alice" );
 			session.persist( emp );
@@ -68,7 +68,7 @@ class AuditUnidirectionalOneToManyJoinColumnTest {
 			session.persist( dept );
 		} );
 
-		// REV 2: add second employee (ADD for employee + MOD for FK set)
+		// REV 2: add second employee
 		scope.inTransaction( session -> {
 			var emp = new Employee( 2L, "Bob" );
 			session.persist( emp );
@@ -76,13 +76,13 @@ class AuditUnidirectionalOneToManyJoinColumnTest {
 			dept.employees.add( emp );
 		} );
 
-		// REV 3: remove first employee from department (MOD for FK null-out)
+		// REV 3: remove first employee from department
 		scope.inTransaction( session -> {
 			var dept = session.find( Department.class, 1L );
 			dept.employees.removeIf( e -> e.id == 1L );
 		} );
 
-		// REV 4: delete department (bulk removal of remaining employees from collection)
+		// REV 4: delete department
 		scope.inTransaction( session -> {
 			var dept = session.find( Department.class, 1L );
 			session.remove( dept );
@@ -90,17 +90,16 @@ class AuditUnidirectionalOneToManyJoinColumnTest {
 
 		scope.inSession( session -> {
 			var auditLog = session.getAuditLog();
-			// Department: REV 1 (ADD) + REV 4 (DEL) = 2 revisions
-			assertEquals( 2, auditLog.getRevisions( Department.class, 1L ).size(),
-					"Department should have 2 revisions (ADD + DEL)" );
+			// Department: REV 1 (ADD) + REV 2 (collection change) + REV 3 (collection change) + REV 4 (DEL)
+			var deptRevs = auditLog.getRevisions( Department.class, 1L );
+			assertEquals( 4, deptRevs.size(),
+					"Department should have 4 revisions (ADD + 2 collection changes + DEL)" );
 
-			// Employee 1: ADD (persist) + MOD (FK set) + MOD (FK null-out) = 3 revisions
-			assertEquals( 3, auditLog.getRevisions( Employee.class, 1L ).size(),
-					"Employee 1 should have 3 revisions (ADD + MOD FK set + MOD FK null)" );
-
-			// Employee 2: ADD (persist) + MOD (FK set) + MOD (FK null via bulk removal) = 3 revisions
-			assertEquals( 3, auditLog.getRevisions( Employee.class, 2L ).size(),
-					"Employee 2 should have 3 revisions (ADD + MOD FK set + MOD FK null via bulk removal)" );
+			// Employees: only ADD revisions (FK changes tracked on parent side, not child)
+			assertEquals( 1, auditLog.getRevisions( Employee.class, 1L ).size(),
+					"Employee 1 should have 1 revision (ADD only)" );
+			assertEquals( 1, auditLog.getRevisions( Employee.class, 2L ).size(),
+					"Employee 2 should have 1 revision (ADD only)" );
 		} );
 	}
 

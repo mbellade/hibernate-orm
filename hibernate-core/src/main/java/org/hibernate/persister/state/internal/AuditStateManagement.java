@@ -14,14 +14,12 @@ import org.hibernate.persister.collection.CollectionPersister;
 import org.hibernate.persister.collection.mutation.DeleteRowsCoordinator;
 import org.hibernate.persister.collection.mutation.DeleteRowsCoordinatorNoOp;
 import org.hibernate.persister.collection.mutation.DeleteRowsCoordinatorAudit;
-import org.hibernate.persister.collection.mutation.DeleteRowsCoordinatorOneToManyAudit;
 import org.hibernate.persister.collection.mutation.InsertRowsCoordinator;
 import org.hibernate.persister.collection.mutation.InsertRowsCoordinatorAudit;
-import org.hibernate.persister.collection.mutation.InsertRowsCoordinatorOneToManyAudit;
 import org.hibernate.persister.collection.mutation.InsertRowsCoordinatorNoOp;
 import org.hibernate.persister.collection.mutation.RemoveCoordinator;
+import org.hibernate.persister.collection.mutation.RemoveCoordinatorAudit;
 import org.hibernate.persister.collection.mutation.RemoveCoordinatorNoOp;
-import org.hibernate.persister.collection.mutation.RemoveCoordinatorOneToManyAudit;
 import org.hibernate.persister.collection.mutation.UpdateRowsCoordinator;
 import org.hibernate.persister.collection.mutation.UpdateRowsCoordinatorAudit;
 import org.hibernate.persister.collection.mutation.UpdateRowsCoordinatorNoOp;
@@ -83,13 +81,6 @@ public class AuditStateManagement implements StateManagement {
 		if ( !AbstractStateManagement.isInsertAllowed( persister ) ) {
 			return new InsertRowsCoordinatorNoOp( mutationTarget );
 		}
-		else if ( persister.isOneToMany() ) {
-			return new InsertRowsCoordinatorOneToManyAudit(
-					mutationTarget,
-					StandardStateManagement.INSTANCE.createInsertRowsCoordinator( persister ),
-					persister.getFactory()
-			);
-		}
 		else {
 			return new InsertRowsCoordinatorAudit(
 					mutationTarget,
@@ -130,13 +121,6 @@ public class AuditStateManagement implements StateManagement {
 		if ( !persister.needsRemove() ) {
 			return new DeleteRowsCoordinatorNoOp( mutationTarget );
 		}
-		else if ( persister.isOneToMany() ) {
-			return new DeleteRowsCoordinatorOneToManyAudit(
-					mutationTarget,
-					StandardStateManagement.INSTANCE.createDeleteRowsCoordinator( persister ),
-					persister.getFactory()
-			);
-		}
 		else {
 			return new DeleteRowsCoordinatorAudit(
 					mutationTarget,
@@ -152,18 +136,17 @@ public class AuditStateManagement implements StateManagement {
 
 	@Override
 	public RemoveCoordinator createRemoveCoordinator(CollectionPersister persister) {
-		final var mutationTarget = resolveMutationTarget( persister );
 		if ( !persister.needsRemove() ) {
-			return new RemoveCoordinatorNoOp( mutationTarget );
+			return new RemoveCoordinatorNoOp( resolveMutationTarget( persister ) );
 		}
-		if ( persister.isOneToMany() ) {
-			return new RemoveCoordinatorOneToManyAudit(
-					mutationTarget,
-					StandardStateManagement.INSTANCE.createRemoveCoordinator( persister ),
-					persister.getFactory()
-			);
-		}
-		return StandardStateManagement.INSTANCE.createRemoveCoordinator( persister );
+		return new RemoveCoordinatorAudit(
+				resolveMutationTarget( persister ),
+				StandardStateManagement.INSTANCE.createRemoveCoordinator( persister ),
+				persister.getIndexColumnIsSettable(),
+				persister.getElementColumnIsSettable(),
+				persister.getIndexIncrementer(),
+				persister.getFactory()
+		);
 	}
 
 	@Override
