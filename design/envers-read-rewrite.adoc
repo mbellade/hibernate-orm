@@ -326,8 +326,13 @@ See <<Custom Revision Entity Support>> section below.
 
 | W15
 | `REVISION_ON_COLLECTION_CHANGE` (audit non-owned collection changes)
-| [yellow]#TODO# — investigate current behavior
-| Medium
+| [yellow]#DEFERRED# — envers wrote MOD rows for inverse (mappedBy) entities when the owning side's
+  collection changed (`generateBidirectionalCollectionChangeWorkUnits()`). This was enabled by default
+  and applied to both bidirectional OTM and M2M. Core does NOT replicate this: inverse entities only
+  get their own property-change revisions. The relationship history is fully captured on the owning side
+  (child's FK for OTM, middle audit table for M2M). Implementing this would require a work-unit
+  buffering/merging layer for deduplication that doesn't exist in core's audit coordinators.
+| Low
 
 | W16
 | ManyToOne / OneToOne relationship auditing
@@ -1373,8 +1378,9 @@ The following capabilities were verified with dedicated smoke tests (`AuditSmoke
 | Bidirectional `@OneToMany(mappedBy)`: [green]#DONE# — FK on child entity, audited via entity
   mutation coordinators. Unidirectional `@OneToMany @JoinColumn`: write [green]#DONE# — middle
   audit table (`{Owner}_{Child}_aud`) tracks membership via `InsertRowsCoordinatorAudit` /
-  `DeleteRowsCoordinatorAudit` / `RemoveCoordinatorAudit`. Parent entity gets MOD revision on
-  collection changes via `isCollectionDirtyCheckNecessary` fix in `DefaultFlushEntityEventListener`.
+  `RemoveCoordinatorAudit`. `DeleteRowsCoordinatorAudit` delegates only (no audit writing — diff
+  computed by `InsertRowsCoordinatorAudit` via `PersistentCollection.needsInserting()`/`getDeletes()`).
+  Parent entity gets MOD revision on collection changes via `isCollectionDirtyCheckNecessary` fix.
   Read [red]#TODO# — `UnknownTableReferenceException` when resolving audit table in collection loader.
   Unidirectional `@OneToMany @JoinTable`: same write/read status as `@ManyToMany`.
 
@@ -1384,8 +1390,13 @@ The following capabilities were verified with dedicated smoke tests (`AuditSmoke
   Read [red]#TODO# — same table reference resolution issue as OTM collections.
   Class-level `@Audited` propagates to owned collections via `CollectionBinder.extract()`.
   Audit table column cloning no longer copies unique constraints (bug fix in `AuditHelper`).
-  Remaining: bidirectional `@ManyToMany` inverse side auditing, collection recreate writing
-  excessive audit rows (should only write diffs, not full delete+reinsert).
+  Bidirectional `@ManyToMany`: inverse (mappedBy) side is correctly skipped in `processAudited()` —
+  no separate audit table, no inverse MOD rows (see W15 `REVISION_ON_COLLECTION_CHANGE` decision).
+  Tested in `AuditBidirectionalManyToManyTest`.
+  Collection recreate: [green]#FIXED# — `InsertRowsCoordinatorAudit` now uses snapshot-based diff
+  via `PersistentCollection.needsInserting()`/`getDeletes()` to write only actual ADD/DEL rows,
+  matching envers behavior. `DeleteRowsCoordinatorAudit` simplified to pure delegation.
+  `RemoveCoordinatorAudit` only writes DEL for entity deletion (checks owner entity status).
 
 | G4
 | **`@EmbeddedId` / `@IdClass` composite keys**
@@ -1538,8 +1549,13 @@ direct equivalents in core, but all need a clear migration path.
   Deferred — see discussion on `row_start` uniqueness guarantees.
 * **JOINED inheritance read side**: Per-table temporal predicates on joined subclass table references.
   Write side done (multi-table audit coordinator). SINGLE_TABLE and TABLE_PER_CLASS fully working.
-* **`REVISION_ON_COLLECTION_CHANGE`**: Should changes to non-owned collections create a revision
-  for the owning entity? Core currently only creates audit rows when the entity is explicitly modified.
+* **`REVISION_ON_COLLECTION_CHANGE`**: Investigated. Envers wrote MOD rows for inverse (mappedBy)
+  entities when the owning side's collection changed, via `generateBidirectionalCollectionChangeWorkUnits()`
+  in `BaseEnversEventListener`. This applied to both bidirectional `@OneToMany` and `@ManyToMany`.
+  Envers used `AuditProcess` work-unit buffering with merge semantics for deduplication
+  (ADD+CollectionChange→ADD, MOD+CollectionChange→single MOD, etc.). **Decision**: not replicated
+  in core — the relationship history is fully captured on the owning side. Can be revisited if users
+  need `getRevisions()` on inverse entities to include relationship changes.
 * **ValidityAuditStrategy**: Worth implementing in core? Trade-off: write perf vs read perf.
   May not be needed if MAX-subquery approach performs well with proper indexing.
 * **`EntityTrackingRevisionListener`**: Should `TransactionIdentifierSupplier` receive a richer context?

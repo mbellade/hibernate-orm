@@ -14,6 +14,8 @@ import org.hibernate.engine.spi.SharedSessionContractImplementor;
 import org.hibernate.audit.ModificationType;
 import org.hibernate.sql.model.MutationOperationGroup;
 
+import static java.util.Collections.emptyIterator;
+
 /**
  * InsertRowsCoordinator for audited collections.
  */
@@ -23,6 +25,7 @@ public class InsertRowsCoordinatorAudit implements InsertRowsCoordinator {
 	private final SessionFactoryImplementor sessionFactory;
 	private final MutationExecutorService mutationExecutorService;
 	private final BasicBatchKey auditBatchKey;
+	private final boolean deleteByIndex;
 	private final boolean[] indexColumnIsSettable;
 	private final boolean[] elementColumnIsSettable;
 	private final UnaryOperator<Object> indexIncrementer;
@@ -32,8 +35,8 @@ public class InsertRowsCoordinatorAudit implements InsertRowsCoordinator {
 
 	public InsertRowsCoordinatorAudit(
 			CollectionMutationTarget mutationTarget,
-			RowMutationOperations rowMutationOperations,
 			InsertRowsCoordinator currentInsertCoordinator,
+			boolean deleteByIndex,
 			boolean[] indexColumnIsSettable,
 			boolean[] elementColumnIsSettable,
 			UnaryOperator<Object> indexIncrementer,
@@ -41,6 +44,7 @@ public class InsertRowsCoordinatorAudit implements InsertRowsCoordinator {
 		this.mutationTarget = mutationTarget;
 		this.currentInsertCoordinator = currentInsertCoordinator;
 		this.sessionFactory = sessionFactory;
+		this.deleteByIndex = deleteByIndex;
 		this.indexColumnIsSettable = indexColumnIsSettable;
 		this.elementColumnIsSettable = elementColumnIsSettable;
 		this.indexIncrementer = indexIncrementer;
@@ -70,38 +74,65 @@ public class InsertRowsCoordinatorAudit implements InsertRowsCoordinator {
 
 		final var pluralAttribute = mutationTarget.getTargetPart();
 		final var collectionDescriptor = pluralAttribute.getCollectionDescriptor();
-		final var entries = collection.entries( collectionDescriptor );
-		if ( entries.hasNext() ) {
-			final var mutationExecutor = mutationExecutorService.createExecutor(
-					() -> auditBatchKey,
-					auditOperationGroup,
-					session
-			);
 
-			try {
-				int entryCount = 0;
-				final var bindings = getAuditHelper().getRowMutationHelper();
-				while ( entries.hasNext() ) {
-					final Object entry = entries.next();
-					if ( entryChecker == null || entryChecker.include( entry, entryCount, collection,
-							pluralAttribute ) ) {
-						bindings.bindInsertValues(
-								collection,
-								id,
-								entry,
-								entryCount,
-								ModificationType.ADD,
-								session,
-								mutationExecutor.getJdbcValueBindings()
-						);
-						mutationExecutor.execute( entry, null, null, null, session );
-					}
-					entryCount++;
+		final var mutationExecutor = mutationExecutorService.createExecutor(
+				() -> auditBatchKey,
+				auditOperationGroup,
+				session
+		);
+
+		try {
+			final var bindings = getAuditHelper().getRowMutationHelper();
+
+			// Use snapshot diff to avoid excessive audit rows during collection recreate.
+			// For new collections (no loaded persister), just include everything.
+			final var collectionEntry = session.getPersistenceContextInternal()
+					.getCollectionEntry( collection );
+			final boolean hasPriorDbState = collectionEntry != null
+					&& collectionEntry.getLoadedPersister() != null;
+
+			final var entries = collection.entries( collectionDescriptor );
+			int entryCount = 0;
+			while ( entries.hasNext() ) {
+				final Object entry = entries.next();
+				if ( hasPriorDbState
+						? collection.needsInserting( entry, entryCount, collectionDescriptor.getElementType() )
+						: entryChecker.include( entry, entryCount, collection, pluralAttribute ) ) {
+					bindings.bindInsertValues(
+							collection,
+							id,
+							entry,
+							entryCount,
+							ModificationType.ADD,
+							session,
+							mutationExecutor.getJdbcValueBindings()
+					);
+					mutationExecutor.execute( entry, null, null, null, session );
 				}
+				entryCount++;
 			}
-			finally {
-				mutationExecutor.release();
+
+			// Write DEL audit rows for actually removed elements (in snapshot but not in current)
+			final var deletes = hasPriorDbState
+					? collection.getDeletes( collectionDescriptor, !deleteByIndex )
+					: emptyIterator();
+			int deleteCount = 0;
+			while ( deletes.hasNext() ) {
+				final Object deleted = deletes.next();
+				bindings.bindInsertValues(
+						collection,
+						id,
+						deleted,
+						deleteCount++,
+						ModificationType.DEL,
+						session,
+						mutationExecutor.getJdbcValueBindings()
+				);
+				mutationExecutor.execute( deleted, null, null, null, session );
 			}
+		}
+		finally {
+			mutationExecutor.release();
 		}
 	}
 

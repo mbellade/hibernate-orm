@@ -75,8 +75,8 @@ public class RemoveCoordinatorAudit implements RemoveCoordinator {
 		// Delegate to standard coordinator
 		standardCoordinator.deleteAllRows( key, session );
 
-		// Write DEL audit rows for each entry
-		if ( collection != null && collection.wasInitialized() ) {
+		// Only write DEL audit rows for entity deletion (all snapshot elements are truly removed)
+		if ( collection != null && isEntityDeletion( key, session ) ) {
 			if ( auditOperationGroup == null ) {
 				auditOperationGroup = getAuditHelper().getAuditInsertOperationGroup();
 			}
@@ -110,6 +110,17 @@ public class RemoveCoordinatorAudit implements RemoveCoordinator {
 				}
 			}
 		}
+	}
+
+	private boolean isEntityDeletion(Object key, SharedSessionContractImplementor session) {
+		final var pc = session.getPersistenceContextInternal();
+		final var collectionDescriptor = mutationTarget.getTargetPart().getCollectionDescriptor();
+		final var owner = pc.getCollectionOwner( key, collectionDescriptor );
+		if ( owner != null ) {
+			final var ownerEntry = pc.getEntry( owner );
+			return ownerEntry != null && ownerEntry.getStatus().isDeletedOrGone();
+		}
+		return true;
 	}
 
 	private AuditCollectionHelper getAuditHelper() {

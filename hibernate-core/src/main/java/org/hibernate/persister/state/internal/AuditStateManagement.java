@@ -84,8 +84,8 @@ public class AuditStateManagement implements StateManagement {
 		else {
 			return new InsertRowsCoordinatorAudit(
 					mutationTarget,
-					persister.getRowMutationOperations(),
 					StandardStateManagement.INSTANCE.createInsertRowsCoordinator( persister ),
+					mutationTarget.hasPhysicalIndexColumn(),
 					persister.getIndexColumnIsSettable(),
 					persister.getElementColumnIsSettable(),
 					persister.getIndexIncrementer(),
@@ -124,12 +124,7 @@ public class AuditStateManagement implements StateManagement {
 		else {
 			return new DeleteRowsCoordinatorAudit(
 					mutationTarget,
-					StandardStateManagement.INSTANCE.createDeleteRowsCoordinator( persister ),
-					mutationTarget.hasPhysicalIndexColumn(),
-					persister.getIndexColumnIsSettable(),
-					persister.getElementColumnIsSettable(),
-					persister.getIndexIncrementer(),
-					persister.getFactory()
+					StandardStateManagement.INSTANCE.createDeleteRowsCoordinator( persister )
 			);
 		}
 	}
