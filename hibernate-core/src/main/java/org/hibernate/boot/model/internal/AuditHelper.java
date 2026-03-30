@@ -153,7 +153,12 @@ public final class AuditHelper {
 	private static void copyTableColumns(Table sourceTable, Table targetTable, Set<String> excludedColumns) {
 		for ( var column : sourceTable.getColumns() ) {
 			if ( !excludedColumns.contains( column.getCanonicalName() ) ) {
-				targetTable.addColumn( column.clone() );
+				final var copy = column.clone();
+				// Audit tables must not inherit unique constraints from the source,
+				// since the same value can appear at different revisions
+				copy.setUnique( false );
+				copy.setUniqueKeyName( null );
+				targetTable.addColumn( copy );
 			}
 		}
 	}

@@ -15,6 +15,7 @@ import java.util.Properties;
 import java.util.function.Supplier;
 
 import org.hibernate.AnnotationException;
+import org.hibernate.persister.state.internal.AuditStateManagement;
 import org.hibernate.AssertionFailure;
 import org.hibernate.FetchMode;
 import org.hibernate.MappingException;
@@ -1569,6 +1570,13 @@ public abstract class CollectionBinder {
 						: foreignJoinColumns.getTable();
 		collection.setCollectionTable( collectionTable );
 
+		// For @OneToMany @JoinColumn on an @Audited entity, set audit state management
+		// so the FK update on the child table is audited.
+		final var audited = extract( Audited.class, property, buildingContext );
+		if ( audited != null ) {
+			collection.setStateManagementType( AuditStateManagement.class );
+		}
+
 		bindSynchronize();
 		bindFilters( false );
 		handleWhere( false );
@@ -2448,9 +2456,15 @@ public abstract class CollectionBinder {
 	private static <T extends Annotation> T extract(
 			Class<T> annotationClass, MemberDetails property, MetadataBuildingContext context) {
 		final var fromProperty = property.getDirectAnnotationUsage( annotationClass );
-		return fromProperty == null
-				? extractFromPackage( annotationClass, property.getDeclaringType(), context )
-				: fromProperty;
+		if ( fromProperty != null ) {
+			return fromProperty;
+		}
+		// Check the owning entity class hierarchy (class-level annotation propagates to collections)
+		final var modelsContext = context.getBootstrapContext().getModelsContext();
+		final var fromClass = property.getDeclaringType().getAnnotationUsage( annotationClass, modelsContext );
+		return fromClass == null ?
+				extractFromPackage( annotationClass, property.getDeclaringType(), context ) :
+				fromClass;
 	}
 
 	private void handleUnownedManyToMany(

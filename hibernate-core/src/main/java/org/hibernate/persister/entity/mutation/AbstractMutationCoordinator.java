@@ -333,7 +333,7 @@ public abstract class AbstractMutationCoordinator {
 	/**
 	 * For temporal history tables and audit log tables.
 	 */
-	static EntityTableMapping createAuxiliaryTableMapping(
+	public static EntityTableMapping createAuxiliaryTableMapping(
 			EntityTableMapping identifierTableMapping,
 			EntityPersister persister,
 			String tableName) {
@@ -358,4 +358,5 @@ public abstract class AbstractMutationCoordinator {
 				persister.isDynamicUpdate(),
 				persister.isDynamicInsert()
 		);
-	}}
+	}
+}

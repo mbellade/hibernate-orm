@@ -14,11 +14,14 @@ import org.hibernate.persister.collection.CollectionPersister;
 import org.hibernate.persister.collection.mutation.DeleteRowsCoordinator;
 import org.hibernate.persister.collection.mutation.DeleteRowsCoordinatorNoOp;
 import org.hibernate.persister.collection.mutation.DeleteRowsCoordinatorAudit;
+import org.hibernate.persister.collection.mutation.DeleteRowsCoordinatorOneToManyAudit;
 import org.hibernate.persister.collection.mutation.InsertRowsCoordinator;
 import org.hibernate.persister.collection.mutation.InsertRowsCoordinatorAudit;
+import org.hibernate.persister.collection.mutation.InsertRowsCoordinatorOneToManyAudit;
 import org.hibernate.persister.collection.mutation.InsertRowsCoordinatorNoOp;
 import org.hibernate.persister.collection.mutation.RemoveCoordinator;
 import org.hibernate.persister.collection.mutation.RemoveCoordinatorNoOp;
+import org.hibernate.persister.collection.mutation.RemoveCoordinatorOneToManyAudit;
 import org.hibernate.persister.collection.mutation.UpdateRowsCoordinator;
 import org.hibernate.persister.collection.mutation.UpdateRowsCoordinatorAudit;
 import org.hibernate.persister.collection.mutation.UpdateRowsCoordinatorNoOp;
@@ -81,7 +84,11 @@ public class AuditStateManagement implements StateManagement {
 			return new InsertRowsCoordinatorNoOp( mutationTarget );
 		}
 		else if ( persister.isOneToMany() ) {
-			throw new UnsupportedOperationException();
+			return new InsertRowsCoordinatorOneToManyAudit(
+					mutationTarget,
+					StandardStateManagement.INSTANCE.createInsertRowsCoordinator( persister ),
+					persister.getFactory()
+			);
 		}
 		else {
 			return new InsertRowsCoordinatorAudit(
@@ -103,7 +110,7 @@ public class AuditStateManagement implements StateManagement {
 			return new UpdateRowsCoordinatorNoOp( mutationTarget );
 		}
 		else if ( persister.isOneToMany() ) {
-			throw new UnsupportedOperationException();
+			return StandardStateManagement.INSTANCE.createUpdateRowsCoordinator( persister );
 		}
 		else {
 			return new UpdateRowsCoordinatorAudit(
@@ -124,7 +131,11 @@ public class AuditStateManagement implements StateManagement {
 			return new DeleteRowsCoordinatorNoOp( mutationTarget );
 		}
 		else if ( persister.isOneToMany() ) {
-			throw new UnsupportedOperationException();
+			return new DeleteRowsCoordinatorOneToManyAudit(
+					mutationTarget,
+					StandardStateManagement.INSTANCE.createDeleteRowsCoordinator( persister ),
+					persister.getFactory()
+			);
 		}
 		else {
 			return new DeleteRowsCoordinatorAudit(
@@ -145,12 +156,14 @@ public class AuditStateManagement implements StateManagement {
 		if ( !persister.needsRemove() ) {
 			return new RemoveCoordinatorNoOp( mutationTarget );
 		}
-		else if ( persister.isOneToMany() ) {
-			throw new UnsupportedOperationException();
+		if ( persister.isOneToMany() ) {
+			return new RemoveCoordinatorOneToManyAudit(
+					mutationTarget,
+					StandardStateManagement.INSTANCE.createRemoveCoordinator( persister ),
+					persister.getFactory()
+			);
 		}
-		else {
-			return StandardStateManagement.INSTANCE.createRemoveCoordinator( persister );
-		}
+		return StandardStateManagement.INSTANCE.createRemoveCoordinator( persister );
 	}
 
 	@Override
@@ -175,8 +188,12 @@ public class AuditStateManagement implements StateManagement {
 			Collection bootDescriptor,
 			MappingModelCreationProcess creationProcess) {
 		final var auditTable = bootDescriptor.getAuxiliaryTable();
-		final String tableName = auditTable == null ? null
-				: getTableIdentifierExpression( auditTable, creationProcess );
+		if ( auditTable == null ) {
+			// No audit table for this collection (e.g. @OneToMany @JoinColumn —
+			// the child entity's audit table handles FK auditing)
+			return null;
+		}
+		final String tableName = getTableIdentifierExpression( auditTable, creationProcess );
 		return new AuditMappingImpl( bootDescriptor, tableName, creationProcess );
 	}
 

@@ -336,8 +336,9 @@ See <<Custom Revision Entity Support>> section below.
 
 | W17
 | ManyToMany / OneToMany owned relationship auditing (join tables)
-| [yellow]#TODO# — investigate current support
-| High
+| [green]#DONE# — join table audit tables created; class-level `@Audited` propagates to collections;
+  unidirectional @OneToMany @JoinColumn handled by dedicated coordinators
+| —
 
 | W18
 | `@AuditJoinTable` / `@AuditMappedBy` (join table customization)
@@ -1368,14 +1369,23 @@ The following capabilities were verified with dedicated smoke tests (`AuditSmoke
   read [red]#TODO# (per-table temporal predicates on joined subclass table references).
 
 | G2
-| **OneToMany collection auditing** (join table + inverse FK)
-| `AuditStateManagement` throws `UnsupportedOperationException` for `isOneToMany()`.
-  Implement OneToMany audit coordinators.
+| **OneToMany collection auditing**
+| Bidirectional `@OneToMany(mappedBy)`: [green]#DONE# — FK is on the child entity, audited
+  via entity mutation coordinators. Unidirectional `@OneToMany @JoinColumn`: [green]#DONE# —
+  write side handled by `InsertRowsCoordinatorOneToManyAudit` / `DeleteRowsCoordinatorOneToManyAudit`
+  / `RemoveCoordinatorOneToManyAudit` (builds INSERT into child entity audit table with FK column).
+  Read side works via point-in-time predicate on child entity's audit table.
+  Unidirectional `@OneToMany @JoinTable`: write [green]#DONE# (join table audit via
+  `InsertRowsCoordinatorAudit`), read [yellow]#PARTIAL# (point-in-time reads for additions work,
+  removals don't reflect correctly — join table temporal predicates not yet applied).
 
 | G3
 | **ManyToMany collection auditing** (join tables)
-| Untested — may partially work since ManyToMany uses join tables like ElementCollection.
-  Test and verify.
+| Write [green]#DONE# — join table audit rows written via `InsertRowsCoordinatorAudit`.
+  Read [yellow]#PARTIAL# — same issue as OneToMany @JoinTable: point-in-time collection loads
+  don't apply temporal predicates to the join table, so removals aren't reflected.
+  Class-level `@Audited` now propagates to collections via `CollectionBinder.extract()`.
+  Audit table column cloning no longer copies unique constraints (bug fix in `AuditHelper`).
 
 | G4
 | **`@EmbeddedId` / `@IdClass` composite keys**
