@@ -113,8 +113,7 @@ public final class AuditCollectionHelper {
 		if ( elementDescriptor instanceof OneToManyCollectionPart oneToMany ) {
 			// For @OneToMany @JoinColumn, the middle audit table stores the child entity's ID,
 			// not the FK columns (which are the element's selectables for OneToManyCollectionPart)
-			oneToMany.getAssociatedEntityMappingType().getIdentifierMapping()
-					.forEachInsertable( insertBuilder );
+			oneToMany.getAssociatedEntityMappingType().getIdentifierMapping().forEachInsertable( insertBuilder );
 		}
 		else {
 			elementDescriptor.forEachInsertable( insertBuilder );

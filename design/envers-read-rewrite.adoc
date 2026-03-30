@@ -1381,13 +1381,18 @@ The following capabilities were verified with dedicated smoke tests (`AuditSmoke
   `RemoveCoordinatorAudit`. `DeleteRowsCoordinatorAudit` delegates only (no audit writing — diff
   computed by `InsertRowsCoordinatorAudit` via `PersistentCollection.needsInserting()`/`getDeletes()`).
   Parent entity gets MOD revision on collection changes via `isCollectionDirtyCheckNecessary` fix.
-  Read [red]#TODO# — `UnknownTableReferenceException` when resolving audit table in collection loader.
+  Read [green]#DONE# — for temporal OTM `@JoinColumn`, uses `CollectionTableGroup` with middle audit
+  table as primary (like M2M), since the FK column is never written to the entity audit table. Entity
+  data joined via `OneToManyCollectionPart.createTableGroupJoin()` which handles `CollectionTableGroup`
+  parent. Unmapped FK columns (from `@JoinColumn`/`Backref`) excluded from entity audit table schema
+  via `resolveExcludedColumns()` (matching envers behavior).
   Unidirectional `@OneToMany @JoinTable`: same write/read status as `@ManyToMany`.
 
 | G3
 | **ManyToMany collection auditing** (join tables)
 | Write [green]#DONE# — join table audit rows written, parent MOD on collection change.
-  Read [red]#TODO# — same table reference resolution issue as OTM collections.
+  Read [green]#DONE# — `collectionTableReference()` swaps join table to audit table via
+  `AuxiliaryTableReference`; entity elements get their own temporal predicate.
   Class-level `@Audited` propagates to owned collections via `CollectionBinder.extract()`.
   Audit table column cloning no longer copies unique constraints (bug fix in `AuditHelper`).
   Bidirectional `@ManyToMany`: inverse (mappedBy) side is correctly skipped in `processAudited()` —

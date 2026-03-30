@@ -155,7 +155,7 @@ class AuditManyToManyTest {
 
 		scope.inSession( session -> {
 			var history = session.getAuditLog().getHistory( Student.class, 20L );
-			assertEquals( 1, history.size() );
+			assertEquals( 2, history.size(), "Student has ADD + MOD (collection change)" );
 			assertEquals( "Hist Alice", history.get( 0 ).entity().name );
 		} );
 	}

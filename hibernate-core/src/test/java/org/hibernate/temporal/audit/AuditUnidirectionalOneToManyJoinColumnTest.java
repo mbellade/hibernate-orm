@@ -196,8 +196,8 @@ class AuditUnidirectionalOneToManyJoinColumnTest {
 
 		scope.inSession( session -> {
 			var history = session.getAuditLog().getHistory( Department.class, 20L );
-			// Department: ADD + DEL = 2 revisions
-			assertEquals( 2, history.size(), "Department should have 2 history entries" );
+			// Department: ADD + MOD (collection change) + DEL = 3 revisions
+			assertEquals( 3, history.size(), "Department should have 3 history entries" );
 			assertEquals( "Hist Engineering", history.get( 0 ).entity().name );
 		} );
 	}

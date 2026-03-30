@@ -158,7 +158,7 @@ class AuditUnidirectionalOneToManyJoinTableTest {
 
 		scope.inSession( session -> {
 			var history = session.getAuditLog().getHistory( Team.class, 20L );
-			assertEquals( 1, history.size() );
+			assertEquals( 2, history.size(), "Team has ADD + MOD (collection change)" );
 			assertEquals( "Hist Team", history.get( 0 ).entity().name );
 		} );
 	}

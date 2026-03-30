@@ -404,6 +404,16 @@ public class AuditMappingImpl implements AuditMapping {
 					}
 			);
 		}
+		else if ( collectionDescriptor.getElementDescriptor() instanceof OneToManyCollectionPart oneToMany ) {
+			// For OTM @JoinColumn, the middle audit table stores the entity ID, not the FK
+			oneToMany.getAssociatedEntityMappingType().getIdentifierMapping().forEachSelectable(
+					(selectionIndex, selectableMapping) -> {
+						if ( !selectableMapping.isFormula() ) {
+							keySelectables.add( selectableMapping );
+						}
+					}
+			);
+		}
 		else {
 			collectionDescriptor.getElementDescriptor().forEachSelectable(
 					(selectionIndex, selectableMapping) -> {

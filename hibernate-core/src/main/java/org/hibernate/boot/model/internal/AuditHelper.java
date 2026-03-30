@@ -13,9 +13,11 @@ import org.hibernate.boot.model.naming.Identifier;
 import org.hibernate.boot.model.naming.PhysicalNamingStrategy;
 import org.hibernate.boot.model.relational.Database;
 import org.hibernate.boot.spi.MetadataBuildingContext;
+import org.hibernate.mapping.Backref;
 import org.hibernate.mapping.BasicValue;
 import org.hibernate.mapping.Collection;
 import org.hibernate.mapping.Column;
+import org.hibernate.mapping.PersistentClass;
 import org.hibernate.mapping.RootClass;
 import org.hibernate.mapping.Stateful;
 import org.hibernate.mapping.Table;
@@ -43,8 +45,7 @@ public final class AuditHelper {
 			Audited audited,
 			RootClass rootClass,
 			MetadataBuildingContext context) {
-		bindAuditTable( audited, rootClass, context,
-				resolveExcludedColumns( rootClass ) );
+		bindAuditTable( audited, (Stateful) rootClass, context );
 		bindSubclassAuditTables( audited, rootClass, context );
 	}
 
@@ -52,14 +53,13 @@ public final class AuditHelper {
 			Audited audited,
 			Collection collection,
 			MetadataBuildingContext context) {
-		bindAuditTable( audited, collection, context, Set.of() );
+		bindAuditTable( audited, (Stateful) collection, context );
 	}
 
 	private static void bindAuditTable(
 			Audited audited,
 			Stateful auditable,
-			MetadataBuildingContext context,
-			Set<String> excludedColumns) {
+			MetadataBuildingContext context) {
 		final var collector = context.getMetadataCollector();
 		final var table = auditable.getMainTable();
 		final String explicitAuditTableName = audited.tableName();
@@ -85,6 +85,11 @@ public final class AuditHelper {
 		final String txIdColumnName = audited.transactionId();
 		final String modTypeColumnName = audited.modificationType();
 		collector.addSecondPass( (OptionalDeterminationSecondPass) ignored -> {
+			// Resolve exclusions at second-pass time so collection-managed FK columns
+			// (added during collection binding) are detected
+			final var excludedColumns = auditable instanceof RootClass rootClass
+					? resolveExcludedColumns( rootClass )
+					: Set.<String>of();
 			copyTableColumns( table, auditTable, excludedColumns );
 			final var transactionIdColumn =
 					createAuditColumn( txIdColumnName,
@@ -276,14 +281,46 @@ public final class AuditHelper {
 
 	private static Set<String> resolveExcludedColumns(RootClass rootClass) {
 		final Set<String> excluded = new HashSet<>();
-		final var properties = rootClass.getProperties();
-		for ( var property : properties ) {
-			if ( property.isAuditedExcluded() ) {
+		final Set<String> mappedColumns = new HashSet<>();
+		// Identifier columns
+		for ( var column : rootClass.getIdentifier().getColumns() ) {
+			mappedColumns.add( column.getCanonicalName() );
+		}
+		// Discriminator column
+		if ( rootClass.getDiscriminator() != null ) {
+			for ( var column : rootClass.getDiscriminator().getColumns() ) {
+				mappedColumns.add( column.getCanonicalName() );
+			}
+		}
+		// All properties in the hierarchy (root + subclasses for SINGLE_TABLE)
+		collectPropertyColumns( rootClass, mappedColumns, excluded );
+		for ( var subclass : rootClass.getSubclasses() ) {
+			collectPropertyColumns( subclass, mappedColumns, excluded );
+		}
+		// Exclude unmapped columns (e.g. FK from unidirectional @OneToMany @JoinColumn)
+		for ( var column : rootClass.getMainTable().getColumns() ) {
+			if ( !mappedColumns.contains( column.getCanonicalName() ) ) {
+				excluded.add( column.getCanonicalName() );
+			}
+		}
+		return excluded;
+	}
+
+	private static void collectPropertyColumns(
+			PersistentClass persistentClass,
+			Set<String> mappedColumns,
+			Set<String> excluded) {
+		for ( var property : persistentClass.getProperties() ) {
+			if ( property.isAuditedExcluded() || property instanceof Backref ) {
 				for ( var column : property.getColumns() ) {
 					excluded.add( column.getCanonicalName() );
 				}
 			}
+			else {
+				for ( var column : property.getColumns() ) {
+					mappedColumns.add( column.getCanonicalName() );
+				}
+			}
 		}
-		return excluded;
 	}
 }
