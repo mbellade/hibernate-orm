@@ -25,8 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /**
- * Tests for @ManyToMany associations.
- * Uses a join table — similar path to @ElementCollection.
+ * Tests unidirectional @ManyToMany auditing (join table).
  */
 @SessionFactory
 @DomainModel(annotatedClasses = {
@@ -130,9 +129,73 @@ class AuditManyToManyTest {
 			assertEquals( 2, student.courses.size(), "At REV 2, student should have 2 courses" );
 		}
 
-		// todo (envers-rewrite) : collection-level point-in-time reads for join-table collections
-		//  don't yet reflect removals — the join table audit table has DEL rows but the
-		//  collection loading doesn't apply temporal predicates to the join table
+		// REV 3: drop Math
+		scope.inTransaction( session -> {
+			session.find( Student.class, 10L ).courses.removeIf( c -> c.id == 10L );
+		} );
+
+		// At REV 3: 1 course (Physics only)
+		try ( var s = scope.getSessionFactory().withOptions()
+				.atTransaction( 103 ).openSession() ) {
+			var student = s.find( Student.class, 10L );
+			assertNotNull( student );
+			assertEquals( 1, student.courses.size(), "At REV 3, student should have 1 course" );
+			assertEquals( "PIT Physics", student.courses.get( 0 ).name );
+		}
+	}
+
+	/**
+	 * Bulk recreation (clear + re-add): only diff audit rows should be written.
+	 */
+	@Test
+	void testPointInTimeReadAfterRecreate(SessionFactoryScope scope) {
+		currentTxId = 300;
+
+		// REV 1: student enrolled in Math + Physics
+		scope.inTransaction( session -> {
+			var c1 = new Course( 30L, "Rec Math" );
+			var c2 = new Course( 31L, "Rec Physics" );
+			session.persist( c1 );
+			session.persist( c2 );
+			var student = new Student( 30L, "Rec Alice" );
+			student.courses.add( c1 );
+			student.courses.add( c2 );
+			session.persist( student );
+		} );
+
+		// REV 2: recreate — clear and re-add only Physics + new Chemistry
+		scope.inTransaction( session -> {
+			var c3 = new Course( 32L, "Rec Chemistry" );
+			session.persist( c3 );
+			var student = session.find( Student.class, 30L );
+			student.courses.clear();
+			student.courses.add( session.find( Course.class, 31L ) );
+			student.courses.add( c3 );
+		} );
+
+		// Student: ADD + recreate = 2 revisions (not more)
+		scope.inSession( session -> {
+			assertEquals( 2, session.getAuditLog().getRevisions( Student.class, 30L ).size(),
+					"Student should have exactly 2 revisions (ADD + recreate)" );
+		} );
+
+		// At REV 1: 2 courses (Math + Physics)
+		try ( var s = scope.getSessionFactory().withOptions()
+				.atTransaction( 301 ).openSession() ) {
+			var student = s.find( Student.class, 30L );
+			assertNotNull( student );
+			assertEquals( 2, student.courses.size(), "At REV 1, student should have 2 courses" );
+		}
+
+		// At REV 2: 2 courses (Physics + Chemistry — Math dropped)
+		try ( var s = scope.getSessionFactory().withOptions()
+				.atTransaction( 302 ).openSession() ) {
+			var student = s.find( Student.class, 30L );
+			assertNotNull( student );
+			assertEquals( 2, student.courses.size(), "At REV 2, student should have 2 courses" );
+			var names = student.courses.stream().map( c -> c.name ).sorted().toList();
+			assertEquals( List.of( "Rec Chemistry", "Rec Physics" ), names );
+		}
 	}
 
 	@Test
@@ -163,7 +226,7 @@ class AuditManyToManyTest {
 	// ---- Entity classes ----
 
 	@Audited
-	@Entity(name = "M2mStudent")
+	@Entity(name = "Student")
 	static class Student {
 		@Id
 		long id;
@@ -180,7 +243,7 @@ class AuditManyToManyTest {
 	}
 
 	@Audited
-	@Entity(name = "M2mCourse")
+	@Entity(name = "Course")
 	static class Course {
 		@Id
 		long id;

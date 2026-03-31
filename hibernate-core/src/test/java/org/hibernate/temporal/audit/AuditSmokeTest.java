@@ -113,7 +113,7 @@ class AuditSmokeTest {
 	}
 
 	@Audited
-	@Entity(name = "SmokeParent")
+	@Entity(name = "Parent")
 	static class Parent {
 		@Id
 		long id;
@@ -129,7 +129,7 @@ class AuditSmokeTest {
 	}
 
 	@Audited
-	@Entity(name = "SmokeChild")
+	@Entity(name = "Child")
 	static class Child {
 		@Id
 		long id;

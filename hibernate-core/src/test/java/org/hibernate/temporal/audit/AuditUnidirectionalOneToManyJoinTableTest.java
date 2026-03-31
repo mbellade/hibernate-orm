@@ -26,9 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /**
- * Tests for unidirectional @OneToMany with @JoinTable.
- * Uses a join table (like @ElementCollection / @ManyToMany), so the
- * collection persister should have isOneToMany()=false.
+ * Tests unidirectional @OneToMany with @JoinTable auditing.
  */
 @SessionFactory
 @DomainModel(annotatedClasses = {
@@ -133,9 +131,73 @@ class AuditUnidirectionalOneToManyJoinTableTest {
 			assertEquals( 2, team.players.size(), "At REV 2, team should have 2 players" );
 		}
 
-		// todo (envers-rewrite) : collection-level point-in-time reads for join-table collections
-		//  don't yet reflect removals — the join table audit table has DEL rows but the
-		//  collection loading doesn't apply temporal predicates to the join table
+		// REV 3: remove player A
+		scope.inTransaction( session -> {
+			session.find( Team.class, 10L ).players.removeIf( p -> p.id == 10L );
+		} );
+
+		// At REV 3: 1 player (Bob only)
+		try ( var s = scope.getSessionFactory().withOptions()
+				.atTransaction( 103 ).openSession() ) {
+			var team = s.find( Team.class, 10L );
+			assertNotNull( team );
+			assertEquals( 1, team.players.size(), "At REV 3, team should have 1 player" );
+			assertEquals( "PIT Bob", team.players.get( 0 ).name );
+		}
+	}
+
+	/**
+	 * Bulk recreation (clear + re-add): only diff audit rows should be written.
+	 */
+	@Test
+	void testPointInTimeReadAfterRecreate(SessionFactoryScope scope) {
+		currentTxId = 300;
+
+		// REV 1: team with Alice + Bob
+		scope.inTransaction( session -> {
+			var p1 = new Player( 30L, "Rec Alice" );
+			var p2 = new Player( 31L, "Rec Bob" );
+			session.persist( p1 );
+			session.persist( p2 );
+			var team = new Team( 30L, "Rec Team" );
+			team.players.add( p1 );
+			team.players.add( p2 );
+			session.persist( team );
+		} );
+
+		// REV 2: recreate — clear and re-add Bob + new Charlie
+		scope.inTransaction( session -> {
+			var p3 = new Player( 32L, "Rec Charlie" );
+			session.persist( p3 );
+			var team = session.find( Team.class, 30L );
+			team.players.clear();
+			team.players.add( session.find( Player.class, 31L ) );
+			team.players.add( p3 );
+		} );
+
+		// Team: ADD + recreate = 2 revisions (not more)
+		scope.inSession( session -> {
+			assertEquals( 2, session.getAuditLog().getRevisions( Team.class, 30L ).size(),
+					"Team should have exactly 2 revisions (ADD + recreate)" );
+		} );
+
+		// At REV 1: 2 players
+		try ( var s = scope.getSessionFactory().withOptions()
+				.atTransaction( 301 ).openSession() ) {
+			var team = s.find( Team.class, 30L );
+			assertNotNull( team );
+			assertEquals( 2, team.players.size(), "At REV 1, team should have 2 players" );
+		}
+
+		// At REV 2: 2 players (Bob + Charlie — Alice dropped)
+		try ( var s = scope.getSessionFactory().withOptions()
+				.atTransaction( 302 ).openSession() ) {
+			var team = s.find( Team.class, 30L );
+			assertNotNull( team );
+			assertEquals( 2, team.players.size(), "At REV 2, team should have 2 players" );
+			var names = team.players.stream().map( p -> p.name ).sorted().toList();
+			assertEquals( List.of( "Rec Bob", "Rec Charlie" ), names );
+		}
 	}
 
 	@Test
@@ -166,7 +228,7 @@ class AuditUnidirectionalOneToManyJoinTableTest {
 	// ---- Entity classes ----
 
 	@Audited
-	@Entity(name = "JtOtmTeam")
+	@Entity(name = "Team")
 	static class Team {
 		@Id
 		long id;
@@ -184,7 +246,7 @@ class AuditUnidirectionalOneToManyJoinTableTest {
 	}
 
 	@Audited
-	@Entity(name = "JtOtmPlayer")
+	@Entity(name = "Player")
 	static class Player {
 		@Id
 		long id;

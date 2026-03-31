@@ -19,22 +19,16 @@ import org.hibernate.testing.orm.junit.Setting;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /**
  * Tests bidirectional @ManyToMany auditing.
- * <p>
  * The owning side's collection changes are tracked; the inverse (mappedBy) side
  * does NOT get extra MOD revisions for relationship changes.
- * <p>
- * Note: envers' {@code org.hibernate.envers.revision_on_collection_change} setting
- * (default: true) would write MOD rows for the inverse entity as well.
- * We don't replicate that behavior for now — it requires a work-unit buffering/merging
- * layer for deduplication that doesn't exist in core's audit coordinators.
- *
- * @see org.hibernate.orm.test.envers.integration.manytomany.BasicSet
  */
 @SessionFactory
 @DomainModel(annotatedClasses = {
@@ -147,13 +141,112 @@ class AuditBidirectionalManyToManyTest {
 		} );
 	}
 
-	// todo (envers-rewrite) : point-in-time read for bidirectional M2M collections
-	//  requires fixing the overarching collection read-side table reference resolution gap
+	@Test
+	void testPointInTimeRead(SessionFactoryScope scope) {
+		currentTxId = 100;
+
+		// REV 1: create entities
+		scope.inTransaction( session -> {
+			session.persist( new OwnedEntity( 10, "pit ed1" ) );
+			session.persist( new OwnedEntity( 11, "pit ed2" ) );
+			var ing = new OwningEntity( 12, "pit ing" );
+			ing.references.add( session.find( OwnedEntity.class, 10 ) );
+			session.persist( ing );
+		} );
+
+		// REV 2: add ed2
+		scope.inTransaction( session -> {
+			var ing = session.find( OwningEntity.class, 12 );
+			ing.references.add( session.find( OwnedEntity.class, 11 ) );
+		} );
+
+		// REV 3: remove ed1
+		scope.inTransaction( session -> {
+			var ing = session.find( OwningEntity.class, 12 );
+			ing.references.removeIf( e -> e.id == 10 );
+		} );
+
+		// At REV 1: 1 reference (ed1)
+		try ( var s = scope.getSessionFactory().withOptions()
+				.atTransaction( 101 ).openSession() ) {
+			var ing = s.find( OwningEntity.class, 12 );
+			assertNotNull( ing );
+			assertEquals( 1, ing.references.size(), "At REV 1, should have 1 reference" );
+		}
+
+		// At REV 2: 2 references
+		try ( var s = scope.getSessionFactory().withOptions()
+				.atTransaction( 102 ).openSession() ) {
+			var ing = s.find( OwningEntity.class, 12 );
+			assertNotNull( ing );
+			assertEquals( 2, ing.references.size(), "At REV 2, should have 2 references" );
+		}
+
+		// At REV 3: 1 reference (ed2 only)
+		try ( var s = scope.getSessionFactory().withOptions()
+				.atTransaction( 103 ).openSession() ) {
+			var ing = s.find( OwningEntity.class, 12 );
+			assertNotNull( ing );
+			assertEquals( 1, ing.references.size(), "At REV 3, should have 1 reference" );
+			assertEquals( "pit ed2", ing.references.iterator().next().data );
+		}
+	}
+
+	/**
+	 * Bulk recreation (clear + re-add): only diff audit rows should be written.
+	 */
+	@Test
+	void testPointInTimeReadAfterRecreate(SessionFactoryScope scope) {
+		currentTxId = 300;
+
+		// REV 1: ing with ed1 + ed2
+		scope.inTransaction( session -> {
+			session.persist( new OwnedEntity( 30, "rec ed1" ) );
+			session.persist( new OwnedEntity( 31, "rec ed2" ) );
+			var ing = new OwningEntity( 32, "rec ing" );
+			ing.references.add( session.find( OwnedEntity.class, 30 ) );
+			ing.references.add( session.find( OwnedEntity.class, 31 ) );
+			session.persist( ing );
+		} );
+
+		// REV 2: recreate — clear and re-add ed2 + new ed3
+		scope.inTransaction( session -> {
+			session.persist( new OwnedEntity( 33, "rec ed3" ) );
+			var ing = session.find( OwningEntity.class, 32 );
+			ing.references.clear();
+			ing.references.add( session.find( OwnedEntity.class, 31 ) );
+			ing.references.add( session.find( OwnedEntity.class, 33 ) );
+		} );
+
+		// Owning entity: ADD + recreate = 2 revisions (not more)
+		scope.inSession( session -> {
+			assertEquals( 2, session.getAuditLog().getRevisions( OwningEntity.class, 32 ).size(),
+					"Owning entity should have exactly 2 revisions (ADD + recreate)" );
+		} );
+
+		// At REV 1: 2 references
+		try ( var s = scope.getSessionFactory().withOptions()
+				.atTransaction( 301 ).openSession() ) {
+			var ing = s.find( OwningEntity.class, 32 );
+			assertNotNull( ing );
+			assertEquals( 2, ing.references.size(), "At REV 1, should have 2 references" );
+		}
+
+		// At REV 2: 2 references (ed2 + ed3 — ed1 dropped)
+		try ( var s = scope.getSessionFactory().withOptions()
+				.atTransaction( 302 ).openSession() ) {
+			var ing = s.find( OwningEntity.class, 32 );
+			assertNotNull( ing );
+			assertEquals( 2, ing.references.size(), "At REV 2, should have 2 references" );
+			var names = ing.references.stream().map( e -> e.data ).sorted().toList();
+			assertEquals( List.of( "rec ed2", "rec ed3" ), names );
+		}
+	}
 
 	// ---- Entity classes ----
 
 	@Audited
-	@Entity(name = "BiM2mOwning")
+	@Entity(name = "OwningEntity")
 	static class OwningEntity {
 		@Id
 		int id;
@@ -170,7 +263,7 @@ class AuditBidirectionalManyToManyTest {
 	}
 
 	@Audited
-	@Entity(name = "BiM2mOwned")
+	@Entity(name = "OwnedEntity")
 	static class OwnedEntity {
 		@Id
 		int id;

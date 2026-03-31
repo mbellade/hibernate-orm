@@ -266,18 +266,6 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 				explicitSourceAlias
 		);
 		if ( additionalPredicateCollectorAccess != null ) {
-			final var softDeleteMapping = getSoftDeleteMapping();
-			if ( softDeleteMapping != null ) {
-				final var tableReference =
-						tableGroup.resolveTableReference( getSoftDeleteTableDetails().getTableName() );
-				additionalPredicateCollectorAccess.get().accept(
-						softDeleteMapping.createNonDeletedRestriction(
-								tableReference,
-								creationState.getSqlExpressionResolver()
-						)
-				);
-			}
-
 			final var auxMapping = getAuxiliaryMapping();
 			if ( auxMapping != null ) {
 				auxMapping.applyPredicate(

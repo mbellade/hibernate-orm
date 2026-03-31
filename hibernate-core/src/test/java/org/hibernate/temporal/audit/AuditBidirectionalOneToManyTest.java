@@ -26,8 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /**
- * Tests for bidirectional @OneToMany (mapped-by a @ManyToOne on the child).
- * The owning side is the child's FK — no join table involved.
+ * Tests bidirectional @OneToMany (mappedBy) auditing.
  */
 @SessionFactory
 @DomainModel(annotatedClasses = {
@@ -51,10 +50,6 @@ class AuditBidirectionalOneToManyTest {
 		}
 	}
 
-	/**
-	 * Write side: verify that adding/removing children creates
-	 * audit rows for the child entity (owning side of the FK).
-	 */
 	@Test
 	void testWriteSide(SessionFactoryScope scope) {
 		currentTxId = 0;
@@ -101,10 +96,6 @@ class AuditBidirectionalOneToManyTest {
 		} );
 	}
 
-	/**
-	 * Read side: point-in-time reads should load the parent
-	 * with the correct children at each revision.
-	 */
 	@Test
 	void testPointInTimeRead(SessionFactoryScope scope) {
 		currentTxId = 100;
@@ -163,11 +154,6 @@ class AuditBidirectionalOneToManyTest {
 		}
 	}
 
-	/**
-	 * Historical read: getHistory() on the child entity should return
-	 * all revisions, and each snapshot should have the correct parent
-	 * association resolved at the right point in time.
-	 */
 	@Test
 	void testGetHistoryWithCollection(SessionFactoryScope scope) {
 		currentTxId = 200;
@@ -222,10 +208,105 @@ class AuditBidirectionalOneToManyTest {
 		} );
 	}
 
+	/**
+	 * Bulk recreation (clear + re-add): only diff audit rows should be written.
+	 */
+	@Test
+	void testPointInTimeReadAfterRecreate(SessionFactoryScope scope) {
+		currentTxId = 300;
+
+		// REV 1: parent with child A + B
+		scope.inTransaction( session -> {
+			var parent = new Parent( 30L, "Rec Parent" );
+			var childA = new Child( 30L, "Rec Child A", parent );
+			var childB = new Child( 31L, "Rec Child B", parent );
+			parent.children.add( childA );
+			parent.children.add( childB );
+			session.persist( parent );
+			session.persist( childA );
+			session.persist( childB );
+		} );
+
+		// REV 2: recreate — keep B, add C, drop A
+		scope.inTransaction( session -> {
+			var parent = session.find( Parent.class, 30L );
+			var childC = new Child( 32L, "Rec Child C", parent );
+			session.persist( childC );
+			// remove A
+			var childA = session.find( Child.class, 30L );
+			parent.children.remove( childA );
+			session.remove( childA );
+			// add C
+			parent.children.add( childC );
+		} );
+
+		// Parent is inverse side: only 1 revision (ADD, no collection-change MOD)
+		scope.inSession( session -> {
+			assertEquals( 1, session.getAuditLog().getRevisions( Parent.class, 30L ).size(),
+					"Parent should have exactly 1 revision (inverse side)" );
+		} );
+
+		// At REV 1: 2 children
+		try ( var s = scope.getSessionFactory().withOptions()
+				.atTransaction( 301 ).openSession() ) {
+			var parent = s.find( Parent.class, 30L );
+			assertNotNull( parent );
+			assertEquals( 2, parent.children.size(), "At REV 1, parent should have 2 children" );
+		}
+
+		// At REV 2: 2 children (B + C — A removed)
+		try ( var s = scope.getSessionFactory().withOptions()
+				.atTransaction( 302 ).openSession() ) {
+			var parent = s.find( Parent.class, 30L );
+			assertNotNull( parent );
+			assertEquals( 2, parent.children.size(), "At REV 2, parent should have 2 children" );
+			var names = parent.children.stream().map( c -> c.name ).sorted().toList();
+			assertEquals( List.of( "Rec Child B", "Rec Child C" ), names );
+		}
+	}
+
+	@Test
+	void testChildPropertyUpdate(SessionFactoryScope scope) {
+		currentTxId = 400;
+
+		// REV 1: parent + child A
+		scope.inTransaction( session -> {
+			var parent = new Parent( 40L, "Upd Parent" );
+			var child = new Child( 40L, "Upd Child A", parent );
+			parent.children.add( child );
+			session.persist( parent );
+			session.persist( child );
+		} );
+
+		// REV 2: update child name (no collection membership change)
+		scope.inTransaction( session -> {
+			session.find( Child.class, 40L ).name = "Upd Child A v2";
+		} );
+
+		// Child should have 2 revisions (ADD + MOD)
+		scope.inSession( session -> {
+			var auditLog = session.getAuditLog();
+			assertEquals( 2, auditLog.getRevisions( Child.class, 40L ).size(),
+					"Child should have 2 revisions (ADD + property update)" );
+			// Parent: still only 1 revision (inverse side, no collection change)
+			assertEquals( 1, auditLog.getRevisions( Parent.class, 40L ).size(),
+					"Parent should still have 1 revision" );
+		} );
+
+		// Point-in-time: child name should reflect the update
+		try ( var s = scope.getSessionFactory().withOptions()
+				.atTransaction( 402 ).openSession() ) {
+			var parent = s.find( Parent.class, 40L );
+			assertNotNull( parent );
+			assertEquals( 1, parent.children.size() );
+			assertEquals( "Upd Child A v2", parent.children.get( 0 ).name );
+		}
+	}
+
 	// ---- Entity classes ----
 
 	@Audited
-	@Entity(name = "BiOtmParent")
+	@Entity(name = "Parent")
 	static class Parent {
 		@Id
 		long id;
@@ -242,7 +323,7 @@ class AuditBidirectionalOneToManyTest {
 	}
 
 	@Audited
-	@Entity(name = "BiOtmChild")
+	@Entity(name = "Child")
 	static class Child {
 		@Id
 		long id;

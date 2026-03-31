@@ -271,7 +271,7 @@ class AuditToOneAssociationTest {
 				.atTransaction( AuditLog.ALL_REVISIONS ).openSession() ) {
 			final var rows = session.createSelectionQuery(
 					"select e, transactionId(e), modificationType(e)"
-							+ " from AuditBook e join fetch e.author"
+							+ " from Book e join fetch e.author"
 							+ " where e.id = :id"
 							+ " order by transactionId(e)",
 					Object[].class
@@ -307,7 +307,7 @@ class AuditToOneAssociationTest {
 				.atTransaction( AuditLog.ALL_REVISIONS ).openSession() ) {
 			final var rows = session.createSelectionQuery(
 					"select e, transactionId(e), modificationType(e)"
-							+ " from AuditBook e"
+							+ " from Book e"
 							+ " join fetch e.author a"
 							+ " join fetch a.publisher"
 							+ " where e.id = :id"
@@ -465,7 +465,7 @@ class AuditToOneAssociationTest {
 				.atTransaction( AuditLog.ALL_REVISIONS ).openSession() ) {
 			final var rows = session.createSelectionQuery(
 					"select e, transactionId(e), modificationType(e)"
-							+ " from AuditBook e left join fetch e.author"
+							+ " from Book e left join fetch e.author"
 							+ " where e.id = :id"
 							+ " order by transactionId(e)",
 					Object[].class
@@ -484,7 +484,7 @@ class AuditToOneAssociationTest {
 	// ---- Entity classes ----
 
 	@Audited
-	@Entity(name = "AuditPublisher")
+	@Entity(name = "Publisher")
 	static class Publisher {
 		@Id
 		long id;
@@ -507,7 +507,7 @@ class AuditToOneAssociationTest {
 	}
 
 	@Audited
-	@Entity(name = "AuditAuthor")
+	@Entity(name = "Author")
 	static class Author {
 		@Id
 		long id;
@@ -542,7 +542,7 @@ class AuditToOneAssociationTest {
 	}
 
 	@Audited
-	@Entity(name = "AuditBook")
+	@Entity(name = "Book")
 	static class Book {
 		@Id
 		long id;
@@ -576,7 +576,7 @@ class AuditToOneAssociationTest {
 	}
 
 	@Audited
-	@Entity(name = "AuditLazyBook")
+	@Entity(name = "LazyBook")
 	static class LazyBook {
 		@Id
 		long id;
