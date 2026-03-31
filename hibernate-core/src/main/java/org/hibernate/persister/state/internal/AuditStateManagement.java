@@ -4,8 +4,21 @@
  */
 package org.hibernate.persister.state.internal;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+import org.hibernate.audit.ModificationType;
 import org.hibernate.mapping.Collection;
 import org.hibernate.mapping.PersistentClass;
+import org.hibernate.mapping.RootClass;
+import org.hibernate.mapping.Stateful;
+import org.hibernate.mapping.Table;
+import org.hibernate.metamodel.mapping.JdbcMapping;
+import org.hibernate.metamodel.mapping.internal.SelectableMappingImpl;
+import org.hibernate.type.spi.TypeConfiguration;
+
+import static org.hibernate.boot.model.internal.AuditHelper.MODIFICATION_TYPE;
+import static org.hibernate.boot.model.internal.AuditHelper.TRANSACTION_ID;
 import org.hibernate.metamodel.mapping.AuditMapping;
 import org.hibernate.metamodel.mapping.PluralAttributeMapping;
 import org.hibernate.metamodel.mapping.internal.AuditMappingImpl;
@@ -150,14 +163,84 @@ public class AuditStateManagement implements StateManagement {
 			PersistentClass bootDescriptor,
 			MappingModelCreationProcess creationProcess) {
 		final var rootClass = bootDescriptor.getRootClass();
-		final var auditTable = bootDescriptor.getAuxiliaryTable() != null
-				? bootDescriptor.getAuxiliaryTable()
-				: rootClass.getAuxiliaryTable();
-		final String tableName = auditTable == null
-				? persister.getIdentifierTableName()
-				: ( (AbstractEntityPersister) persister )
-						.determineTableName( auditTable );
-		return new AuditMappingImpl( rootClass, tableName, creationProcess );
+		// Subclasses inherit the root's multi-table mapping
+		if ( bootDescriptor != rootClass ) {
+			final var superType = persister.getSuperMappingType();
+			return superType != null ? superType.getAuditMapping() : null;
+		}
+		final var aep = (AbstractEntityPersister) persister;
+		final var tableAuditInfoMap = buildTableAuditInfoMap( rootClass, aep, creationProcess );
+		return new AuditMappingImpl( tableAuditInfoMap, creationProcess );
+	}
+
+	private static Map<String, AuditMappingImpl.TableAuditInfo> buildTableAuditInfoMap(
+			RootClass rootClass,
+			AbstractEntityPersister persister,
+			MappingModelCreationProcess creationProcess) {
+		final var typeConfiguration = creationProcess.getCreationContext().getTypeConfiguration();
+		final var sessionFactory = creationProcess.getCreationContext().getSessionFactory();
+		final var txIdJdbcMapping = resolveJdbcMapping( typeConfiguration,
+				sessionFactory.getTransactionIdentifierService().getIdentifierType() );
+		final var modTypeJdbcMapping = resolveJdbcMapping( typeConfiguration, ModificationType.class );
+
+		final var map = new LinkedHashMap<String, AuditMappingImpl.TableAuditInfo>();
+		// Root table entry first
+		addTableAuditInfo( map, rootClass.getTable(), rootClass.getAuxiliaryTable(),
+				rootClass, persister, txIdJdbcMapping, modTypeJdbcMapping, creationProcess );
+		// Subclass table entries (JOINED / TABLE_PER_CLASS)
+		for ( var subclass : rootClass.getSubclasses() ) {
+			if ( subclass.getAuxiliaryTable() != null ) {
+				addTableAuditInfo( map, subclass.getTable(), subclass.getAuxiliaryTable(),
+						rootClass, persister, txIdJdbcMapping, modTypeJdbcMapping, creationProcess );
+			}
+		}
+		return map;
+	}
+
+	private static void addTableAuditInfo(
+			Map<String, AuditMappingImpl.TableAuditInfo> map,
+			Table originalTable,
+			Table auditTable,
+			Stateful auditable,
+			AbstractEntityPersister persister,
+			JdbcMapping txIdJdbcMapping,
+			JdbcMapping modTypeJdbcMapping,
+			MappingModelCreationProcess creationProcess) {
+		final String originalTableName = persister.determineTableName( originalTable );
+		final String auditTableName = persister.determineTableName( auditTable );
+		map.put( originalTableName, createTableAuditInfo(
+				auditTableName, auditable, txIdJdbcMapping, modTypeJdbcMapping, creationProcess ) );
+	}
+
+	private static AuditMappingImpl.TableAuditInfo createTableAuditInfo(
+			String auditTableName,
+			Stateful auditable,
+			JdbcMapping txIdJdbcMapping,
+			JdbcMapping modTypeJdbcMapping,
+			MappingModelCreationProcess creationProcess) {
+		final var creationContext = creationProcess.getCreationContext();
+		final var typeConfiguration = creationContext.getTypeConfiguration();
+		final var dialect = creationContext.getDialect();
+		final var sqmFunctionRegistry =
+				creationContext.getSessionFactory().getQueryEngine().getSqmFunctionRegistry();
+		return new AuditMappingImpl.TableAuditInfo(
+				auditTableName,
+				SelectableMappingImpl.from(
+						auditTableName, auditable.getAuxiliaryColumn( TRANSACTION_ID ),
+						txIdJdbcMapping, typeConfiguration, true, false, false,
+						dialect, sqmFunctionRegistry, creationContext
+				),
+				SelectableMappingImpl.from(
+						auditTableName, auditable.getAuxiliaryColumn( MODIFICATION_TYPE ),
+						modTypeJdbcMapping, typeConfiguration, true, false, false,
+						dialect, sqmFunctionRegistry, creationContext
+				)
+		);
+	}
+
+	private static JdbcMapping resolveJdbcMapping(TypeConfiguration typeConfiguration, Class<?> javaType) {
+		final var basicType = typeConfiguration.getBasicTypeForJavaType( javaType );
+		return basicType != null ? basicType : typeConfiguration.standardBasicTypeForJavaType( javaType );
 	}
 
 	@Override
@@ -171,8 +254,19 @@ public class AuditStateManagement implements StateManagement {
 			// the child entity's audit table handles FK auditing)
 			return null;
 		}
-		final String tableName = getTableIdentifierExpression( auditTable, creationProcess );
-		return new AuditMappingImpl( bootDescriptor, tableName, creationProcess );
+		final String originalTableName = getTableIdentifierExpression(
+				bootDescriptor.getCollectionTable(), creationProcess );
+		final String auditTableName = getTableIdentifierExpression( auditTable, creationProcess );
+		final var typeConfiguration = creationProcess.getCreationContext().getTypeConfiguration();
+		final var sessionFactory = creationProcess.getCreationContext().getSessionFactory();
+		final var txIdJdbcMapping = resolveJdbcMapping( typeConfiguration,
+				sessionFactory.getTransactionIdentifierService().getIdentifierType() );
+		final var modTypeJdbcMapping = resolveJdbcMapping( typeConfiguration, ModificationType.class );
+		return new AuditMappingImpl(
+				Map.of( originalTableName, createTableAuditInfo(
+						auditTableName, bootDescriptor,
+						txIdJdbcMapping, modTypeJdbcMapping, creationProcess ) ),
+				creationProcess );
 	}
 
 }

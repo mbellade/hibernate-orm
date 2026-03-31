@@ -14,10 +14,13 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 import org.hibernate.AssertionFailure;
+import org.hibernate.metamodel.mapping.AuditMapping;
+import org.hibernate.metamodel.mapping.AuxiliaryMapping;
 import org.hibernate.HibernateException;
 import org.hibernate.Internal;
 import org.hibernate.MappingException;
@@ -222,23 +225,29 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 		final boolean useAuxiliaryTable =
 				auxMapping != null
 						&& auxMapping.useAuxiliaryTable( loadQueryInfluencers );
-		final String tableName = useAuxiliaryTable
-				? auxMapping.getTableName()
-				: getTableName();
-		final String[] tableExpressions;
+		final String resolvedTableName;
+		final String[] resolvedTableExpressions;
 		if ( useAuxiliaryTable ) {
-			tableExpressions = Arrays.copyOf(
-					subclassTableExpressions,
-					subclassTableExpressions.length + 1
-			);
-			tableExpressions[subclassTableExpressions.length] = auxMapping.getTableName();
+			resolvedTableName = hasSubclasses()
+					? toAuditSubquery( subquery, auxMapping )
+					: auxMapping.resolveTableName( this.tableName );
+			// Include both original and audit table expressions for resolution
+			final var resolved = new ArrayList<String>( subclassTableExpressions.length * 2 );
+			for ( String expr : subclassTableExpressions ) {
+				resolved.add( expr );
+				if ( expr.charAt( 0 ) != '(' ) {
+					resolved.add( auxMapping.resolveTableName( expr ) );
+				}
+			}
+			resolvedTableExpressions = resolved.toArray( String[]::new );
 		}
 		else {
-			tableExpressions = subclassTableExpressions;
+			resolvedTableName = getTableName();
+			resolvedTableExpressions = subclassTableExpressions;
 		}
 		final var tableReference = new UnionTableReference(
-				tableName,
-				tableExpressions,
+				resolvedTableName,
+				resolvedTableExpressions,
 				SqlAliasBase.from(
 						sqlAliasBase,
 						null,
@@ -395,8 +404,10 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 		if ( tableReference == null ) {
 			throw new UnknownTableReferenceException( getRootTableName(), "Couldn't find table reference" );
 		}
-		// Replace the default union sub-query with a specially created one that only selects the tables for the treated entity names
-		tableReference.setPrunedTableExpression( generateSubquery( entityNameUses ) );
+		tableReference.setPrunedTableExpression( generateSubquery(
+				entityNameUses,
+				tableReference.getTableExpression()
+		) );
 	}
 
 	@Override
@@ -441,6 +452,35 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 	@Override
 	public int getTableSpan() {
 		return 1;
+	}
+
+	/**
+	 * Transform a union subselect to use audit table names and include
+	 * REV/REVTYPE columns in the SELECT list.
+	 */
+	private String toAuditSubquery(String subqueryExpr, AuxiliaryMapping auxMapping) {
+		// todo (envers-rewrite) : this is less than ideal; we should really have some special treatment
+		//  for union-subtypes in the aux mapping itself, or at least in the audited impl, so that when
+		//  we generate the audit tables map, we already return the correct (cached) subquery!
+		//  Also, we need to review how to apply the `select max(REV)` subquery accross multiple tables!
+		var result = subqueryExpr;
+		// Replace each table name after "from " with its audit equivalent
+		for ( String space : subclassSpaces ) {
+			final String auditName = auxMapping.resolveTableName( space );
+			// Table can be followed by ")" (last in union) or " " (before "union")
+			result = result.replace( " from " + space + ")", " from " + auditName + ")" );
+			result = result.replace( " from " + space + " ", " from " + auditName + " " );
+		}
+		// Add REV and REVTYPE columns to each SELECT in the union
+		if ( auxMapping instanceof AuditMapping auditMapping ) {
+			final String revCol = auditMapping.getTransactionIdMapping(
+					this.tableName ).getSelectionExpression();
+			final String revTypeCol = auditMapping.getModificationTypeMapping(
+					this.tableName ).getSelectionExpression();
+			result = result.replace( " as clazz_ from",
+					" as clazz_, " + revCol + ", " + revTypeCol + " from" );
+		}
+		return result;
 	}
 
 	@Override
@@ -509,9 +549,10 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 		);
 	}
 
-	protected String generateSubquery(Map<String, EntityNameUse> entityNameUses) {
+	protected String generateSubquery(Map<String, EntityNameUse> entityNameUses, String currentTableExpression) {
+		final var auxMapping = currentTableExpression.equals( getTableName() ) ? null : getAuxiliaryMapping();
 		if ( !hasSubclasses() ) {
-			return getTableName();
+			return currentTableExpression;
 		}
 
 		final var factory = getFactory();
@@ -541,7 +582,7 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 			}
 			if ( tablesToUnion.isEmpty() ) {
 				// If there are only projection or expression uses, we can't optimize anything
-				return getTableName();
+				return currentTableExpression;
 			}
 		}
 
@@ -585,7 +626,9 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 				}
 				unionSubquery.append( persister.getDiscriminatorSQLValue() )
 						.append( " as clazz_ from " )
-						.append( subclassTableName );
+						.append( auxMapping != null
+								? auxMapping.resolveTableName( subclassTableName )
+								: subclassTableName );
 			}
 		}
 		return unionSubquery.append( ")" ).toString();

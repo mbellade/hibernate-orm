@@ -357,8 +357,8 @@ See <<Custom Revision Entity Support>> section below.
 
 | W20
 | Entity inheritance (single-table, joined, table-per-class)
-| [yellow]#PARTIAL# — SINGLE_TABLE and TABLE_PER_CLASS write+read done.
-  JOINED write done (multi-table audit coordinator), read TODO (per-table temporal predicates).
+| [green]#DONE# — all three strategies: write + read. Multi-table `AuditMappingImpl` with per-table
+  `TableAuditInfo` map. TABLE_PER_CLASS deep hierarchy (3+ levels) has a MAX(REV) limitation.
 | High
 
 | W21
@@ -1321,13 +1321,10 @@ The following capabilities were verified with dedicated smoke tests (`AuditSmoke
 | [green]#WORKS#
 | Write + read verified. Per-concrete-class audit tables with union-subclass persister.
 
-| JOINED inheritance (write)
+| JOINED inheritance (write + read)
 | [green]#WORKS#
-| Multi-table audit coordinator with per-table attribute routing and cached `MutationOperationGroup`.
-
-| JOINED inheritance (read)
-| [red]#TODO#
-| Per-table temporal predicates on joined subclass table references not yet implemented.
+| Multi-table `AuditMappingImpl` with per-table `TableAuditInfo`. Per-table temporal predicates
+  on joined table references. ALL_REVISIONS REV correlation on joins.
 |===
 
 === Features Covered Differently
@@ -1369,9 +1366,15 @@ The following capabilities were verified with dedicated smoke tests (`AuditSmoke
 
 | G1
 | **Entity inheritance** (SINGLE_TABLE, JOINED, TABLE_PER_CLASS)
-| SINGLE_TABLE and TABLE_PER_CLASS: write + read [green]#DONE#.
-  JOINED: write [green]#DONE# (multi-table audit coordinator with per-table attribute routing);
-  read [red]#TODO# (per-table temporal predicates on joined subclass table references).
+| SINGLE_TABLE: write + read [green]#DONE#.
+  JOINED: write + read [green]#DONE# — multi-table `AuditMappingImpl` with per-table `TableAuditInfo`
+  map; per-table temporal predicates on joined subclass table references; ALL_REVISIONS REV
+  correlation on joined tables.
+  TABLE_PER_CLASS: write + read [green]#DONE# — audit-aware union subselects via `toAuditSubquery()`
+  in `UnionSubclassEntityPersister`; pruning resolves audit table names.
+  [yellow]#PARTIAL#: TABLE_PER_CLASS deep hierarchy (3+ levels) has a limitation — the MAX(REV)
+  subquery targets a single audit table instead of the full union (see TODO in
+  `UnionSubclassEntityPersister`).
 
 | G2
 | **OneToMany collection auditing**
@@ -1411,6 +1414,14 @@ The following capabilities were verified with dedicated smoke tests (`AuditSmoke
 | **Cross-type revision queries**
 | `AuditLog.getEntityTypesModifiedAt(txId)` — iterate all audited entity persisters for rows
   matching the given transaction ID.
+
+| G13
+| **`@SecondaryTable` auditing**
+| Entities mapped across multiple tables via `@SecondaryTable` need audit table support for
+  secondary tables. Write side must route secondary-table columns to the correct audit table;
+  read side must resolve secondary audit table references during temporal predicate application.
+  Related to JOINED inheritance (per-table audit tables) but distinct — `@SecondaryTable` can
+  appear on any inheritance strategy.
 |===
 
 === Remaining Gaps — Medium Priority
@@ -1552,8 +1563,12 @@ direct equivalents in core, but all need a clear migration path.
   (SINGLE_TABLE: remove predicate; HISTORY_TABLE: union current + history; NATIVE: `FOR SYSTEM_TIME ALL`)
   and using `row_start` as the `TemporalEntityKey` discriminator (assumed unique at sufficient precision).
   Deferred — see discussion on `row_start` uniqueness guarantees.
-* **JOINED inheritance read side**: Per-table temporal predicates on joined subclass table references.
-  Write side done (multi-table audit coordinator). SINGLE_TABLE and TABLE_PER_CLASS fully working.
+* [green]#RESOLVED#: **JOINED inheritance read side**: Multi-table `AuditMappingImpl` with per-table
+  `TableAuditInfo` map. Per-table temporal predicates on joined table references. ALL_REVISIONS
+  REV correlation. Subclass persisters inherit root's multi-table mapping via `AuditStateManagement`.
+* **TABLE_PER_CLASS deep hierarchy**: MAX(REV) subquery targets a single audit table instead of
+  the full union for 3+ level hierarchies. Needs audit-aware subquery generation in
+  `UnionSubclassEntityPersister`. Simple (2-level) TPC hierarchies work correctly.
 * **`REVISION_ON_COLLECTION_CHANGE`**: Investigated. Envers wrote MOD rows for inverse (mappedBy)
   entities when the owning side's collection changed, via `generateBidirectionalCollectionChangeWorkUnits()`
   in `BaseEnversEventListener`. This applied to both bidirectional `@OneToMany` and `@ManyToMany`.

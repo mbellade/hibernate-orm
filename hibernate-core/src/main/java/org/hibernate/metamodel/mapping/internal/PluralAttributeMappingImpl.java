@@ -1176,7 +1176,7 @@ public class PluralAttributeMappingImpl
 
 	private NamedTableReference collectionTableReference(SqlAstCreationState creationState, String tableName, String alias) {
 		return auxiliaryMapping != null && auxiliaryMapping.useAuxiliaryTable( creationState.getLoadQueryInfluencers() )
-				? new AuxiliaryTableReference( auxiliaryMapping.getTableName(), tableName, alias, true )
+				? new AuxiliaryTableReference( auxiliaryMapping.resolveTableName( tableName ), tableName, alias, true )
 				: new NamedTableReference( tableName, alias, true );
 	}
 

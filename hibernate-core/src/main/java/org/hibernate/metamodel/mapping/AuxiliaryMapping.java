@@ -14,6 +14,7 @@ import org.hibernate.sql.ast.tree.from.LazyTableGroup;
 import org.hibernate.sql.ast.tree.from.NamedTableReference;
 import org.hibernate.sql.ast.tree.from.TableGroup;
 import org.hibernate.sql.ast.tree.from.TableGroupJoin;
+import org.hibernate.sql.ast.tree.from.TableReferenceJoin;
 import org.hibernate.sql.ast.tree.predicate.Predicate;
 import org.hibernate.sql.model.ast.builder.MutationGroupBuilder;
 
@@ -30,9 +31,19 @@ import java.util.function.Supplier;
 @Incubating
 public interface AuxiliaryMapping {
 	/**
-	 * The name of the table to which this auxiliary mapping applies.
+	 * The name of the primary auxiliary table.
+	 * For multi-table strategies (e.g. audit), use {@link #resolveTableName(String)} to resolve per-table instead.
 	 */
 	String getTableName();
+
+	/**
+	 * Resolve the auxiliary table name for the given original table.
+	 * For multi-table inheritance or {@code @SecondaryTable}, each table
+	 * may have its own auxiliary table. Defaults to {@link #getTableName()}.
+	 */
+	default String resolveTableName(String originalTableName) {
+		return getTableName();
+	}
 
 	default void addToInsertGroup(MutationGroupBuilder insertGroupBuilder, EntityPersister persister) {}
 
@@ -64,6 +75,22 @@ public interface AuxiliaryMapping {
 			SqlAstCreationState creationState,
 			TableGroup tableGroup,
 			NamedTableReference rootTableReference, EntityMappingType entityMappingType);
+
+	/**
+	 * Apply the auxiliary restriction to a joined table reference.
+	 * Used for JOINED inheritance where each table in the hierarchy
+	 * has its own auxiliary table.
+	 *
+	 * @param originalTableName the original (non-auxiliary) table name
+	 */
+	default void applyPredicate(
+			TableReferenceJoin tableReferenceJoin,
+			NamedTableReference primaryTableReference,
+			String originalTableName,
+			EntityMappingType entityMappingType,
+			SqlAliasBaseGenerator sqlAliasBaseGenerator,
+			LoadQueryInfluencers influencers) {
+	}
 
 	JdbcMapping getJdbcMapping();
 

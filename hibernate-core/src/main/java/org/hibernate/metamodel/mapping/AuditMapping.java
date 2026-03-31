@@ -18,8 +18,14 @@ import org.hibernate.Incubating;
 @Incubating
 public interface AuditMapping extends AuxiliaryMapping {
 
-	SelectableMapping getTransactionIdMapping();
+	/**
+	 * Get the transaction ID selectable mapping for the given original table.
+	 */
+	SelectableMapping getTransactionIdMapping(String originalTableName);
 
-	SelectableMapping getModificationTypeMapping();
+	/**
+	 * Get the modification type selectable mapping for the given original table.
+	 */
+	SelectableMapping getModificationTypeMapping(String originalTableName);
 
 }

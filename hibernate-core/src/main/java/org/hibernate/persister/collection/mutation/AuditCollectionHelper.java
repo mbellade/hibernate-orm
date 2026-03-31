@@ -46,11 +46,13 @@ public final class AuditCollectionHelper {
 		this.indexColumnIsSettable = indexColumnIsSettable;
 		this.elementColumnIsSettable = elementColumnIsSettable;
 		this.indexIncrementer = indexIncrementer;
-		this.auditTableMapping =
-				new CollectionTableMapping( mutationTarget.getCollectionTableMapping(),
-						auditMapping.getTableName() );
-		this.transactionIdMapping = auditMapping.getTransactionIdMapping();
-		this.modificationTypeMapping = auditMapping.getModificationTypeMapping();
+		final String collectionTableName = mutationTarget.getCollectionTableMapping().getTableName();
+		this.auditTableMapping = new CollectionTableMapping(
+				mutationTarget.getCollectionTableMapping(),
+				auditMapping.resolveTableName( collectionTableName )
+		);
+		this.transactionIdMapping = auditMapping.getTransactionIdMapping( collectionTableName );
+		this.modificationTypeMapping = auditMapping.getModificationTypeMapping( collectionTableName );
 		this.useServerTransactionTimestamps =
 				sessionFactory.getTransactionIdentifierService().isDisabled();
 		this.currentTimestampFunctionName = useServerTransactionTimestamps

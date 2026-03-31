@@ -104,10 +104,12 @@ public abstract class AbstractEntityResultGraphNode extends AbstractFetchParent 
 		if ( !auditMapping.useAuxiliaryTable( influencers ) ) {
 			return null;
 		}
-		final var transactionIdMapping = auditMapping.getTransactionIdMapping();
+		final String originalTable = entityMappingType.getMappedTableDetails().getTableName();
+		final var transactionIdMapping = auditMapping.getTransactionIdMapping( originalTable );
 		final var sqlAstCreationState = creationState.getSqlAstCreationState();
 		final var expressionResolver = sqlAstCreationState.getSqlExpressionResolver();
-		final var tableReference = entityTableGroup.resolveTableReference( auditMapping.getTableName() );
+		final var tableReference = entityTableGroup.resolveTableReference(
+				auditMapping.resolveTableName( originalTable ) );
 		final var expression = expressionResolver.resolveSqlExpression( tableReference, transactionIdMapping );
 		final var sqlSelection = expressionResolver.resolveSqlSelection(
 				expression,

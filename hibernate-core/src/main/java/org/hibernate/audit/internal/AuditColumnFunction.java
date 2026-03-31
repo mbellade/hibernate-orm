@@ -176,13 +176,15 @@ public class AuditColumnFunction extends AbstractSqmFunctionDescriptor {
 				);
 			}
 
+			final String originalTable = entityMapping.getMappedTableDetails().getTableName();
 			final SelectableMapping selectableMapping = transactionId
-					? auditMapping.getTransactionIdMapping()
-					: auditMapping.getModificationTypeMapping();
+					? auditMapping.getTransactionIdMapping( originalTable )
+					: auditMapping.getModificationTypeMapping( originalTable );
 
 			final var tableReference = tableGroup.resolveTableReference(
 					entityPath.getNavigablePath(),
-					auditMapping.getTableName()
+					auditMapping.resolveTableName(
+							entityMapping.getMappedTableDetails().getTableName() )
 			);
 
 			final var columnReference =

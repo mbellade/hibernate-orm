@@ -1353,7 +1353,7 @@ public abstract class AbstractEntityPersister
 						&& auxiliaryMapping.useAuxiliaryTable( loadQueryInfluencers );
 		final String primaryTableName =
 				useAuxiliaryTable
-						? auxiliaryMapping.getTableName()
+						? auxiliaryMapping.resolveTableName( getTableName() )
 						: getTableName();
 		final String primaryAlias = sqlAliasBase.generateNewAlias();
 		final var tableReference =
@@ -2860,18 +2860,17 @@ public abstract class AbstractEntityPersister
 		final boolean useAuxiliaryTable =
 				auxiliaryMapping != null
 						&& auxiliaryMapping.useAuxiliaryTable( loadQueryInfluencers );
+		final String originalTableName = needsDiscriminator() ? getRootTableName() : getTableName();
 		final String rootTableName =
 				useAuxiliaryTable
-						? auxiliaryMapping.getTableName()
-						: needsDiscriminator() ? getRootTableName() : getTableName();
+						? auxiliaryMapping.resolveTableName( originalTableName )
+						: originalTableName;
 		final String rootAlias = sqlAliasBase.generateNewAlias();
 		final var rootTableReference =
 				useAuxiliaryTable
 						? new AuxiliaryTableReference(
 								rootTableName,
-								needsDiscriminator()
-										? getRootTableName()
-										: getTableName(),
+								originalTableName,
 								rootAlias
 						)
 						: new NamedTableReference( rootTableName, rootAlias );
@@ -2889,14 +2888,24 @@ public abstract class AbstractEntityPersister
 				(tableExpression, group) -> {
 					final var subclassTableNames = getSubclassTableNames();
 					for ( int i = 0; i < subclassTableNames.length; i++ ) {
-						if ( tableExpression.equals( subclassTableNames[ i ] ) ) {
-							final var joinedTableReference = new NamedTableReference(
-									tableExpression,
-									sqlAliasBase.generateNewAlias(),
-									isNullableSubclassTable( i )
-							);
+						if ( tableExpression.equals( subclassTableNames[i] ) ) {
+							final String auxiliaryTableName = useAuxiliaryTable
+									? auxiliaryMapping.resolveTableName( tableExpression )
+									: null;
+							final var joinedTableReference = auxiliaryTableName != null
+									? new AuxiliaryTableReference(
+											auxiliaryTableName,
+											tableExpression,
+											sqlAliasBase.generateNewAlias(),
+											isNullableSubclassTable( i )
+									)
+									: new NamedTableReference(
+											tableExpression,
+											sqlAliasBase.generateNewAlias(),
+											isNullableSubclassTable( i )
+									);
 							joinedTableReference.applyAuxiliaryTable( auxiliaryMapping, loadQueryInfluencers );
-							return new TableReferenceJoin(
+							final var tableReferenceJoin = new TableReferenceJoin(
 									shouldInnerJoinSubclassTable( i, emptySet() ),
 									joinedTableReference,
 									additionalPredicateCollector == null
@@ -2911,6 +2920,17 @@ public abstract class AbstractEntityPersister
 													creationState
 											)
 							);
+							if ( auxiliaryTableName != null ) {
+								auxiliaryMapping.applyPredicate(
+										tableReferenceJoin,
+										rootTableReference,
+										tableExpression,
+										AbstractEntityPersister.this,
+										creationState.getSqlAliasBaseGenerator(),
+										loadQueryInfluencers
+								);
+							}
+							return tableReferenceJoin;
 						}
 					}
 					return null;

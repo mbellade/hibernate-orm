@@ -16,12 +16,12 @@ import org.hibernate.engine.jdbc.mutation.group.PreparedStatementDetails;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.hibernate.engine.spi.SharedSessionContractImplementor;
 import org.hibernate.MappingException;
+import org.hibernate.metamodel.mapping.AuditMapping;
 import org.hibernate.generator.Generator;
 import org.hibernate.generator.OnExecutionGenerator;
 import org.hibernate.metamodel.mapping.AttributeMapping;
 import org.hibernate.metamodel.mapping.DiscriminatorValue;
 import org.hibernate.metamodel.mapping.PluralAttributeMapping;
-import org.hibernate.metamodel.mapping.SelectableMapping;
 import org.hibernate.persister.entity.EntityPersister;
 import org.hibernate.audit.ModificationType;
 import org.hibernate.sql.model.MutationOperationGroup;
@@ -42,10 +42,9 @@ import static org.hibernate.sql.model.internal.MutationOperationGroupFactory.sin
  * The static operation group is cached for reuse.
  */
 abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator {
+	private final AuditMapping auditMapping;
 	private final EntityTableMapping[] auditTableMappings;
 	protected final boolean[] auditedPropertyMask;
-	private final SelectableMapping transactionIdMapping;
-	private final SelectableMapping modificationTypeMapping;
 	protected final BasicBatchKey auditBatchKey;
 	private final boolean useServerTransactionTimestamps;
 	private final String currentTimestampFunctionName;
@@ -53,17 +52,15 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator {
 
 	protected AbstractAuditCoordinator(EntityPersister entityPersister, SessionFactoryImplementor factory) {
 		super( entityPersister, factory );
-		final var auditMapping = entityPersister.getAuditMapping();
+		this.auditMapping = entityPersister.getAuditMapping();
 		if ( auditMapping == null ) {
 			throw new MappingException( "No audit mapping available for " + entityPersister.getEntityName() );
 		}
-		this.auditTableMappings = buildAuditTableMappings( entityPersister, auditMapping.getTableName() );
+		this.auditTableMappings = buildAuditTableMappings( entityPersister, auditMapping );
 		this.auditedPropertyMask = new boolean[entityPersister.getPropertySpan()];
 		for ( int i = 0; i < this.auditedPropertyMask.length; i++ ) {
 			this.auditedPropertyMask[i] = !entityPersister.isPropertyAuditedExcluded( i );
 		}
-		this.transactionIdMapping = auditMapping.getTransactionIdMapping();
-		this.modificationTypeMapping = auditMapping.getModificationTypeMapping();
 		this.useServerTransactionTimestamps = factory.getTransactionIdentifierService().isDisabled();
 		this.currentTimestampFunctionName = useServerTransactionTimestamps ? dialect().currentTimestamp() : null;
 		this.auditBatchKey = new BasicBatchKey( entityPersister.getEntityName() + "#AUDIT_INSERT" );
@@ -72,7 +69,7 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator {
 				: buildAuditInsertGroup( applyAuditMask( entityPersister.getPropertyInsertability() ), null, null );
 	}
 
-	private EntityTableMapping[] buildAuditTableMappings(EntityPersister persister, String primaryAuditTableName) {
+	private EntityTableMapping[] buildAuditTableMappings(EntityPersister persister, AuditMapping auditMapping) {
 		final EntityTableMapping[] sourceMappings = persister.getTableMappings();
 		final EntityTableMapping[] result = new EntityTableMapping[sourceMappings.length];
 		for ( int i = 0; i < sourceMappings.length; i++ ) {
@@ -80,11 +77,7 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator {
 			if ( source.isInverse() ) {
 				continue;
 			}
-			// For single-table entities, use the provided audit table name.
-			// For multi-table (JOINED), derive from the source entity table name.
-			final String auditTableName = sourceMappings.length == 1
-					? primaryAuditTableName
-					: source.getTableName() + "_aud";
+			final String auditTableName = auditMapping.resolveTableName( source.getTableName() );
 			result[i] = createAuxiliaryTableMapping( source, persister, auditTableName );
 		}
 		return result;
@@ -156,7 +149,8 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator {
 					new TableInsertBuilderStandard( entityPersister(), auditTableMappings[i], factory() );
 
 			// Route attributes to this builder using the source table's attribute indexes
-			for ( final int attributeIndex : sourceMappings[i].getAttributeIndexes() ) {
+			final var sourceMapping = sourceMappings[i];
+			for ( final int attributeIndex : sourceMapping.getAttributeIndexes() ) {
 				final var attributeMapping = attributeMappings.get( attributeIndex );
 				if ( propertyInclusions[attributeIndex] ) {
 					attributeMapping.forEachInsertable( insertBuilder );
@@ -176,7 +170,7 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator {
 			}
 
 			// Discriminator belongs to the identifier table only
-			if ( sourceMappings[i].isIdentifierTable() ) {
+			if ( sourceMapping.isIdentifierTable() ) {
 				final var discriminatorMapping = entityPersister().getDiscriminatorMapping();
 				if ( discriminatorMapping != null && discriminatorMapping.hasPhysicalColumn()
 						&& entityPersister().getDiscriminatorValue() instanceof DiscriminatorValue.Literal ) {
@@ -188,16 +182,19 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator {
 			}
 
 			// Audit columns (on every audit table)
+			final var sourceTableName = sourceMapping.getTableName();
+			final var txIdMapping = auditMapping.getTransactionIdMapping( sourceTableName );
+			final var modTypeMapping = auditMapping.getModificationTypeMapping( sourceTableName );
 			if ( useServerTransactionTimestamps ) {
-				insertBuilder.addValueColumn( currentTimestampFunctionName, transactionIdMapping );
+				insertBuilder.addValueColumn( currentTimestampFunctionName, txIdMapping );
 			}
 			else {
-				insertBuilder.addValueColumn( "?", transactionIdMapping );
+				insertBuilder.addValueColumn( "?", txIdMapping );
 			}
-			insertBuilder.addValueColumn( "?", modificationTypeMapping );
+			insertBuilder.addValueColumn( "?", modTypeMapping );
 
 			// Key columns
-			sourceMappings[i].getKeyMapping().forEachKeyColumn( insertBuilder::addKeyColumn );
+			sourceMapping.getKeyMapping().forEachKeyColumn( insertBuilder::addKeyColumn );
 
 			mutations.add( insertBuilder.buildMutation() );
 		}
@@ -258,15 +255,18 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator {
 			}
 
 			// Audit columns
+			final String sourceTableName = sourceMappings[tableIndex].getTableName();
 			if ( !useServerTransactionTimestamps ) {
 				jdbcValueBindings.bindValue(
 						session.getCurrentTransactionIdentifier(), tableName,
-						transactionIdMapping.getSelectionExpression(), ParameterUsage.SET
+						auditMapping.getTransactionIdMapping( sourceTableName ).getSelectionExpression(),
+						ParameterUsage.SET
 				);
 			}
 			jdbcValueBindings.bindValue(
 					modificationType, tableName,
-					modificationTypeMapping.getSelectionExpression(), ParameterUsage.SET
+					auditMapping.getModificationTypeMapping( sourceTableName ).getSelectionExpression(),
+					ParameterUsage.SET
 			);
 		}
 	}
@@ -306,14 +306,6 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator {
 						: generator.getReferencedColumnValues( factory.getJdbcServices().getDialect() );
 		attributeMapping.forEachSelectable( (j, mapping) ->
 				insertBuilder.addValueColumn( writePropertyValue ? "?" : columnValues[j], mapping ) );
-	}
-
-	protected SelectableMapping getTransactionIdMapping() {
-		return transactionIdMapping;
-	}
-
-	protected SelectableMapping getModificationTypeMapping() {
-		return modificationTypeMapping;
 	}
 
 	private static boolean verifyOutcome(
