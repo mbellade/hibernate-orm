@@ -4,8 +4,10 @@
  */
 package org.hibernate.persister.state.internal;
 
-import java.util.LinkedHashMap;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 
 import org.hibernate.audit.ModificationType;
 import org.hibernate.mapping.Collection;
@@ -38,6 +40,7 @@ import org.hibernate.persister.collection.mutation.UpdateRowsCoordinatorAudit;
 import org.hibernate.persister.collection.mutation.UpdateRowsCoordinatorNoOp;
 import org.hibernate.persister.entity.AbstractEntityPersister;
 import org.hibernate.persister.entity.EntityPersister;
+import org.hibernate.persister.entity.UnionSubclassEntityPersister;
 import org.hibernate.persister.entity.mutation.DeleteCoordinator;
 import org.hibernate.persister.entity.mutation.DeleteCoordinatorAudit;
 import org.hibernate.persister.entity.mutation.InsertCoordinator;
@@ -183,18 +186,74 @@ public class AuditStateManagement implements StateManagement {
 				sessionFactory.getTransactionIdentifierService().getIdentifierType() );
 		final var modTypeJdbcMapping = resolveJdbcMapping( typeConfiguration, ModificationType.class );
 
-		final var map = new LinkedHashMap<String, AuditMappingImpl.TableAuditInfo>();
-		// Root table entry first
+		final var map = new HashMap<String, AuditMappingImpl.TableAuditInfo>();
+
+		// Root table entry
 		addTableAuditInfo( map, rootClass.getTable(), rootClass.getAuxiliaryTable(),
 				rootClass, persister, txIdJdbcMapping, modTypeJdbcMapping, creationProcess );
+
+		// For TABLE_PER_CLASS, prepare audit subquery generation context
+		// (the tableNameResolver lambda captures the map, so it resolves lazily)
+		final Function<String, String> tableNameResolver;
+		final List<String> extraColumns;
+		if ( persister instanceof UnionSubclassEntityPersister ) {
+			tableNameResolver = originalName -> {
+				final var info = map.get( originalName );
+				return info != null ? info.auditTableName() : originalName;
+			};
+			final var rootInfo = map.values().iterator().next();
+			extraColumns = List.of(
+					rootInfo.transactionIdMapping().getSelectionExpression(),
+					rootInfo.modificationTypeMapping().getSelectionExpression()
+			);
+		}
+		else {
+			tableNameResolver = null;
+			extraColumns = null;
+		}
+
 		// Subclass table entries (JOINED / TABLE_PER_CLASS)
 		for ( var subclass : rootClass.getSubclasses() ) {
 			if ( subclass.getAuxiliaryTable() != null ) {
 				addTableAuditInfo( map, subclass.getTable(), subclass.getAuxiliaryTable(),
 						rootClass, persister, txIdJdbcMapping, modTypeJdbcMapping, creationProcess );
 			}
+			// For TABLE_PER_CLASS intermediate classes, build audit subquery inline
+			// (getSubclasses() is depth-first, so subtypes' entries are already in the map)
+			if ( tableNameResolver != null && subclass.hasSubclasses() ) {
+				addAuditSubquery( map, subclass, tableNameResolver, extraColumns, creationProcess );
+			}
 		}
+
+		// Root's audit subquery (needs all subclass entries, so must come last)
+		if ( tableNameResolver != null && rootClass.hasSubclasses() ) {
+			addAuditSubquery( map, rootClass, tableNameResolver, extraColumns, creationProcess );
+		}
+
 		return map;
+	}
+
+	private static void addAuditSubquery(
+			Map<String, AuditMappingImpl.TableAuditInfo> map,
+			PersistentClass bootClass,
+			Function<String, String> tableNameResolver,
+			List<String> extraColumns,
+			MappingModelCreationProcess creationProcess) {
+		assert !bootClass.getSubclasses().isEmpty();
+		final var unionPersister = (UnionSubclassEntityPersister)
+				creationProcess.getEntityPersister( bootClass.getEntityName() );
+		final var rootInfo = map.values().iterator().next();
+		final String originalSubquery = unionPersister.getTableName();
+		final String auditSubquery = unionPersister.generateSubquery(
+				bootClass,
+				tableNameResolver,
+				extraColumns
+		);
+		map.put( originalSubquery, new AuditMappingImpl.TableAuditInfo(
+				auditSubquery,
+				rootInfo.transactionIdMapping(),
+				rootInfo.modificationTypeMapping()
+		) );
 	}
 
 	private static void addTableAuditInfo(

@@ -16,12 +16,12 @@ import java.util.Map;
 import java.util.Set;
 
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import org.hibernate.AssertionFailure;
-import org.hibernate.metamodel.mapping.AuditMapping;
-import org.hibernate.metamodel.mapping.AuxiliaryMapping;
 import org.hibernate.HibernateException;
+
 import org.hibernate.Internal;
 import org.hibernate.MappingException;
 import org.hibernate.cache.spi.access.EntityDataAccess;
@@ -225,24 +225,20 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 		final boolean useAuxiliaryTable =
 				auxMapping != null
 						&& auxMapping.useAuxiliaryTable( loadQueryInfluencers );
-		final String resolvedTableName;
+		final String resolvedTableName = useAuxiliaryTable
+				? auxMapping.resolveTableName( getTableName() )
+				: getTableName();
 		final String[] resolvedTableExpressions;
 		if ( useAuxiliaryTable ) {
-			resolvedTableName = hasSubclasses()
-					? toAuditSubquery( subquery, auxMapping )
-					: auxMapping.resolveTableName( this.tableName );
 			// Include both original and audit table expressions for resolution
 			final var resolved = new ArrayList<String>( subclassTableExpressions.length * 2 );
 			for ( String expr : subclassTableExpressions ) {
 				resolved.add( expr );
-				if ( expr.charAt( 0 ) != '(' ) {
-					resolved.add( auxMapping.resolveTableName( expr ) );
-				}
+				resolved.add( auxMapping.resolveTableName( expr ) );
 			}
 			resolvedTableExpressions = resolved.toArray( String[]::new );
 		}
 		else {
-			resolvedTableName = getTableName();
 			resolvedTableExpressions = subclassTableExpressions;
 		}
 		final var tableReference = new UnionTableReference(
@@ -454,34 +450,6 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 		return 1;
 	}
 
-	/**
-	 * Transform a union subselect to use audit table names and include
-	 * REV/REVTYPE columns in the SELECT list.
-	 */
-	private String toAuditSubquery(String subqueryExpr, AuxiliaryMapping auxMapping) {
-		// todo (envers-rewrite) : this is less than ideal; we should really have some special treatment
-		//  for union-subtypes in the aux mapping itself, or at least in the audited impl, so that when
-		//  we generate the audit tables map, we already return the correct (cached) subquery!
-		//  Also, we need to review how to apply the `select max(REV)` subquery accross multiple tables!
-		var result = subqueryExpr;
-		// Replace each table name after "from " with its audit equivalent
-		for ( String space : subclassSpaces ) {
-			final String auditName = auxMapping.resolveTableName( space );
-			// Table can be followed by ")" (last in union) or " " (before "union")
-			result = result.replace( " from " + space + ")", " from " + auditName + ")" );
-			result = result.replace( " from " + space + " ", " from " + auditName + " " );
-		}
-		// Add REV and REVTYPE columns to each SELECT in the union
-		if ( auxMapping instanceof AuditMapping auditMapping ) {
-			final String revCol = auditMapping.getTransactionIdMapping(
-					this.tableName ).getSelectionExpression();
-			final String revTypeCol = auditMapping.getModificationTypeMapping(
-					this.tableName ).getSelectionExpression();
-			result = result.replace( " as clazz_ from",
-					" as clazz_, " + revCol + ", " + revTypeCol + " from" );
-		}
-		return result;
-	}
 
 	@Override
 	protected int[] getPropertyTableNumbers() {
@@ -489,10 +457,26 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 	}
 
 	protected String generateSubquery(PersistentClass model) {
+		return generateSubquery( model, null, null );
+	}
+
+	/**
+	 * Generate a union subquery for the given model.
+	 *
+	 * @param tableNameResolver when non-null, resolves original table names to
+	 *                          alternative names (e.g. audit table names)
+	 * @param extraSelectExpressions additional column expressions to include in
+	 *                               each SELECT of the union (e.g. REV, REVTYPE)
+	 */
+	public String generateSubquery(
+			PersistentClass model,
+			Function<String, String> tableNameResolver,
+			List<String> extraSelectExpressions) {
 		final var factory = getFactory();
 		final var sqlStringGenerationContext = factory.getSqlStringGenerationContext();
 		if ( !model.hasSubclasses() ) {
-			return model.getTable().getQualifiedName( sqlStringGenerationContext );
+			final String qualifiedName = model.getTable().getQualifiedName( sqlStringGenerationContext );
+			return tableNameResolver != null ? tableNameResolver.apply( qualifiedName ) : qualifiedName;
 		}
 		else {
 			final Set<Column> columns = new LinkedHashSet<>();
@@ -525,9 +509,18 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 						subquery.append( column.getQuotedName( dialect ) )
 								.append( ", " );
 					}
+					if ( extraSelectExpressions != null ) {
+						for ( var expr : extraSelectExpressions ) {
+							subquery.append( expr ).append( ", " );
+						}
+					}
 					subquery.append( persistentClass.getSubclassId() )
-							.append( " as clazz_ from " )
-							.append( table.getQualifiedName( sqlStringGenerationContext ) );
+							.append( " as clazz_" );
+					final String qualifiedName = table.getQualifiedName( sqlStringGenerationContext );
+					subquery.append( " from " )
+							.append( tableNameResolver != null
+									? tableNameResolver.apply( qualifiedName )
+									: qualifiedName );
 				}
 			}
 			return subquery.append( ")" ).toString();
@@ -624,8 +617,14 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 					unionSubquery.append( selectable )
 							.append( ", " );
 				}
+				if ( auxMapping != null ) {
+					for ( var expr : auxMapping.getExtraSelectExpressions() ) {
+						unionSubquery.append( expr ).append( ", " );
+					}
+				}
 				unionSubquery.append( persister.getDiscriminatorSQLValue() )
-						.append( " as clazz_ from " )
+						.append( " as clazz_" );
+				unionSubquery.append( " from " )
 						.append( auxMapping != null
 								? auxMapping.resolveTableName( subclassTableName )
 								: subclassTableName );

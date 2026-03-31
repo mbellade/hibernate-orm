@@ -2,8 +2,10 @@
  * SPDX-License-Identifier: Apache-2.0
  * Copyright Red Hat Inc. and Hibernate Authors
  */
-package org.hibernate.temporal.audit;
+package org.hibernate.temporal.audit.inheritance;
 
+import jakarta.persistence.DiscriminatorColumn;
+import jakarta.persistence.DiscriminatorValue;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Inheritance;
@@ -17,7 +19,6 @@ import org.hibernate.testing.orm.junit.ServiceRegistry;
 import org.hibernate.testing.orm.junit.SessionFactory;
 import org.hibernate.testing.orm.junit.SessionFactoryScope;
 import org.hibernate.testing.orm.junit.Setting;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -25,19 +26,18 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
- * Tests @Audited with TABLE_PER_CLASS inheritance.
- * Each concrete class has its own table and audit table.
+ * Tests @Audited with SINGLE_TABLE inheritance.
  */
 @SessionFactory
 @DomainModel(annotatedClasses = {
-		AuditTablePerClassInheritanceTest.Vehicle.class,
-		AuditTablePerClassInheritanceTest.Car.class,
-		AuditTablePerClassInheritanceTest.SportsCar.class,
-		AuditTablePerClassInheritanceTest.Truck.class
+		AuditSingleTableInheritanceTest.Vehicle.class,
+		AuditSingleTableInheritanceTest.Car.class,
+		AuditSingleTableInheritanceTest.SportsCar.class,
+		AuditSingleTableInheritanceTest.Truck.class
 })
 @ServiceRegistry(settings = @Setting(name = StateManagementSettings.TRANSACTION_ID_SUPPLIER,
-		value = "org.hibernate.temporal.audit.AuditTablePerClassInheritanceTest$TxIdSupplier"))
-class AuditTablePerClassInheritanceTest {
+		value = "org.hibernate.temporal.audit.inheritance.AuditSingleTableInheritanceTest$TxIdSupplier"))
+class AuditSingleTableInheritanceTest {
 	private static int currentTxId;
 
 	public static class TxIdSupplier implements TransactionIdentifierSupplier<Integer> {
@@ -115,17 +115,21 @@ class AuditTablePerClassInheritanceTest {
 			assertEquals( 10.5, truck.payload );
 		}
 
-		// At REV 2: car updated — also test polymorphic find(Car.class)
+		// At REV 2: car updated, truck still exists — also test polymorphic find(Vehicle.class)
 		try ( var s = scope.getSessionFactory().withOptions().atTransaction( 102 ).openSession() ) {
 			var car = s.find( SportsCar.class, 10L );
 			assertNotNull( car );
 			assertEquals( "Sports Car", car.name );
 			assertEquals( 2, car.seatCount );
 
-			// Polymorphic lookup via Car (parent) — exercises union over Car_aud + SportsCar_aud
-			var carPolymorphic = s.find( Car.class, 10L );
-			assertNotNull( carPolymorphic );
-			assertEquals( "Sports Car", carPolymorphic.name );
+			// Polymorphic lookups via parent types
+			var carPoly = s.find( Car.class, 10L );
+			assertNotNull( carPoly );
+			assertEquals( "Sports Car", carPoly.name );
+
+			var vehicle = s.find( Vehicle.class, 10L );
+			assertNotNull( vehicle );
+			assertEquals( "Sports Car", vehicle.name );
 
 			assertNotNull( s.find( Truck.class, 11L ) );
 		}
@@ -159,20 +163,12 @@ class AuditTablePerClassInheritanceTest {
 			var history = session.getAuditLog().getHistory( SportsCar.class, 20L );
 			assertEquals( 3, history.size(), "Car should have 3 history entries (ADD + MOD + DEL)" );
 			assertEquals( "Sedan", history.get( 0 ).entity().name );
-			assertEquals( 5, history.get( 0 ).entity().seatCount );
 			assertEquals( "Sports Car", history.get( 1 ).entity().name );
-			assertEquals( 2, history.get( 1 ).entity().seatCount );
 			assertNotNull( history.get( 2 ).entity() );
 		} );
 	}
 
-	/**
-	 * Deep hierarchy: Car → SportsCar with polymorphic queries.
-	 * Disabled: the MAX(REV) subquery only targets a single audit table
-	 * instead of the full union — see TODO in UnionSubclassEntityPersister.
-	 */
 	@Test
-	@Disabled("TABLE_PER_CLASS deep hierarchy: MAX(REV) subquery across union tables")
 	void testDeepHierarchy(SessionFactoryScope scope) {
 		currentTxId = 300;
 
@@ -188,9 +184,8 @@ class AuditTablePerClassInheritanceTest {
 		} );
 
 		scope.inSession( session -> {
-			var auditLog = session.getAuditLog();
-			assertEquals( 1, auditLog.getRevisions( Car.class, 30L ).size() );
-			assertEquals( 2, auditLog.getRevisions( SportsCar.class, 31L ).size() );
+			assertEquals( 1, session.getAuditLog().getRevisions( Car.class, 30L ).size() );
+			assertEquals( 2, session.getAuditLog().getRevisions( SportsCar.class, 31L ).size() );
 		} );
 
 		// Polymorphic find(Car.class) at point-in-time
@@ -220,7 +215,9 @@ class AuditTablePerClassInheritanceTest {
 
 	@Audited
 	@Entity(name = "Vehicle")
-	@Inheritance(strategy = InheritanceType.TABLE_PER_CLASS)
+	@Inheritance(strategy = InheritanceType.SINGLE_TABLE)
+	@DiscriminatorColumn(name = "VEHICLE_TYPE")
+	@DiscriminatorValue("VEHICLE")
 	static class Vehicle {
 		@Id long id;
 		String name;
@@ -229,6 +226,7 @@ class AuditTablePerClassInheritanceTest {
 	}
 
 	@Entity(name = "Car")
+	@DiscriminatorValue("CAR")
 	static class Car extends Vehicle {
 		int seatCount;
 		Car() {}
@@ -236,6 +234,7 @@ class AuditTablePerClassInheritanceTest {
 	}
 
 	@Entity(name = "SportsCar")
+	@DiscriminatorValue("SPORTS_CAR")
 	static class SportsCar extends Car {
 		int horsepower;
 		SportsCar() {}
@@ -246,6 +245,7 @@ class AuditTablePerClassInheritanceTest {
 	}
 
 	@Entity(name = "Truck")
+	@DiscriminatorValue("TRUCK")
 	static class Truck extends Vehicle {
 		double payload;
 		Truck() {}

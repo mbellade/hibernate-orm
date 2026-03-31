@@ -18,6 +18,7 @@ import org.hibernate.sql.ast.tree.from.TableReferenceJoin;
 import org.hibernate.sql.ast.tree.predicate.Predicate;
 import org.hibernate.sql.model.ast.builder.MutationGroupBuilder;
 
+import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -90,6 +91,14 @@ public interface AuxiliaryMapping {
 			EntityMappingType entityMappingType,
 			SqlAliasBaseGenerator sqlAliasBaseGenerator,
 			LoadQueryInfluencers influencers) {
+	}
+
+	/**
+	 * Additional column expressions to include in each SELECT of a
+	 * TABLE_PER_CLASS union subquery (e.g. REV, REVTYPE for audit).
+	 */
+	default List<String> getExtraSelectExpressions() {
+		return List.of();
 	}
 
 	JdbcMapping getJdbcMapping();

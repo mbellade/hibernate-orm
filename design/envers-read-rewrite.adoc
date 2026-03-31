@@ -358,7 +358,7 @@ See <<Custom Revision Entity Support>> section below.
 | W20
 | Entity inheritance (single-table, joined, table-per-class)
 | [green]#DONE# — all three strategies: write + read. Multi-table `AuditMappingImpl` with per-table
-  `TableAuditInfo` map. TABLE_PER_CLASS deep hierarchy (3+ levels) has a MAX(REV) limitation.
+  `TableAuditInfo` map. TABLE_PER_CLASS deep hierarchy resolved via pre-built audit union subqueries.
 | High
 
 | W21
@@ -1370,11 +1370,12 @@ The following capabilities were verified with dedicated smoke tests (`AuditSmoke
   JOINED: write + read [green]#DONE# — multi-table `AuditMappingImpl` with per-table `TableAuditInfo`
   map; per-table temporal predicates on joined subclass table references; ALL_REVISIONS REV
   correlation on joined tables.
-  TABLE_PER_CLASS: write + read [green]#DONE# — audit-aware union subselects via `toAuditSubquery()`
-  in `UnionSubclassEntityPersister`; pruning resolves audit table names.
-  [yellow]#PARTIAL#: TABLE_PER_CLASS deep hierarchy (3+ levels) has a limitation — the MAX(REV)
-  subquery targets a single audit table instead of the full union (see TODO in
-  `UnionSubclassEntityPersister`).
+  TABLE_PER_CLASS: write + read [green]#DONE# — pre-built audit union subqueries stored in
+  `TableAuditInfo` map (keyed by original subquery); deep hierarchy MAX(REV) resolved by using
+  `getTableName()` (returns union subquery) for the MAX subquery's FROM table.
+  JOINED with discriminator column: [green]#DONE#.
+  Next verification: associations pointing to polymorphic entities (to-one / to-many across all
+  inheritance strategies).
 
 | G2
 | **OneToMany collection auditing**
@@ -1566,9 +1567,12 @@ direct equivalents in core, but all need a clear migration path.
 * [green]#RESOLVED#: **JOINED inheritance read side**: Multi-table `AuditMappingImpl` with per-table
   `TableAuditInfo` map. Per-table temporal predicates on joined table references. ALL_REVISIONS
   REV correlation. Subclass persisters inherit root's multi-table mapping via `AuditStateManagement`.
-* **TABLE_PER_CLASS deep hierarchy**: MAX(REV) subquery targets a single audit table instead of
-  the full union for 3+ level hierarchies. Needs audit-aware subquery generation in
-  `UnionSubclassEntityPersister`. Simple (2-level) TPC hierarchies work correctly.
+* [green]#RESOLVED#: **TABLE_PER_CLASS deep hierarchy**: Pre-built audit union subqueries stored in
+  `TableAuditInfo` map; MAX(REV) subquery uses `getTableName()` (returns union subquery for
+  persisters with subclasses) to span all audit tables. `toAuditSubquery()` eliminated.
+* **Associations to polymorphic entities**: Verify that to-one and to-many associations pointing
+  to entities with SINGLE_TABLE, JOINED, and TABLE_PER_CLASS inheritance work correctly in
+  point-in-time reads.
 * **`REVISION_ON_COLLECTION_CHANGE`**: Investigated. Envers wrote MOD rows for inverse (mappedBy)
   entities when the owning side's collection changed, via `generateBidirectionalCollectionChangeWorkUnits()`
   in `BaseEnversEventListener`. This applied to both bidirectional `@OneToMany` and `@ManyToMany`.

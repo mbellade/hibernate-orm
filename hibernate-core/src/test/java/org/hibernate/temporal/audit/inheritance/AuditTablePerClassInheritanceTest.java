@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  * Copyright Red Hat Inc. and Hibernate Authors
  */
-package org.hibernate.temporal.audit;
+package org.hibernate.temporal.audit.inheritance;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
@@ -24,20 +24,19 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
- * Tests @Audited with JOINED inheritance.
- * Each table in the hierarchy has its own audit table with per-table
- * temporal predicates.
+ * Tests @Audited with TABLE_PER_CLASS inheritance.
+ * Each concrete class has its own table and audit table.
  */
 @SessionFactory
 @DomainModel(annotatedClasses = {
-		AuditJoinedInheritanceTest.Vehicle.class,
-		AuditJoinedInheritanceTest.Car.class,
-		AuditJoinedInheritanceTest.SportsCar.class,
-		AuditJoinedInheritanceTest.Truck.class
+		AuditTablePerClassInheritanceTest.Vehicle.class,
+		AuditTablePerClassInheritanceTest.Car.class,
+		AuditTablePerClassInheritanceTest.SportsCar.class,
+		AuditTablePerClassInheritanceTest.Truck.class
 })
 @ServiceRegistry(settings = @Setting(name = StateManagementSettings.TRANSACTION_ID_SUPPLIER,
-		value = "org.hibernate.temporal.audit.AuditJoinedInheritanceTest$TxIdSupplier"))
-class AuditJoinedInheritanceTest {
+		value = "org.hibernate.temporal.audit.inheritance.AuditTablePerClassInheritanceTest$TxIdSupplier"))
+class AuditTablePerClassInheritanceTest {
 	private static int currentTxId;
 
 	public static class TxIdSupplier implements TransactionIdentifierSupplier<Integer> {
@@ -62,29 +61,24 @@ class AuditJoinedInheritanceTest {
 			session.persist( new Truck( 2L, "Hauler", 10.5 ) );
 		} );
 
-		// REV 2: update car (both root + subclass columns)
+		// REV 2: update car
 		scope.inTransaction( session -> {
 			var car = session.find( SportsCar.class, 1L );
 			car.name = "Sports Car";
 			car.seatCount = 2;
 		} );
 
-		// REV 3: update only root column on truck
+		// REV 3: delete truck
 		scope.inTransaction( session -> {
-			session.find( Truck.class, 2L ).name = "Big Hauler";
-		} );
-
-		// REV 4: delete car
-		scope.inTransaction( session -> {
-			session.remove( session.find( SportsCar.class, 1L ) );
+			session.remove( session.find( Truck.class, 2L ) );
 		} );
 
 		scope.inSession( session -> {
 			var auditLog = session.getAuditLog();
-			assertEquals( 3, auditLog.getRevisions( SportsCar.class, 1L ).size(),
-					"Car should have 3 revisions (ADD + MOD + DEL)" );
+			assertEquals( 2, auditLog.getRevisions( SportsCar.class, 1L ).size(),
+					"Car should have 2 revisions (ADD + MOD)" );
 			assertEquals( 2, auditLog.getRevisions( Truck.class, 2L ).size(),
-					"Truck should have 2 revisions (ADD + MOD)" );
+					"Truck should have 2 revisions (ADD + DEL)" );
 		} );
 	}
 
@@ -92,30 +86,22 @@ class AuditJoinedInheritanceTest {
 	void testPointInTimeRead(SessionFactoryScope scope) {
 		currentTxId = 100;
 
-		// REV 1: create car + truck
 		scope.inTransaction( session -> {
 			session.persist( new SportsCar( 10L, "Sedan", 5, 200 ) );
 			session.persist( new Truck( 11L, "Hauler", 10.5 ) );
 		} );
 
-		// REV 2: update car name + seatCount
 		scope.inTransaction( session -> {
 			var car = session.find( SportsCar.class, 10L );
 			car.name = "Sports Car";
 			car.seatCount = 2;
 		} );
 
-		// REV 3: update truck name only (root table column)
 		scope.inTransaction( session -> {
-			session.find( Truck.class, 11L ).name = "Big Hauler";
+			session.remove( session.find( Truck.class, 11L ) );
 		} );
 
-		// REV 4: delete car
-		scope.inTransaction( session -> {
-			session.remove( session.find( SportsCar.class, 10L ) );
-		} );
-
-		// At REV 1: original values
+		// At REV 1: both exist with original values
 		try ( var s = scope.getSessionFactory().withOptions().atTransaction( 101 ).openSession() ) {
 			var car = s.find( SportsCar.class, 10L );
 			assertNotNull( car );
@@ -128,39 +114,25 @@ class AuditJoinedInheritanceTest {
 			assertEquals( 10.5, truck.payload );
 		}
 
-		// At REV 2: car updated, truck unchanged — also test polymorphic lookups
+		// At REV 2: car updated — also test polymorphic find(Car.class)
 		try ( var s = scope.getSessionFactory().withOptions().atTransaction( 102 ).openSession() ) {
 			var car = s.find( SportsCar.class, 10L );
 			assertNotNull( car );
 			assertEquals( "Sports Car", car.name );
 			assertEquals( 2, car.seatCount );
 
-			// Polymorphic lookups via parent types
-			var carPoly = s.find( Car.class, 10L );
-			assertNotNull( carPoly );
-			assertEquals( "Sports Car", carPoly.name );
+			// Polymorphic lookup via Car (parent) — exercises union over Car_aud + SportsCar_aud
+			var carPolymorphic = s.find( Car.class, 10L );
+			assertNotNull( carPolymorphic );
+			assertEquals( "Sports Car", carPolymorphic.name );
 
-			var vehiclePoly = s.find( Vehicle.class, 10L );
-			assertNotNull( vehiclePoly );
-			assertEquals( "Sports Car", vehiclePoly.name );
-
-			var truck = s.find( Truck.class, 11L );
-			assertNotNull( truck );
-			assertEquals( "Hauler", truck.name );
-		}
-
-		// At REV 3: truck name updated
-		try ( var s = scope.getSessionFactory().withOptions().atTransaction( 103 ).openSession() ) {
-			var truck = s.find( Truck.class, 11L );
-			assertNotNull( truck );
-			assertEquals( "Big Hauler", truck.name );
-			assertEquals( 10.5, truck.payload );
-		}
-
-		// At REV 4: car deleted
-		try ( var s = scope.getSessionFactory().withOptions().atTransaction( 104 ).openSession() ) {
-			assertNull( s.find( SportsCar.class, 10L ) );
 			assertNotNull( s.find( Truck.class, 11L ) );
+		}
+
+		// At REV 3: truck deleted
+		try ( var s = scope.getSessionFactory().withOptions().atTransaction( 103 ).openSession() ) {
+			assertNotNull( s.find( SportsCar.class, 10L ) );
+			assertNull( s.find( Truck.class, 11L ) );
 		}
 	}
 
@@ -185,7 +157,6 @@ class AuditJoinedInheritanceTest {
 		scope.inSession( session -> {
 			var history = session.getAuditLog().getHistory( SportsCar.class, 20L );
 			assertEquals( 3, history.size(), "Car should have 3 history entries (ADD + MOD + DEL)" );
-			// Verify both root (name) and subclass (seatCount) columns at each revision
 			assertEquals( "Sedan", history.get( 0 ).entity().name );
 			assertEquals( 5, history.get( 0 ).entity().seatCount );
 			assertEquals( "Sports Car", history.get( 1 ).entity().name );
@@ -210,8 +181,9 @@ class AuditJoinedInheritanceTest {
 		} );
 
 		scope.inSession( session -> {
-			assertEquals( 1, session.getAuditLog().getRevisions( Car.class, 30L ).size() );
-			assertEquals( 2, session.getAuditLog().getRevisions( SportsCar.class, 31L ).size() );
+			var auditLog = session.getAuditLog();
+			assertEquals( 1, auditLog.getRevisions( Car.class, 30L ).size() );
+			assertEquals( 2, auditLog.getRevisions( SportsCar.class, 31L ).size() );
 		} );
 
 		// Polymorphic find(Car.class) at point-in-time
@@ -241,7 +213,7 @@ class AuditJoinedInheritanceTest {
 
 	@Audited
 	@Entity(name = "Vehicle")
-	@Inheritance(strategy = InheritanceType.JOINED)
+	@Inheritance(strategy = InheritanceType.TABLE_PER_CLASS)
 	static class Vehicle {
 		@Id long id;
 		String name;

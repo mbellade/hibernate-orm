@@ -133,6 +133,15 @@ public class AuditMappingImpl implements AuditMapping {
 	}
 
 	@Override
+	public List<String> getExtraSelectExpressions() {
+		final var anyInfo = tableAuditInfoMap.values().iterator().next();
+		return List.of(
+				anyInfo.transactionIdMapping.getSelectionExpression(),
+				anyInfo.modificationTypeMapping.getSelectionExpression()
+		);
+	}
+
+	@Override
 	public JdbcMapping getJdbcMapping() {
 		return jdbcMapping;
 	}
@@ -405,7 +414,7 @@ public class AuditMappingImpl implements AuditMapping {
 			NamedTableReference rootTableReference,
 			EntityMappingType entityMappingType) {
 		if ( hasTemporalPredicate( creationState.getLoadQueryInfluencers() ) ) {
-			final String originalTable = entityMappingType.getMappedTableDetails().getTableName();
+			final String originalTable = entityMappingType.getEntityPersister().getTableName();
 			predicateCollector.get().accept( createRestriction(
 					entityMappingType.getEntityPersister(),
 					rootTableReference,
