@@ -34,7 +34,6 @@ import org.hibernate.Incubating;
  * is required.
  *
  * @see RevisionEntity
- * @see RevisionEntitySupplier
  *
  * @author Marco Belladelli
  *

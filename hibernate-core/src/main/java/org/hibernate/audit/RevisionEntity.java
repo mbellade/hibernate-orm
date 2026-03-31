@@ -22,9 +22,9 @@ import org.hibernate.Incubating;
  * </ul>
  * <p>
  * When a class annotated with {@code @RevisionEntity} is found
- * in the domain model, a {@link RevisionEntitySupplier} is
- * automatically configured — no explicit
- * {@code hibernate.temporal.transaction_id_supplier} setting
+ * in the domain model, it's automatically configured as the
+ * {@link org.hibernate.temporal.spi.TransactionIdentifierSupplier},
+ * no {@code hibernate.temporal.transaction_id_supplier} setting
  * is required.
  * <p>
  * Only one entity may be annotated with {@code @RevisionEntity}.

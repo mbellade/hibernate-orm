@@ -12,11 +12,8 @@ import org.hibernate.Incubating;
  * <p>
  * The {@link #revision} field is:
  * <ul>
- *   <li>the revision entity instance (e.g.
- *       {@link DefaultRevisionEntity}) if a
- *       {@link RevisionEntitySupplier} is configured</li>
- *   <li>the plain transaction identifier (e.g.
- *       {@code Instant}, {@code Integer}) otherwise</li>
+ *   <li>the revision entity instance (e.g. {@link DefaultRevisionEntity}), if one is configured
+ *   <li>the plain transaction identifier (e.g. {@code Instant}, {@code Integer}) otherwise</li>
  * </ul>
  *
  * @param entity the entity snapshot at this revision
