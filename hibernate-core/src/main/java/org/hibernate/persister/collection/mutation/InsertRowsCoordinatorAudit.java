@@ -5,15 +5,18 @@
 package org.hibernate.persister.collection.mutation;
 
 import org.hibernate.audit.ModificationType;
+import org.hibernate.collection.spi.PersistentArrayHolder;
 import org.hibernate.collection.spi.PersistentCollection;
 import org.hibernate.engine.jdbc.batch.internal.BasicBatchKey;
 import org.hibernate.engine.jdbc.mutation.spi.MutationExecutorService;
+import org.hibernate.engine.spi.CollectionKey;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.hibernate.engine.spi.SharedSessionContractImplementor;
 import org.hibernate.persister.collection.CollectionPersister;
 import org.hibernate.sql.model.MutationOperationGroup;
 import org.hibernate.type.Type;
 
+import java.lang.reflect.Array;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -84,10 +87,30 @@ public class InsertRowsCoordinatorAudit implements InsertRowsCoordinator {
 
 		try {
 			final var bindings = getAuditHelper().getRowMutationHelper();
-			final var collectionEntry = session.getPersistenceContextInternal()
-					.getCollectionEntry( collection );
-			final boolean hasPriorDbState = collectionEntry != null
-					&& collectionEntry.getLoadedPersister() != null;
+			final var persistenceContext = session.getPersistenceContextInternal();
+			final var collectionEntry = persistenceContext.getCollectionEntry( collection );
+			final boolean hasPriorDbState;
+			final Object snapshot;
+			if ( collectionEntry != null && collectionEntry.getLoadedPersister() != null ) {
+				// Standard collections: snapshot from collection entry
+				hasPriorDbState = true;
+				snapshot = collection.getStoredSnapshot();
+			}
+			else if ( collection instanceof PersistentArrayHolder<?> ) {
+				// for arrays loadedPersister is always null because arrays are re-wrapped
+				// on every flush. Look up the old collection entry via CollectionKey
+				final var oldCollection = persistenceContext.getCollection( new CollectionKey(
+						collectionDescriptor,
+						id
+				) );
+				final var oldSnapshot = oldCollection != null ? oldCollection.getStoredSnapshot() : null;
+				hasPriorDbState = oldSnapshot != null;
+				snapshot = oldSnapshot;
+			}
+			else {
+				hasPriorDbState = false;
+				snapshot = null;
+			}
 
 			if ( !hasPriorDbState ) {
 				// New collection, write ADD for all entries
@@ -112,7 +135,7 @@ public class InsertRowsCoordinatorAudit implements InsertRowsCoordinator {
 			}
 			else {
 				// Existing collection, compute semantic diff
-				for ( var change : computeCollectionChanges( collection, collectionDescriptor ) ) {
+				for ( var change : computeCollectionChanges( collection, collectionDescriptor, snapshot ) ) {
 					bindings.bindInsertValues(
 							collection,
 							id,
@@ -144,13 +167,13 @@ public class InsertRowsCoordinatorAudit implements InsertRowsCoordinator {
 	 */
 	private List<AuditChange> computeCollectionChanges(
 			PersistentCollection<?> collection,
-			CollectionPersister collectionDescriptor) {
-		final Object snapshot = collection.getStoredSnapshot();
+			CollectionPersister collectionDescriptor,
+			Object snapshot) {
 		final Type elementType = collectionDescriptor.getElementType();
 		if ( collectionDescriptor.hasIndex() ) {
-			return snapshot instanceof Map<?,?> snapshotMap
-					? computeMapChanges( collection, collectionDescriptor, snapshotMap, elementType )
-					: computeListChanges( collection, collectionDescriptor, (List<?>) snapshot, elementType );
+			return snapshot instanceof Map<?, ?> ?
+					computeMapChanges( collection, collectionDescriptor, (Map<?, ?>) snapshot, elementType ) :
+					computeListChanges( collection, collectionDescriptor, snapshot, elementType );
 		}
 		else {
 			// Non-indexed (sets, bags): extract snapshot elements into a mutable list
@@ -204,19 +227,21 @@ public class InsertRowsCoordinatorAudit implements InsertRowsCoordinator {
 		return changes;
 	}
 
-	/** Diff for indexed lists: positional comparison against the snapshot. */
+	/** Diff for indexed lists and arrays: positional comparison against the snapshot. */
 	private List<AuditChange> computeListChanges(
 			PersistentCollection<?> collection,
 			CollectionPersister collectionDescriptor,
-			List<?> snapshot,
+			Object snapshot,
 			Type elementType) {
 		final List<AuditChange> changes = new ArrayList<>();
+		final List<?> snapshotList = snapshot instanceof List<?> list ? list : null;
+		final int snapshotSize = snapshotList != null ? snapshotList.size() : Array.getLength( snapshot );
 
 		final var entries = collection.entries( collectionDescriptor );
 		int i = 0;
 		while ( entries.hasNext() ) {
 			final Object current = collection.getElement( entries.next() );
-			final Object old = i < snapshot.size() ? snapshot.get( i ) : null;
+			final Object old = i < snapshotSize ? ( snapshotList != null ? snapshotList.get( i ) : Array.get( snapshot, i ) ) : null;
 			final boolean same = current != null && old != null && elementType.isSame( current, old );
 			if ( current != null && !same ) {
 				changes.add( new AuditChange( current, i, ModificationType.ADD ) );
@@ -228,8 +253,8 @@ public class InsertRowsCoordinatorAudit implements InsertRowsCoordinator {
 		}
 
 		// Snapshot positions beyond current size are all DELs
-		for ( ; i < snapshot.size(); i++ ) {
-			final Object old = snapshot.get( i );
+		for ( ; i < snapshotSize; i++ ) {
+			final Object old = snapshotList != null ? snapshotList.get( i ) : Array.get( snapshot, i );
 			if ( old != null ) {
 				changes.add( new AuditChange( old, i, ModificationType.DEL ) );
 			}

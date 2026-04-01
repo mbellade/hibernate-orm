@@ -40,7 +40,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DomainModel(annotatedClasses = {
 		AuditElementCollectionTest.ListEntity.class,
 		AuditElementCollectionTest.MapEntity.class,
-		AuditElementCollectionTest.EmbeddableSetEntity.class
+		AuditElementCollectionTest.EmbeddableSetEntity.class,
+		AuditElementCollectionTest.ArrayEntity.class
 })
 @ServiceRegistry(settings = @Setting(name = StateManagementSettings.TRANSACTION_ID_SUPPLIER,
 		value = "org.hibernate.temporal.audit.AuditElementCollectionTest$TxIdSupplier"))
@@ -228,6 +229,53 @@ class AuditElementCollectionTest {
 		} );
 	}
 
+	// ---- String array with @OrderColumn ----
+
+	@Test
+	void testStringArray(SessionFactoryScope scope) {
+		currentTxId = 300;
+
+		// REV 1: create with 2 elements
+		scope.inTransaction( session -> {
+			var e = new ArrayEntity( 1L );
+			e.strings = new String[] { "alpha", "beta" };
+			session.persist( e );
+		} );
+
+		// REV 2: replace element at index 0, add element
+		scope.inTransaction( session -> {
+			var e = session.find( ArrayEntity.class, 1L );
+			e.strings = new String[] { "gamma", "beta", "delta" };
+		} );
+
+		scope.inSession( session -> {
+			assertThat( session.getAuditLog().getRevisions( ArrayEntity.class, 1L ) ).hasSize( 2 );
+		} );
+
+		// At REV 1: [alpha, beta]
+		try ( var s = scope.getSessionFactory().withOptions().atTransaction( 301 ).openSession() ) {
+			var e = s.find( ArrayEntity.class, 1L );
+			assertThat( e ).isNotNull();
+			assertThat( e.strings ).containsExactly( "alpha", "beta" );
+		}
+
+		// At REV 2: [gamma, beta, delta]
+		try ( var s = scope.getSessionFactory().withOptions().atTransaction( 302 ).openSession() ) {
+			var e = s.find( ArrayEntity.class, 1L );
+			assertThat( e ).isNotNull();
+			assertThat( e.strings ).containsExactly( "gamma", "beta", "delta" );
+		}
+
+		// Verify diff: "beta" unchanged at index 1 -- no audit rows for it in REV 2.
+		scope.inSession( session -> {
+			var rev2Rows = session.createNativeQuery(
+					"select strings, strings_ORDER, REVTYPE from ArrayEntity_strings_aud"
+							+ " where REV = 302 order by strings_ORDER, REVTYPE", Tuple.class
+			).getResultList();
+			assertThat( rev2Rows ).noneMatch( row -> "beta".equals( row.get( "strings" ) ) );
+		} );
+	}
+
 	// ---- Entity classes ----
 
 	@Audited
@@ -260,6 +308,17 @@ class AuditElementCollectionTest {
 		Set<Component> components = new HashSet<>();
 		EmbeddableSetEntity() {}
 		EmbeddableSetEntity(long id) { this.id = id; }
+	}
+
+	@Audited
+	@Entity(name = "ArrayEntity")
+	static class ArrayEntity {
+		@Id long id;
+		@ElementCollection
+		@OrderColumn
+		String[] strings;
+		ArrayEntity() {}
+		ArrayEntity(long id) { this.id = id; }
 	}
 
 	@Embeddable

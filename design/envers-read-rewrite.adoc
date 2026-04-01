@@ -383,12 +383,13 @@ See <<Custom Revision Entity Support>> section below.
 
 | W25
 | Collection type support (bags, sets, lists, maps, sorted variants)
-| [yellow]#PARTIAL# — `Set<String>`, `List<String>` with `@OrderColumn`, `Map<String, String>`, and
-  `Set<Embeddable>` element collections tested. Semantic diff computes ADD/DEL matching envers
-  behavior (value updates produce DEL+ADD pairs, DEL rows store full entry data).
-  Array collections (`PersistentArrayHolder`) not supported (envers didn't support them either).
-  Identifier bags (`@CollectionId`) go through the unindexed path (should work, not tested).
-  Sorted collections (`@SortNatural`, `@SortComparator`) not yet verified.
+| [yellow]#PARTIAL# — `Set<String>`, `List<String>` with `@OrderColumn`, `Map<String, String>`,
+  `Set<Embeddable>`, and `String[]` array element collections tested. Semantic diff computes
+  ADD/DEL matching envers behavior (value updates produce DEL+ADD pairs, DEL rows store full
+  entry data). Array collections (`PersistentArrayHolder`) supported via `CollectionKey` lookup
+  for prior snapshot (envers rejected arrays entirely). Identifier bags (`@CollectionId`) go
+  through the unindexed path (should work, not tested). Sorted collections (`@SortNatural`,
+  `@SortComparator`) not yet verified.
 | High
 |===
 
