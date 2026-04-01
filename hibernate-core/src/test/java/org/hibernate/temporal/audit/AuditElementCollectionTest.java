@@ -12,6 +12,8 @@ import java.util.Map;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.SortedSet;
+import java.util.TreeSet;
 
 import jakarta.persistence.ElementCollection;
 import jakarta.persistence.Embeddable;
@@ -21,6 +23,7 @@ import jakarta.persistence.MapKeyColumn;
 import jakarta.persistence.OrderColumn;
 import jakarta.persistence.Tuple;
 import org.hibernate.annotations.Audited;
+import org.hibernate.annotations.SortNatural;
 import org.hibernate.cfg.StateManagementSettings;
 import org.hibernate.engine.spi.SharedSessionContractImplementor;
 import org.hibernate.temporal.spi.TransactionIdentifierSupplier;
@@ -41,7 +44,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 		AuditElementCollectionTest.ListEntity.class,
 		AuditElementCollectionTest.MapEntity.class,
 		AuditElementCollectionTest.EmbeddableSetEntity.class,
-		AuditElementCollectionTest.ArrayEntity.class
+		AuditElementCollectionTest.ArrayEntity.class,
+		AuditElementCollectionTest.SortedSetEntity.class
 })
 @ServiceRegistry(settings = @Setting(name = StateManagementSettings.TRANSACTION_ID_SUPPLIER,
 		value = "org.hibernate.temporal.audit.AuditElementCollectionTest$TxIdSupplier"))
@@ -276,6 +280,44 @@ class AuditElementCollectionTest {
 		} );
 	}
 
+	// ---- SortedSet<String> with @SortNatural ----
+
+	@Test
+	void testSortedSet(SessionFactoryScope scope) {
+		currentTxId = 400;
+
+		scope.inTransaction( session -> {
+			var e = new SortedSetEntity( 1L );
+			e.tags.add( "beta" );
+			e.tags.add( "alpha" );
+			session.persist( e );
+		} );
+
+		scope.inTransaction( session -> {
+			var e = session.find( SortedSetEntity.class, 1L );
+			e.tags.remove( "alpha" );
+			e.tags.add( "gamma" );
+		} );
+
+		scope.inSession( session -> {
+			assertThat( session.getAuditLog().getRevisions( SortedSetEntity.class, 1L ) ).hasSize( 2 );
+		} );
+
+		// At REV 1: {alpha, beta} (sorted)
+		try ( var s = scope.getSessionFactory().withOptions().atTransaction( 401 ).openSession() ) {
+			var e = s.find( SortedSetEntity.class, 1L );
+			assertThat( e ).isNotNull();
+			assertThat( e.tags ).containsExactly( "alpha", "beta" );
+		}
+
+		// At REV 2: {beta, gamma} (sorted)
+		try ( var s = scope.getSessionFactory().withOptions().atTransaction( 402 ).openSession() ) {
+			var e = s.find( SortedSetEntity.class, 1L );
+			assertThat( e ).isNotNull();
+			assertThat( e.tags ).containsExactly( "beta", "gamma" );
+		}
+	}
+
 	// ---- Entity classes ----
 
 	@Audited
@@ -319,6 +361,17 @@ class AuditElementCollectionTest {
 		String[] strings;
 		ArrayEntity() {}
 		ArrayEntity(long id) { this.id = id; }
+	}
+
+	@Audited
+	@Entity(name = "SortedSetEntity")
+	static class SortedSetEntity {
+		@Id long id;
+		@ElementCollection
+		@SortNatural
+		SortedSet<String> tags = new TreeSet<>();
+		SortedSetEntity() {}
+		SortedSetEntity(long id) { this.id = id; }
 	}
 
 	@Embeddable
