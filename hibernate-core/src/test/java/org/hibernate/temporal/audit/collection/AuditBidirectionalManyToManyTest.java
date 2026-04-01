@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  * Copyright Red Hat Inc. and Hibernate Authors
  */
-package org.hibernate.temporal.audit;
+package org.hibernate.temporal.audit.collection;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
@@ -36,7 +36,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 		AuditBidirectionalManyToManyTest.OwnedEntity.class
 })
 @ServiceRegistry(settings = @Setting(name = StateManagementSettings.TRANSACTION_ID_SUPPLIER,
-		value = "org.hibernate.temporal.audit.AuditBidirectionalManyToManyTest$TxIdSupplier"))
+		value = "org.hibernate.temporal.audit.collection.AuditBidirectionalManyToManyTest$TxIdSupplier"))
 class AuditBidirectionalManyToManyTest {
 	private static int currentTxId;
 

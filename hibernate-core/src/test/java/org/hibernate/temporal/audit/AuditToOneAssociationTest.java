@@ -8,6 +8,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToOne;
 import org.hibernate.annotations.Audited;
 import org.hibernate.audit.AuditLog;
 import org.hibernate.audit.ModificationType;
@@ -25,15 +26,16 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
- * Tests for @Audited behavior with entity associations.
- * Ordered from base cases to most complex scenarios.
+ * Tests @Audited with @ManyToOne and @OneToOne associations.
  */
 @SessionFactory
 @DomainModel(annotatedClasses = {
 		AuditToOneAssociationTest.Publisher.class,
 		AuditToOneAssociationTest.Author.class,
 		AuditToOneAssociationTest.Book.class,
-		AuditToOneAssociationTest.LazyBook.class
+		AuditToOneAssociationTest.LazyBook.class,
+		AuditToOneAssociationTest.Person.class,
+		AuditToOneAssociationTest.Passport.class
 })
 @ServiceRegistry(settings = @Setting(name = StateManagementSettings.TRANSACTION_ID_SUPPLIER,
 		value = "org.hibernate.temporal.audit.AuditToOneAssociationTest$TxIdSupplier"))
@@ -52,12 +54,6 @@ class AuditToOneAssociationTest {
 		}
 	}
 
-	// ---- 1. Write side ----
-
-	/**
-	 * Test ManyToOne write: verify FK value is stored in the audit table
-	 * and changes to the association are tracked across revisions.
-	 */
 	@Test
 	void testManyToOneWriteSide(SessionFactoryScope scope) {
 		currentTxId = 0;
@@ -84,12 +80,6 @@ class AuditToOneAssociationTest {
 		);
 	}
 
-	// ---- 2. Null association ----
-
-	/**
-	 * Test ManyToOne with null association: verify null FK is correctly
-	 * stored and read back from the audit table.
-	 */
 	@Test
 	void testManyToOneNullAssociation(SessionFactoryScope scope) {
 		currentTxId = 300;
@@ -104,12 +94,6 @@ class AuditToOneAssociationTest {
 		}
 	}
 
-	// ---- 3. Point-in-time reads (single level) ----
-
-	/**
-	 * Test ManyToOne read: verify point-in-time reads resolve
-	 * the associated entity at the correct historical state.
-	 */
 	@Test
 	void testManyToOnePointInTimeRead(SessionFactoryScope scope) {
 		currentTxId = 100;
@@ -148,8 +132,6 @@ class AuditToOneAssociationTest {
 		}
 	}
 
-	// ---- 4. Point-in-time reads (nested: Book → Author → Publisher) ----
-
 	@Test
 	void testNestedAssociationPointInTime(SessionFactoryScope scope) {
 		currentTxId = 700;
@@ -185,8 +167,6 @@ class AuditToOneAssociationTest {
 		}
 	}
 
-	// ---- 5. All-revisions via getHistory() (select-fetch, single level) ----
-
 	@Test
 	void testManyToOneAllRevisionsMode(SessionFactoryScope scope) {
 		currentTxId = 200;
@@ -215,8 +195,6 @@ class AuditToOneAssociationTest {
 			assertEquals( "Author V2", history.get( 1 ).entity().getAuthor().getName() );
 		} );
 	}
-
-	// ---- 6. All-revisions via getHistory() (select-fetch, nested) ----
 
 	@Test
 	void testNestedAssociationGetHistory(SessionFactoryScope scope) {
@@ -250,8 +228,6 @@ class AuditToOneAssociationTest {
 		} );
 	}
 
-	// ---- 7. Join-fetch in all-revisions mode (single level) ----
-
 	@Test
 	void testManyToOneJoinFetchAllRevisions(SessionFactoryScope scope) {
 		currentTxId = 500;
@@ -282,8 +258,6 @@ class AuditToOneAssociationTest {
 			assertEquals( "JF Author V2", ((Book) rows.get( 1 )[0]).getAuthor().getName() );
 		}
 	}
-
-	// ---- 8. Join-fetch in all-revisions mode (nested: Book → Author → Publisher) ----
 
 	@Test
 	void testNestedJoinFetchAllRevisions(SessionFactoryScope scope) {
@@ -329,8 +303,6 @@ class AuditToOneAssociationTest {
 		}
 	}
 
-	// ---- 9. Lazy proxy with temporal capture ----
-
 	@Test
 	void testLazyManyToOnePointInTimeRead(SessionFactoryScope scope) {
 		currentTxId = 400;
@@ -355,8 +327,6 @@ class AuditToOneAssociationTest {
 			assertEquals( "Lazy Author V2", s.find( LazyBook.class, 40L ).getAuthor().getName() );
 		}
 	}
-
-	// ---- 10. Lazy proxy with nested associations ----
 
 	@Test
 	void testLazyNestedPointInTimeRead(SessionFactoryScope scope) {
@@ -391,13 +361,6 @@ class AuditToOneAssociationTest {
 		}
 	}
 
-	// ---- 11. Null association in ALL_REVISIONS (getHistory) ----
-
-	/**
-	 * Root entity created with null association, then updated to set one.
-	 * getHistory() must return both revisions — the null-association one
-	 * must not be lost.
-	 */
 	@Test
 	void testNullAssociationInGetHistory(SessionFactoryScope scope) {
 		currentTxId = 1000;
@@ -438,13 +401,6 @@ class AuditToOneAssociationTest {
 		} );
 	}
 
-	// ---- 12. Join-fetch with null association in ALL_REVISIONS ----
-
-	/**
-	 * Verify that join-fetch in ALL_REVISIONS mode does not lose
-	 * root entity revisions where the association is null.
-	 * An inner join would incorrectly exclude those rows.
-	 */
 	@Test
 	void testJoinFetchNullAssociationAllRevisions(SessionFactoryScope scope) {
 		currentTxId = 1100;
@@ -479,6 +435,94 @@ class AuditToOneAssociationTest {
 			// REV 2: author set
 			assertEquals( "JF Late Author", ((Book) rows.get( 1 )[0]).getAuthor().getName() );
 		}
+	}
+
+	// ---- @OneToOne ----
+
+	@Test
+	void testOneToOneWriteSide(SessionFactoryScope scope) {
+		currentTxId = 1200;
+
+		scope.inTransaction( session -> {
+			var passport = new Passport( 120L, "AB123" );
+			session.persist( passport );
+			var person = new Person( 120L, "Alice" );
+			person.passport = passport;
+			session.persist( person );
+		} );
+
+		scope.inTransaction( session -> {
+			var passport2 = new Passport( 121L, "CD456" );
+			session.persist( passport2 );
+			session.find( Person.class, 120L ).passport = passport2;
+		} );
+
+		scope.inTransaction( session -> session.find( Person.class, 120L ).passport = null );
+
+		scope.inSession( session ->
+				assertEquals( 3, session.getAuditLog().getRevisions( Person.class, 120L ).size() ) );
+	}
+
+	@Test
+	void testOneToOnePointInTimeRead(SessionFactoryScope scope) {
+		currentTxId = 1300;
+
+		scope.inTransaction( session -> {
+			var passport = new Passport( 130L, "AB123" );
+			session.persist( passport );
+			var person = new Person( 130L, "Alice" );
+			person.passport = passport;
+			session.persist( person );
+		} );
+
+		scope.inTransaction( session -> {
+			var passport2 = new Passport( 131L, "CD456" );
+			session.persist( passport2 );
+			session.find( Person.class, 130L ).passport = passport2;
+		} );
+
+		scope.inTransaction( session -> session.find( Person.class, 130L ).passport = null );
+
+		try ( var s = scope.getSessionFactory().withStatelessOptions()
+				.atTransaction( 1301 ).openStatelessSession() ) {
+			assertEquals( "AB123", s.get( Person.class, 130L ).passport.number );
+		}
+
+		try ( var s = scope.getSessionFactory().withStatelessOptions()
+				.atTransaction( 1302 ).openStatelessSession() ) {
+			assertEquals( "CD456", s.get( Person.class, 130L ).passport.number );
+		}
+
+		try ( var s = scope.getSessionFactory().withStatelessOptions()
+				.atTransaction( 1303 ).openStatelessSession() ) {
+			assertNull( s.get( Person.class, 130L ).passport );
+		}
+	}
+
+	@Test
+	void testOneToOneGetHistory(SessionFactoryScope scope) {
+		currentTxId = 1400;
+
+		scope.inTransaction( session -> {
+			var passport = new Passport( 140L, "AB123" );
+			session.persist( passport );
+			var person = new Person( 140L, "Alice" );
+			person.passport = passport;
+			session.persist( person );
+		} );
+
+		scope.inTransaction( session -> {
+			var passport2 = new Passport( 141L, "CD456" );
+			session.persist( passport2 );
+			session.find( Person.class, 140L ).passport = passport2;
+		} );
+
+		scope.inSession( session -> {
+			var history = session.getAuditLog().getHistory( Person.class, 140L );
+			assertEquals( 2, history.size() );
+			assertEquals( "AB123", history.get( 0 ).entity().passport.number );
+			assertEquals( "CD456", history.get( 1 ).entity().passport.number );
+		} );
 	}
 
 	// ---- Entity classes ----
@@ -603,5 +647,24 @@ class AuditToOneAssociationTest {
 		Author getAuthor() {
 			return author;
 		}
+	}
+
+	@Audited
+	@Entity(name = "Person")
+	static class Person {
+		@Id long id;
+		String name;
+		@OneToOne Passport passport;
+		Person() {}
+		Person(long id, String name) { this.id = id; this.name = name; }
+	}
+
+	@Audited
+	@Entity(name = "Passport")
+	static class Passport {
+		@Id long id;
+		String number;
+		Passport() {}
+		Passport(long id, String number) { this.id = id; this.number = number; }
 	}
 }

@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  * Copyright Red Hat Inc. and Hibernate Authors
  */
-package org.hibernate.temporal.audit;
+package org.hibernate.temporal.audit.collection;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -48,7 +48,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 		AuditElementCollectionTest.SortedSetEntity.class
 })
 @ServiceRegistry(settings = @Setting(name = StateManagementSettings.TRANSACTION_ID_SUPPLIER,
-		value = "org.hibernate.temporal.audit.AuditElementCollectionTest$TxIdSupplier"))
+		value = "org.hibernate.temporal.audit.collection.AuditElementCollectionTest$TxIdSupplier"))
 class AuditElementCollectionTest {
 	private static int currentTxId;
 

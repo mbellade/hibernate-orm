@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  * Copyright Red Hat Inc. and Hibernate Authors
  */
-package org.hibernate.temporal.audit;
+package org.hibernate.temporal.audit.collection;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
@@ -34,7 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 		AuditUnidirectionalOneToManyJoinColumnTest.Employee.class
 })
 @ServiceRegistry(settings = @Setting(name = StateManagementSettings.TRANSACTION_ID_SUPPLIER,
-		value = "org.hibernate.temporal.audit.AuditUnidirectionalOneToManyJoinColumnTest$TxIdSupplier"))
+		value = "org.hibernate.temporal.audit.collection.AuditUnidirectionalOneToManyJoinColumnTest$TxIdSupplier"))
 class AuditUnidirectionalOneToManyJoinColumnTest {
 	private static int currentTxId;
 

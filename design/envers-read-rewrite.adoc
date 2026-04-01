@@ -1319,8 +1319,8 @@ The following capabilities were verified with dedicated smoke tests (`AuditSmoke
 | Version column included in audit table. Write + point-in-time read verified.
 
 | `@EmbeddedId` composite key
-| [red]#BROKEN#
-| Entity table not created properly. Needs investigation in boot model binding.
+| [green]#WORKS#
+| Was blocked by reserved keyword (`value`) in test entity. Composite IDs work out of the box.
 
 | SINGLE_TABLE inheritance
 | [green]#WORKS#
@@ -1418,7 +1418,8 @@ The following capabilities were verified with dedicated smoke tests (`AuditSmoke
 
 | G4
 | **`@EmbeddedId` / `@IdClass` composite keys**
-| Boot-time table creation fails for `@EmbeddedId` entities. Needs investigation.
+| [green]#DONE# -- was blocked by reserved keyword in test entity. `@EmbeddedId` works out of the box.
+  `@IdClass` not yet verified but expected to work similarly.
 
 | G5
 | **Cross-type revision queries**
@@ -1559,7 +1560,7 @@ direct equivalents in core, but all need a clear migration path.
 * [green]#RESOLVED#: **Relationship auditing** — ManyToOne fully tested (eager, lazy, nested).
   OneToOne (FK-based) verified. OneToMany/ManyToMany still TODO (see G2/G3).
 * [green]#RESOLVED#: **Embeddable auditing** — simple `@Embedded` works. Nested embeddables likely work.
-  `@EmbeddedId` broken (see G4).
+  `@EmbeddedId` works (was blocked by reserved keyword in test).
 * [green]#RESOLVED#: **`@Version` fields** — included in audit tables by default. Users can use
   `@Audited.Excluded`. Auto-exclusion is non-trivial (requires coordinating 3 layers).
 * [green]#RESOLVED#: **Audited associations** — work transparently via `TemporalEntityKey`,

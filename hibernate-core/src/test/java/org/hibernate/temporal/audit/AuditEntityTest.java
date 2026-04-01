@@ -5,6 +5,8 @@
 package org.hibernate.temporal.audit;
 
 import jakarta.persistence.ElementCollection;
+import jakarta.persistence.Embeddable;
+import jakarta.persistence.Embedded;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Version;
@@ -28,7 +30,10 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
 @SessionFactory
-@DomainModel(annotatedClasses = AuditEntityTest.AuditEntity.class)
+@DomainModel(annotatedClasses = {
+		AuditEntityTest.AuditEntity.class,
+		AuditEntityTest.EmbeddedEntity.class
+})
 @ServiceRegistry(settings = @Setting(name = StateManagementSettings.TRANSACTION_ID_SUPPLIER,
 		value = "org.hibernate.temporal.audit.AuditEntityTest$TxIdSupplier"))
 class AuditEntityTest {
@@ -119,6 +124,38 @@ class AuditEntityTest {
 			assertNull( result );
 		}
 	}
+	@Test
+	void testEmbeddedAuditing(SessionFactoryScope scope) {
+		currentTxId = 100;
+
+		scope.getSessionFactory().inTransaction( session -> {
+			var e = new EmbeddedEntity();
+			e.id = 1L;
+			e.name = "test";
+			e.address = new Address( "123 Main St", "Springfield" );
+			session.persist( e );
+		} );
+
+		scope.getSessionFactory().inTransaction( session -> {
+			var e = session.find( EmbeddedEntity.class, 1L );
+			e.address = new Address( "456 Oak Ave", "Shelbyville" );
+		} );
+
+		try ( var s = scope.getSessionFactory().withOptions().atTransaction( 101 ).open() ) {
+			var e = s.find( EmbeddedEntity.class, 1L );
+			assertEquals( "123 Main St", e.address.street );
+			assertEquals( "Springfield", e.address.city );
+		}
+
+		try ( var s = scope.getSessionFactory().withOptions().atTransaction( 102 ).open() ) {
+			var e = s.find( EmbeddedEntity.class, 1L );
+			assertEquals( "456 Oak Ave", e.address.street );
+			assertEquals( "Shelbyville", e.address.city );
+		}
+	}
+
+	// ---- Entity classes ----
+
 	@Audited
 	@Entity(name = "AuditEntity")
 	static class AuditEntity {
@@ -130,5 +167,21 @@ class AuditEntityTest {
 		@Audited
 		@ElementCollection
 		Set<String> stringSet = new HashSet<>();
+	}
+
+	@Audited
+	@Entity(name = "EmbeddedEntity")
+	static class EmbeddedEntity {
+		@Id long id;
+		String name;
+		@Embedded Address address;
+	}
+
+	@Embeddable
+	static class Address {
+		String street;
+		String city;
+		Address() {}
+		Address(String street, String city) { this.street = street; this.city = city; }
 	}
 }
