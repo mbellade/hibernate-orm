@@ -91,18 +91,7 @@ final class AuditCollectionRowMutationHelper {
 						0,
 						indexColumnIsSettable,
 						jdbcValueBindings,
-						(valueIndex, settable, bindings, jdbcValue, jdbcValueMapping) -> {
-							if ( settable[valueIndex]
-									&& auditTableName.equals( jdbcValueMapping.getContainingTableExpression() )
-									&& !jdbcValueMapping.isFormula() ) {
-								bindings.bindValue(
-										jdbcValue,
-										auditTableName,
-										jdbcValueMapping.getSelectionExpression(),
-										ParameterUsage.SET
-								);
-							}
-						},
+						this::bindSettableValue,
 						session
 				);
 			}
@@ -113,16 +102,7 @@ final class AuditCollectionRowMutationHelper {
 				0,
 				elementColumnIsSettable,
 				jdbcValueBindings,
-				(valueIndex, settable, bindings, jdbcValue, jdbcValueMapping) -> {
-					if ( settable[valueIndex] && !jdbcValueMapping.isFormula() ) {
-						bindings.bindValue(
-								jdbcValue,
-								auditTableName,
-								jdbcValueMapping.getSelectionExpression(),
-								ParameterUsage.SET
-						);
-					}
-				},
+				this::bindSettableValue,
 				session
 		);
 
@@ -145,18 +125,33 @@ final class AuditCollectionRowMutationHelper {
 
 	private void bindSetValue(
 			int valueIndex,
-			JdbcValueBindings jdbcValueBindings,
+			JdbcValueBindings bindings,
 			Object unused,
 			Object jdbcValue,
-			SelectableMapping selectableMapping) {
-		if ( selectableMapping.isFormula() ) {
-			return;
+			SelectableMapping mapping) {
+		if ( !mapping.isFormula() ) {
+			bindings.bindValue(
+					jdbcValue,
+					auditTableName,
+					mapping.getSelectionExpression(),
+					ParameterUsage.SET
+			);
 		}
-		jdbcValueBindings.bindValue(
-				jdbcValue,
-				auditTableName,
-				selectableMapping.getSelectionExpression(),
-				ParameterUsage.SET
-		);
+	}
+
+	private void bindSettableValue(
+			int valueIndex,
+			boolean[] settable,
+			JdbcValueBindings bindings,
+			Object jdbcValue,
+			SelectableMapping mapping) {
+		if ( settable[valueIndex] && !mapping.isFormula() ) {
+			bindings.bindValue(
+					jdbcValue,
+					auditTableName,
+					mapping.getSelectionExpression(),
+					ParameterUsage.SET
+			);
+		}
 	}
 }

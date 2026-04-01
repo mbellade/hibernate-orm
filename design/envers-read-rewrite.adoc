@@ -383,7 +383,12 @@ See <<Custom Revision Entity Support>> section below.
 
 | W25
 | Collection type support (bags, sets, lists, maps, sorted variants)
-| [yellow]#TODO# — only `Set<String>` ElementCollection tested; lists, maps, sorted variants need verification
+| [yellow]#PARTIAL# — `Set<String>`, `List<String>` with `@OrderColumn`, `Map<String, String>`, and
+  `Set<Embeddable>` element collections tested. Semantic diff computes ADD/DEL matching envers
+  behavior (value updates produce DEL+ADD pairs, DEL rows store full entry data).
+  Array collections (`PersistentArrayHolder`) not supported (envers didn't support them either).
+  Identifier bags (`@CollectionId`) go through the unindexed path (should work, not tested).
+  Sorted collections (`@SortNatural`, `@SortComparator`) not yet verified.
 | High
 |===
 
@@ -1023,9 +1028,12 @@ is impractical or impossible for many users.
 | Yes — defaults match
 
 | Primary key
-| Composite PK: `(entity_id, REV)`
-| No PK defined on audit table
-| Yes — existing PK is harmless, core reads work regardless
+| Composite PK: `(entity_id, REV)` for entities; `(REV, owner_id, element_cols...)` for collections
+| No PK defined on audit tables
+| Yes — existing PK is harmless, core reads work regardless.
+  *TODO*: core should create matching PKs and NOT NULL constraints for data integrity and
+  envers schema compatibility. Envers collection audit tables have NOT NULL on all element/key
+  columns (DEL rows store the full entry, not nulls). Verify and replicate constraints.
 
 | FK to REVINFO
 | `REV` → `REVINFO.REV` (always present)

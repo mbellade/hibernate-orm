@@ -101,7 +101,6 @@ public class AuditStateManagement implements StateManagement {
 			return new InsertRowsCoordinatorAudit(
 					mutationTarget,
 					StandardStateManagement.INSTANCE.createInsertRowsCoordinator( persister ),
-					mutationTarget.hasPhysicalIndexColumn(),
 					persister.getIndexColumnIsSettable(),
 					persister.getElementColumnIsSettable(),
 					persister.getIndexIncrementer(),
