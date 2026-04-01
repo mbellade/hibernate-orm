@@ -336,11 +336,11 @@ public class AuditMappingImpl implements AuditMapping {
 			NavigablePath navigablePath,
 			SqlAstCreationState creationState) {
 		final var influencers = creationState.getLoadQueryInfluencers();
-		final String originalTable = associatedEntityMappingType.getMappedTableDetails().getTableName();
-		final var info = resolveInfo( originalTable );
+		final var persister = associatedEntityMappingType.getEntityPersister();
+		final var info = resolveInfo( persister.getTableName() );
 		if ( hasTemporalPredicate( influencers ) ) {
 			predicateConsumer.accept( createRestriction(
-					associatedEntityMappingType.getEntityPersister(),
+					persister,
 					lazyTableGroup.resolveTableReference( navigablePath, info.auditTableName ),
 					collectEntityKeySelectables( associatedEntityMappingType ),
 					creationState.getSqlAliasBaseGenerator(),
@@ -351,11 +351,12 @@ public class AuditMappingImpl implements AuditMapping {
 			final var parentRevColumn = findParentRevColumn( navigablePath, creationState );
 			if ( parentRevColumn != null ) {
 				predicateConsumer.accept( createRestriction(
-						associatedEntityMappingType.getEntityPersister(),
+						persister,
 						lazyTableGroup.resolveTableReference( navigablePath, info.auditTableName ),
 						collectEntityKeySelectables( associatedEntityMappingType ),
 						creationState.getSqlAliasBaseGenerator(),
-						info, parentRevColumn
+						info,
+						parentRevColumn
 				) );
 			}
 		}
@@ -369,10 +370,10 @@ public class AuditMappingImpl implements AuditMapping {
 			SqlAliasBaseGenerator sqlAliasBaseGenerator,
 			LoadQueryInfluencers influencers) {
 		if ( hasTemporalPredicate( influencers ) ) {
-			final String originalTable = associatedEntityDescriptor.getMappedTableDetails().getTableName();
-			final var info = resolveInfo( originalTable );
+			final var persister = associatedEntityDescriptor.getEntityPersister();
+			final var info = resolveInfo( persister.getTableName() );
 			predicateConsumer.accept( createRestriction(
-					associatedEntityDescriptor.getEntityPersister(),
+					persister,
 					tableGroup.resolveTableReference( info.auditTableName ),
 					collectEntityKeySelectables( associatedEntityDescriptor ),
 					sqlAliasBaseGenerator,
