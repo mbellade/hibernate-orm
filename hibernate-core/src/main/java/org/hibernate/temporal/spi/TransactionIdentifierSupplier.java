@@ -5,7 +5,7 @@
 package org.hibernate.temporal.spi;
 
 import org.hibernate.Incubating;
-import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.SharedSessionContract;
 
 /**
  * A supplier of transaction identifiers for use with
@@ -45,13 +45,5 @@ public interface TransactionIdentifierSupplier<T> {
 	 * @return the transaction identifier, for example, the
 	 *         generated id of a persisted revision entity
 	 */
-	T getTransactionIdentifier(SharedSessionContractImplementor session);
-
-	/**
-	 * The Java type of the transaction identifiers produced
-	 * by this supplier.
-	 *
-	 * @return the identifier type, never null
-	 */
-	Class<T> getIdentifierType();
+	T getTransactionIdentifier(SharedSessionContract session);
 }

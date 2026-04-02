@@ -6,6 +6,7 @@ package org.hibernate.audit.spi;
 
 import org.checkerframework.checker.nullness.qual.Nullable;
 import org.hibernate.Incubating;
+import org.hibernate.SharedSessionContract;
 import org.hibernate.StatelessSession;
 import org.hibernate.audit.AuditException;
 import org.hibernate.audit.RevisionListener;
@@ -44,35 +45,26 @@ import java.util.Date;
  */
 @Incubating
 public class RevisionEntitySupplier<T> implements TransactionIdentifierSupplier<T> {
-	private final Class<T> identifierType;
 	private final Class<?> revisionEntityClass;
 	private final @Nullable RevisionListener listener;
 	private final String revisionNumberProperty;
 	private final String revisionTimestampProperty;
 
 	/**
-	 * @param identifierType the type of the {@link RevisionNumber @RevisionNumber} property
 	 * @param revisionEntityClass the revision entity class
-	 * @param listener optional callback for populating custom fields
 	 * @param revisionNumberProperty the name of the {@link RevisionNumber @RevisionNumber} property
 	 * @param revisionTimestampProperty the name of the {@link RevisionTimestamp @RevisionTimestamp} property
+	 * @param listener optional callback for populating custom fields
 	 */
 	public RevisionEntitySupplier(
-			Class<T> identifierType,
 			Class<?> revisionEntityClass,
 			String revisionNumberProperty,
 			String revisionTimestampProperty,
 			@Nullable RevisionListener listener) {
-		this.identifierType = identifierType;
 		this.revisionEntityClass = revisionEntityClass;
 		this.revisionNumberProperty = revisionNumberProperty;
 		this.revisionTimestampProperty = revisionTimestampProperty;
 		this.listener = listener;
-	}
-
-	@Override
-	public Class<T> getIdentifierType() {
-		return identifierType;
 	}
 
 	/**
@@ -84,15 +76,16 @@ public class RevisionEntitySupplier<T> implements TransactionIdentifierSupplier<
 
 	@Override
 	@SuppressWarnings("unchecked")
-	public T getTransactionIdentifier(SharedSessionContractImplementor session) {
-		final EntityPersister persister = session.getEntityPersister( revisionEntityClass.getName(), null );
-		final Object revisionEntity = persister.instantiate( null, session );
+	public T getTransactionIdentifier(SharedSessionContract session) {
+		final var sessionImpl = (SharedSessionContractImplementor) session;
+		final EntityPersister persister = sessionImpl.getEntityPersister( revisionEntityClass.getName(), null );
+		final Object revisionEntity = persister.instantiate( null, sessionImpl );
 		initializeRevisionEntity( revisionEntity, persister );
 		if ( listener != null ) {
 			listener.newRevision( revisionEntity );
 		}
 		persistRevisionEntity( session, revisionEntity );
-		return (T) readRevisionNumber( revisionEntity, persister, session );
+		return (T) readRevisionNumber( revisionEntity, persister, sessionImpl );
 	}
 
 	/**
@@ -168,7 +161,7 @@ public class RevisionEntitySupplier<T> implements TransactionIdentifierSupplier<
 	 * JDBC connection.
 	 */
 	private static void persistRevisionEntity(
-			SharedSessionContractImplementor session,
+			SharedSessionContract session,
 			Object revisionEntity) {
 		try (StatelessSession childSession = session.statelessWithOptions().connection().open()) {
 			childSession.insert( revisionEntity );

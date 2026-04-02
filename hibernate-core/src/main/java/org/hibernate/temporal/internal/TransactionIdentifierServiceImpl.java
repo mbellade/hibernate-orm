@@ -8,13 +8,16 @@ import java.time.Instant;
 
 import org.hibernate.HibernateException;
 import org.hibernate.MappingException;
+import org.hibernate.SharedSessionContract;
 import org.hibernate.boot.registry.selector.spi.StrategySelector;
 import org.hibernate.cfg.StateManagementSettings;
 import org.hibernate.engine.config.spi.ConfigurationService;
-import org.hibernate.engine.spi.SharedSessionContractImplementor;
 import org.hibernate.service.ServiceRegistry;
 import org.hibernate.temporal.spi.TransactionIdentifierService;
 import org.hibernate.temporal.spi.TransactionIdentifierSupplier;
+
+import static org.hibernate.internal.util.GenericsHelper.erasedType;
+import static org.hibernate.internal.util.GenericsHelper.supertypeInstantiation;
 
 import static org.hibernate.cfg.StateManagementSettings.TRANSACTION_ID_SUPPLIER;
 import static org.hibernate.cfg.StateManagementSettings.USE_SERVER_TRANSACTION_TIMESTAMPS;
@@ -32,10 +35,12 @@ import static org.hibernate.internal.util.config.ConfigurationHelper.getBoolean;
  *
  * @since 7.4
  */
-public class TransactionIdentifierServiceImpl implements TransactionIdentifierService {
+public class TransactionIdentifierServiceImpl
+		implements TransactionIdentifierService, TransactionIdentifierSupplier<Instant> {
 
-	private final boolean useServerTransactionTimestamps;
+	private Class<?> identifierValueType;
 	private TransactionIdentifierSupplier<?> identifierSupplier;
+	private final boolean useServerTransactionTimestamps;
 
 	public TransactionIdentifierServiceImpl(ServiceRegistry serviceRegistry) {
 		final var settings =
@@ -51,17 +56,25 @@ public class TransactionIdentifierServiceImpl implements TransactionIdentifierSe
 				);
 			}
 			identifierSupplier = null;
+			identifierValueType = Instant.class;
 		}
 		else {
 			identifierSupplier =
 					resolveSupplier( settings,
 							serviceRegistry.requireService( StrategySelector.class ) );
+			identifierValueType = resolveSuppliedType( supplierClass( identifierSupplier ) );
 		}
 	}
 
 	@Override
-	public void contributeIdentifierSupplier(TransactionIdentifierSupplier<?> supplier) {
+	public <T> void contributeIdentifierSupplier(TransactionIdentifierSupplier<T> supplier, Class<T> identifierType) {
 		this.identifierSupplier = supplier;
+		this.identifierValueType = identifierType;
+	}
+
+	@Override
+	public Instant getTransactionIdentifier(SharedSessionContract session) {
+		return Instant.now();
 	}
 
 	@Override
@@ -71,9 +84,7 @@ public class TransactionIdentifierServiceImpl implements TransactionIdentifierSe
 
 	@Override
 	public Class<?> getIdentifierType() {
-		return useServerTransactionTimestamps
-				? Instant.class
-				: identifierSupplier.getIdentifierType();
+		return identifierValueType;
 	}
 
 	@Override
@@ -86,12 +97,12 @@ public class TransactionIdentifierServiceImpl implements TransactionIdentifierSe
 		return useServerTransactionTimestamps;
 	}
 
-	private static TransactionIdentifierSupplier<?> resolveSupplier(
+	private TransactionIdentifierSupplier<?> resolveSupplier(
 			java.util.Map<String,Object> settings,
 			StrategySelector strategySelector) {
 		final Object setting = settings.get( TRANSACTION_ID_SUPPLIER );
 		if ( setting == null ) {
-			return DEFAULT_SUPPLIER;
+			return this;
 		}
 		else if ( setting instanceof TransactionIdentifierSupplier<?> supplier ) {
 			return supplier;
@@ -118,16 +129,20 @@ public class TransactionIdentifierServiceImpl implements TransactionIdentifierSe
 		}
 	}
 
-	private static final TransactionIdentifierSupplier<Instant> DEFAULT_SUPPLIER =
-			new TransactionIdentifierSupplier<>() {
-				@Override
-				public Instant getTransactionIdentifier(SharedSessionContractImplementor session) {
-					return Instant.now();
-				}
+	private static Class<?> resolveSuppliedType(Class<? extends TransactionIdentifierSupplier<?>> supplierClass) {
+		final var supplierInstantiation = supertypeInstantiation( TransactionIdentifierSupplier.class, supplierClass );
+		if ( supplierInstantiation == null ) {
+			return null;
+		}
+		else {
+			final var typeArguments = supplierInstantiation.getActualTypeArguments();
+			return typeArguments.length == 0 ? null : erasedType( typeArguments[0] );
+		}
+	}
 
-				@Override
-				public Class<Instant> getIdentifierType() {
-					return Instant.class;
-				}
-			};
+	@SuppressWarnings("unchecked")
+	private static Class<? extends TransactionIdentifierSupplier<?>> supplierClass(
+			TransactionIdentifierSupplier<?> supplier) {
+		return (Class<? extends TransactionIdentifierSupplier<?>>) supplier.getClass();
+	}
 }

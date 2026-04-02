@@ -11,7 +11,7 @@ import org.hibernate.audit.AuditEntry;
 import org.hibernate.audit.AuditLog;
 import org.hibernate.audit.ModificationType;
 import org.hibernate.cfg.StateManagementSettings;
-import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.SharedSessionContract;
 import org.hibernate.temporal.spi.TransactionIdentifierSupplier;
 import org.hibernate.testing.orm.junit.DomainModel;
 import org.hibernate.testing.orm.junit.ServiceRegistry;
@@ -34,14 +34,10 @@ class AuditColumnFunctionTest {
 
 	public static class TxIdSupplier implements TransactionIdentifierSupplier<Integer> {
 		@Override
-		public Integer getTransactionIdentifier(SharedSessionContractImplementor session) {
+		public Integer getTransactionIdentifier(SharedSessionContract session) {
 			return ++currentTxId;
 		}
 
-		@Override
-		public Class<Integer> getIdentifierType() {
-			return Integer.class;
-		}
 	}
 
 	@Test

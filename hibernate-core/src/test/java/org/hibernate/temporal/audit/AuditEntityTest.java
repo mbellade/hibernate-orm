@@ -19,7 +19,7 @@ import org.hibernate.testing.orm.junit.SessionFactoryScope;
 import org.hibernate.testing.orm.junit.Setting;
 import org.junit.jupiter.api.Test;
 
-import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.SharedSessionContract;
 import org.hibernate.temporal.spi.TransactionIdentifierSupplier;
 
 import java.util.HashSet;
@@ -41,14 +41,10 @@ class AuditEntityTest {
 
 	public static class TxIdSupplier implements TransactionIdentifierSupplier<Integer> {
 		@Override
-		public Integer getTransactionIdentifier(SharedSessionContractImplementor session) {
+		public Integer getTransactionIdentifier(SharedSessionContract session) {
 			return ++currentTxId;
 		}
 
-		@Override
-		public Class<Integer> getIdentifierType() {
-			return Integer.class;
-		}
 	}
 
 	@Test

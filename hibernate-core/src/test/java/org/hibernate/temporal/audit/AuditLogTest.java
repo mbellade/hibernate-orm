@@ -22,7 +22,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.TestMethodOrder;
 
-import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.SharedSessionContract;
 import org.hibernate.temporal.spi.TransactionIdentifierSupplier;
 
 import java.util.List;
@@ -50,14 +50,10 @@ class AuditLogTest {
 
 	public static class TxIdSupplier implements TransactionIdentifierSupplier<Integer> {
 		@Override
-		public Integer getTransactionIdentifier(SharedSessionContractImplementor session) {
+		public Integer getTransactionIdentifier(SharedSessionContract session) {
 			return ++currentTxId;
 		}
 
-		@Override
-		public Class<Integer> getIdentifierType() {
-			return Integer.class;
-		}
 	}
 
 	@Audited

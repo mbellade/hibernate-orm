@@ -73,7 +73,9 @@ public interface TransactionIdentifierService extends Service {
 	 * configuration.
 	 *
 	 * @param supplier the supplier to use
+	 * @param identifierType the Java type of transaction identifiers
+	 *        produced by the supplier
 	 */
-	default void contributeIdentifierSupplier(TransactionIdentifierSupplier<?> supplier) {
+	default <T> void contributeIdentifierSupplier(TransactionIdentifierSupplier<T> supplier, Class<T> identifierType) {
 	}
 }

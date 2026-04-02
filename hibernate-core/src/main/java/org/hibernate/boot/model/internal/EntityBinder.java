@@ -406,7 +406,7 @@ public class EntityBinder {
 		}
 
 		// Configure the transaction identifier service with a RevisionEntitySupplier
-		final Class<?> revNumberType = revisionNumberMember.getType().determineRawClass().toJavaClass();
+		final var revNumberType = revisionNumberMember.getType().determineRawClass().toJavaClass();
 		final var serviceRegistry = context.getBootstrapContext().getServiceRegistry();
 		final Class<? extends RevisionListener> listenerClass = revisionEntity.listener();
 		final RevisionListener listener;
@@ -419,13 +419,13 @@ public class EntityBinder {
 					.getBeanInstance();
 		}
 		final var supplier = new RevisionEntitySupplier<>(
-				revNumberType,
 				classDetails.toJavaClass(),
 				revisionNumberMember.getName(),
 				revisionTimestampMember.getName(),
 				listener
 		);
-		serviceRegistry.requireService( TransactionIdentifierService.class ).contributeIdentifierSupplier( supplier );
+		serviceRegistry.requireService( TransactionIdentifierService.class )
+				.contributeIdentifierSupplier( supplier, revNumberType );
 	}
 
 	private static void bindAudited(

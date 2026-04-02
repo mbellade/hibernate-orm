@@ -472,7 +472,7 @@ public interface TransactionIdentifierSupplier<T> {
      * @param session the current session (can be used to persist entities)
      * @return the transaction identifier (e.g. the generated ID of a revision entity)
      */
-    T getTransactionIdentifier(SharedSessionContractImplementor session);
+    T getTransactionIdentifier(SharedSessionContract session);
 }
 ----
 
@@ -494,7 +494,7 @@ public class RevisionInfo {
 
 public class RevisionInfoSupplier implements TransactionIdentifierSupplier<Long> {
     @Override
-    public Long getTransactionIdentifier(SharedSessionContractImplementor session) {
+    public Long getTransactionIdentifier(SharedSessionContract session) {
         var rev = new RevisionInfo();
         rev.setTimestamp(Instant.now());
         rev.setUsername(SecurityContext.getCurrentUser());
