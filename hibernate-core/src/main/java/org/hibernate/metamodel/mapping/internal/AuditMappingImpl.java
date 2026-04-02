@@ -209,18 +209,20 @@ public class AuditMappingImpl implements AuditMapping {
 		subPredicate.add( new ComparisonPredicate( transactionId, LESS_THAN_OR_EQUAL, upperBound ) );
 		subQuerySpec.applyPredicate( subPredicate );
 
-		// Main predicate: REV = (subquery) AND REVTYPE <> DEL
+		// Main predicate: REV = (subquery) AND REVTYPE <> DEL (when REVTYPE exists on this table)
 		final var auditPredicate = new Junction( Junction.Nature.CONJUNCTION );
 		auditPredicate.add( new ComparisonPredicate(
 				new ColumnReference( tableReference, info.transactionIdMapping ),
 				EQUAL,
 				new SelectStatement( subQuerySpec )
 		) );
-		auditPredicate.add( new ComparisonPredicate(
-				new ColumnReference( tableReference, info.modificationTypeMapping ),
-				NOT_EQUAL,
-				new JdbcLiteral<>( ModificationType.DEL, info.modificationTypeMapping.getJdbcMapping() )
-		) );
+		if ( info.modificationTypeMapping != null ) {
+			auditPredicate.add( new ComparisonPredicate(
+					new ColumnReference( tableReference, info.modificationTypeMapping ),
+					NOT_EQUAL,
+					new JdbcLiteral<>( ModificationType.DEL, info.modificationTypeMapping.getJdbcMapping() )
+			) );
+		}
 		return auditPredicate;
 	}
 
@@ -435,8 +437,7 @@ public class AuditMappingImpl implements AuditMapping {
 			SqlAliasBaseGenerator sqlAliasBaseGenerator,
 			LoadQueryInfluencers influencers) {
 		if ( influencers.getTemporalIdentifier() != null ) {
-			// Correlate REV between primary and joined tables, the MAX(REV)
-			// filter predicate itself must be applied on the root table group
+			// Correlate REV between primary and joined tables
 			final String primaryTable = entityMappingType.getMappedTableDetails().getTableName();
 			final var primaryInfo = resolveInfo( primaryTable );
 			final var joinedInfo = resolveInfo( originalTableName );
@@ -445,6 +446,14 @@ public class AuditMappingImpl implements AuditMapping {
 					EQUAL,
 					new ColumnReference( tableReferenceJoin.getJoinedTableReference(), joinedInfo.transactionIdMapping() )
 			) );
+			// If the joined table carries REVTYPE (i.e. the root table), apply the DEL filter
+			if ( joinedInfo.modificationTypeMapping() != null && hasTemporalPredicate( influencers ) ) {
+				tableReferenceJoin.applyPredicate( new ComparisonPredicate(
+						new ColumnReference( tableReferenceJoin.getJoinedTableReference(), joinedInfo.modificationTypeMapping() ),
+						NOT_EQUAL,
+						new JdbcLiteral<>( ModificationType.DEL, joinedInfo.modificationTypeMapping().getJdbcMapping() )
+				) );
+			}
 		}
 	}
 

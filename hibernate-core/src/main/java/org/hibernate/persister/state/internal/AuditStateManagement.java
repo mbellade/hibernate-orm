@@ -11,9 +11,9 @@ import java.util.function.Function;
 
 import org.hibernate.audit.ModificationType;
 import org.hibernate.mapping.Collection;
+import org.hibernate.mapping.AuxiliaryTableHolder;
 import org.hibernate.mapping.PersistentClass;
 import org.hibernate.mapping.RootClass;
-import org.hibernate.mapping.Stateful;
 import org.hibernate.mapping.Table;
 import org.hibernate.metamodel.mapping.JdbcMapping;
 import org.hibernate.metamodel.mapping.internal.SelectableMappingImpl;
@@ -196,10 +196,7 @@ public class AuditStateManagement implements StateManagement {
 		final Function<String, String> tableNameResolver;
 		final List<String> extraColumns;
 		if ( persister instanceof UnionSubclassEntityPersister ) {
-			tableNameResolver = originalName -> {
-				final var info = map.get( originalName );
-				return info != null ? info.auditTableName() : originalName;
-			};
+			tableNameResolver = originalName -> map.get( originalName ).auditTableName();
 			final var rootInfo = map.values().iterator().next();
 			extraColumns = List.of(
 					rootInfo.transactionIdMapping().getSelectionExpression(),
@@ -211,11 +208,19 @@ public class AuditStateManagement implements StateManagement {
 			extraColumns = null;
 		}
 
+		// Secondary table entries (@SecondaryTable joins)
+		for ( var join : rootClass.getJoins() ) {
+			if ( join.getAuxiliaryTable() != null ) {
+				addTableAuditInfo( map, join.getTable(), join.getAuxiliaryTable(),
+						join, persister, txIdJdbcMapping, modTypeJdbcMapping, creationProcess );
+			}
+		}
+
 		// Subclass table entries (JOINED / TABLE_PER_CLASS)
 		for ( var subclass : rootClass.getSubclasses() ) {
 			if ( subclass.getAuxiliaryTable() != null ) {
 				addTableAuditInfo( map, subclass.getTable(), subclass.getAuxiliaryTable(),
-						rootClass, persister, txIdJdbcMapping, modTypeJdbcMapping, creationProcess );
+						subclass, persister, txIdJdbcMapping, modTypeJdbcMapping, creationProcess );
 			}
 			// For TABLE_PER_CLASS intermediate classes, build audit subquery inline
 			// (getSubclasses() is depth-first, so subtypes' entries are already in the map)
@@ -259,7 +264,7 @@ public class AuditStateManagement implements StateManagement {
 			Map<String, AuditMappingImpl.TableAuditInfo> map,
 			Table originalTable,
 			Table auditTable,
-			Stateful auditable,
+			AuxiliaryTableHolder holder,
 			AbstractEntityPersister persister,
 			JdbcMapping txIdJdbcMapping,
 			JdbcMapping modTypeJdbcMapping,
@@ -267,12 +272,12 @@ public class AuditStateManagement implements StateManagement {
 		final String originalTableName = persister.determineTableName( originalTable );
 		final String auditTableName = persister.determineTableName( auditTable );
 		map.put( originalTableName, createTableAuditInfo(
-				auditTableName, auditable, txIdJdbcMapping, modTypeJdbcMapping, creationProcess ) );
+				auditTableName, holder, txIdJdbcMapping, modTypeJdbcMapping, creationProcess ) );
 	}
 
 	private static AuditMappingImpl.TableAuditInfo createTableAuditInfo(
 			String auditTableName,
-			Stateful auditable,
+			AuxiliaryTableHolder holder,
 			JdbcMapping txIdJdbcMapping,
 			JdbcMapping modTypeJdbcMapping,
 			MappingModelCreationProcess creationProcess) {
@@ -281,18 +286,21 @@ public class AuditStateManagement implements StateManagement {
 		final var dialect = creationContext.getDialect();
 		final var sqmFunctionRegistry =
 				creationContext.getSessionFactory().getQueryEngine().getSqmFunctionRegistry();
+		final var modTypeColumn = holder.getAuxiliaryColumn( MODIFICATION_TYPE );
 		return new AuditMappingImpl.TableAuditInfo(
 				auditTableName,
 				SelectableMappingImpl.from(
-						auditTableName, auditable.getAuxiliaryColumn( TRANSACTION_ID ),
+						auditTableName, holder.getAuxiliaryColumn( TRANSACTION_ID ),
 						txIdJdbcMapping, typeConfiguration, true, false, false,
 						dialect, sqmFunctionRegistry, creationContext
 				),
-				SelectableMappingImpl.from(
-						auditTableName, auditable.getAuxiliaryColumn( MODIFICATION_TYPE ),
-						modTypeJdbcMapping, typeConfiguration, true, false, false,
-						dialect, sqmFunctionRegistry, creationContext
-				)
+				modTypeColumn != null
+						? SelectableMappingImpl.from(
+								auditTableName, modTypeColumn,
+								modTypeJdbcMapping, typeConfiguration, true, false, false,
+								dialect, sqmFunctionRegistry, creationContext
+						)
+						: null
 		);
 	}
 

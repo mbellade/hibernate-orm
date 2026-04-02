@@ -4,6 +4,7 @@
  */
 package org.hibernate.metamodel.mapping;
 
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.hibernate.Incubating;
 
 /**
@@ -24,8 +25,9 @@ public interface AuditMapping extends AuxiliaryMapping {
 	SelectableMapping getTransactionIdMapping(String originalTableName);
 
 	/**
-	 * Get the modification type selectable mapping for the given original table.
+	 * Get the modification type selectable mapping for the given original table,
+	 * or {@code null} if the table does not carry a modification type column.
 	 */
-	SelectableMapping getModificationTypeMapping(String originalTableName);
+	@Nullable SelectableMapping getModificationTypeMapping(String originalTableName);
 
 }

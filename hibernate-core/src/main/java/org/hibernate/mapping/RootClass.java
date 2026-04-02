@@ -4,10 +4,8 @@
  */
 package org.hibernate.mapping;
 
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 import org.hibernate.MappingException;
@@ -57,7 +55,6 @@ public final class RootClass extends PersistentClass implements TableOwner, Soft
 
 	private Class<? extends StateManagement> stateManagementType;
 	private boolean partitioned;
-	private Map<String, Column> auxiliaryColumns;
 	private String auxiliaryColumnInPrimaryKey;
 	private boolean primaryKeyDisabled;
 
@@ -495,15 +492,4 @@ public final class RootClass extends PersistentClass implements TableOwner, Soft
 		return stateManagementType;
 	}
 
-	public Column getAuxiliaryColumn(String column) {
-		return auxiliaryColumns == null ? null
-				: auxiliaryColumns.get( column );
-	}
-
-	public void addAuxiliaryColumn(String name, Column column) {
-		if ( auxiliaryColumns == null ) {
-			auxiliaryColumns = new HashMap<>();
-		}
-		auxiliaryColumns.put( name, column );
-	}
 }

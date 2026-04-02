@@ -21,6 +21,7 @@ import org.hibernate.mapping.PersistentClass;
 import org.hibernate.mapping.RootClass;
 import org.hibernate.mapping.Stateful;
 import org.hibernate.mapping.Table;
+import org.hibernate.mapping.UnionSubclass;
 import org.hibernate.mapping.TableOwner;
 import org.hibernate.persister.state.internal.AuditStateManagement;
 import org.hibernate.temporal.spi.TransactionIdentifierService;
@@ -46,6 +47,7 @@ public final class AuditHelper {
 			RootClass rootClass,
 			MetadataBuildingContext context) {
 		bindAuditTable( audited, (Stateful) rootClass, context );
+		bindSecondaryAuditTables( audited, rootClass, context );
 		bindSubclassAuditTables( audited, rootClass, context );
 	}
 
@@ -103,6 +105,38 @@ public final class AuditHelper {
 		} );
 	}
 
+	private static void bindSecondaryAuditTables(
+			Audited audited,
+			RootClass rootClass,
+			MetadataBuildingContext context) {
+		final var collector = context.getMetadataCollector();
+		final String txIdColumnName = audited.transactionId();
+		final String modTypeColumnName = audited.modificationType();
+		collector.addSecondPass( (OptionalDeterminationSecondPass) ignored -> {
+			for ( var join : rootClass.getJoins() ) {
+				final var joinTable = join.getTable();
+				final var auditTable = collector.addTable(
+						joinTable.getSchema(),
+						joinTable.getCatalog(),
+						collector.getLogicalTableName( joinTable )
+								+ DEFAULT_TABLE_SUFFIX,
+						joinTable.getSubselect(),
+						joinTable.isAbstract(),
+						context,
+						joinTable.getNameIdentifier().isExplicit()
+				);
+				copyTableColumns( joinTable, auditTable, Set.of() );
+				final var transactionIdColumn =
+						createAuditColumn( txIdColumnName,
+								getTransactionIdType( context ), auditTable, context );
+				auditTable.addColumn( transactionIdColumn );
+				// Secondary tables only get tx-id, not mod type
+				join.setAuxiliaryTable( auditTable );
+				join.addAuxiliaryColumn( TRANSACTION_ID, transactionIdColumn );
+			}
+		} );
+	}
+
 	private static void bindSubclassAuditTables(
 			Audited audited,
 			RootClass rootClass,
@@ -129,11 +163,17 @@ public final class AuditHelper {
 					final var transactionIdColumn =
 							createAuditColumn( txIdColumnName,
 									getTransactionIdType( context ), subAuditTable, context );
-					final var modificationTypeColumn =
-							createAuditColumn( modTypeColumnName,
-									Byte.class, subAuditTable, context );
 					subAuditTable.addColumn( transactionIdColumn );
-					subAuditTable.addColumn( modificationTypeColumn );
+					subclass.addAuxiliaryColumn( TRANSACTION_ID, transactionIdColumn );
+					// TABLE_PER_CLASS: each table is self-contained, needs REVTYPE
+					// JOINED: REVTYPE only on root table (matches envers behavior)
+					if ( subclass instanceof UnionSubclass ) {
+						final var modificationTypeColumn =
+								createAuditColumn( modTypeColumnName,
+										Byte.class, subAuditTable, context );
+						subAuditTable.addColumn( modificationTypeColumn );
+						subclass.addAuxiliaryColumn( MODIFICATION_TYPE, modificationTypeColumn );
+					}
 					subclass.setAuxiliaryTable( subAuditTable );
 				}
 			}

@@ -176,15 +176,17 @@ public class AuditColumnFunction extends AbstractSqmFunctionDescriptor {
 				);
 			}
 
-			final String originalTable = entityMapping.getMappedTableDetails().getTableName();
+			// modificationType lives on the root (identifier) table, not subclass tables
+			final String originalTable = transactionId
+					? entityMapping.getMappedTableDetails().getTableName()
+					: entityMapping.getIdentifierTableDetails().getTableName();
 			final SelectableMapping selectableMapping = transactionId
 					? auditMapping.getTransactionIdMapping( originalTable )
 					: auditMapping.getModificationTypeMapping( originalTable );
 
 			final var tableReference = tableGroup.resolveTableReference(
 					entityPath.getNavigablePath(),
-					auditMapping.resolveTableName(
-							entityMapping.getMappedTableDetails().getTableName() )
+					originalTable
 			);
 
 			final var columnReference =

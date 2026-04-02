@@ -368,7 +368,8 @@ See <<Custom Revision Entity Support>> section below.
 
 | W22
 | `@SecondaryAuditTable` (audit for `@SecondaryTable`)
-| [red]#TODO#
+| [green]#DONE# — `@SecondaryTable` audit tables auto-created with `_aud` suffix.
+  Custom naming via `@SecondaryAuditTable` not yet supported.
 | Low
 
 | W23
@@ -1428,11 +1429,11 @@ The following capabilities were verified with dedicated smoke tests (`AuditSmoke
 
 | G13
 | **`@SecondaryTable` auditing**
-| Entities mapped across multiple tables via `@SecondaryTable` need audit table support for
-  secondary tables. Write side must route secondary-table columns to the correct audit table;
-  read side must resolve secondary audit table references during temporal predicate application.
-  Related to JOINED inheritance (per-table audit tables) but distinct — `@SecondaryTable` can
-  appear on any inheritance strategy.
+| [green]#DONE# — Secondary tables get their own audit table with REV column (no REVTYPE,
+  matching envers). `AuxiliaryTableHolder` extracted from `Stateful` to provide uniform
+  auxiliary table + column storage for `PersistentClass`, `Join`, and `Collection`.
+  REVTYPE placement aligned with envers: root only for JOINED and secondary tables,
+  every table for TABLE_PER_CLASS.
 |===
 
 === Remaining Gaps — Medium Priority

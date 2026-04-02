@@ -191,7 +191,9 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator {
 			else {
 				insertBuilder.addValueColumn( "?", txIdMapping );
 			}
-			insertBuilder.addValueColumn( "?", modTypeMapping );
+			if ( modTypeMapping != null ) {
+				insertBuilder.addValueColumn( "?", modTypeMapping );
+			}
 
 			// Key columns
 			sourceMapping.getKeyMapping().forEachKeyColumn( insertBuilder::addKeyColumn );
@@ -258,16 +260,21 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator {
 			final String sourceTableName = sourceMappings[tableIndex].getTableName();
 			if ( !useServerTransactionTimestamps ) {
 				jdbcValueBindings.bindValue(
-						session.getCurrentTransactionIdentifier(), tableName,
+						session.getCurrentTransactionIdentifier(),
+						tableName,
 						auditMapping.getTransactionIdMapping( sourceTableName ).getSelectionExpression(),
 						ParameterUsage.SET
 				);
 			}
-			jdbcValueBindings.bindValue(
-					modificationType, tableName,
-					auditMapping.getModificationTypeMapping( sourceTableName ).getSelectionExpression(),
-					ParameterUsage.SET
-			);
+			final var modTypeMapping = auditMapping.getModificationTypeMapping( sourceTableName );
+			if ( modTypeMapping != null ) {
+				jdbcValueBindings.bindValue(
+						modificationType,
+						tableName,
+						modTypeMapping.getSelectionExpression(),
+						ParameterUsage.SET
+				);
+			}
 		}
 	}
 
