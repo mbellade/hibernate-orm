@@ -27,8 +27,6 @@ import org.hibernate.metamodel.mapping.internal.AuditMappingImpl;
 import org.hibernate.metamodel.mapping.internal.MappingModelCreationProcess;
 import org.hibernate.persister.collection.CollectionPersister;
 import org.hibernate.persister.collection.mutation.DeleteRowsCoordinator;
-import org.hibernate.persister.collection.mutation.DeleteRowsCoordinatorNoOp;
-import org.hibernate.persister.collection.mutation.DeleteRowsCoordinatorAudit;
 import org.hibernate.persister.collection.mutation.InsertRowsCoordinator;
 import org.hibernate.persister.collection.mutation.InsertRowsCoordinatorAudit;
 import org.hibernate.persister.collection.mutation.InsertRowsCoordinatorNoOp;
@@ -36,8 +34,6 @@ import org.hibernate.persister.collection.mutation.RemoveCoordinator;
 import org.hibernate.persister.collection.mutation.RemoveCoordinatorAudit;
 import org.hibernate.persister.collection.mutation.RemoveCoordinatorNoOp;
 import org.hibernate.persister.collection.mutation.UpdateRowsCoordinator;
-import org.hibernate.persister.collection.mutation.UpdateRowsCoordinatorAudit;
-import org.hibernate.persister.collection.mutation.UpdateRowsCoordinatorNoOp;
 import org.hibernate.persister.entity.AbstractEntityPersister;
 import org.hibernate.persister.entity.EntityPersister;
 import org.hibernate.persister.entity.UnionSubclassEntityPersister;
@@ -111,37 +107,16 @@ public class AuditStateManagement implements StateManagement {
 
 	@Override
 	public UpdateRowsCoordinator createUpdateRowsCoordinator(CollectionPersister persister) {
-		final var mutationTarget = resolveMutationTarget( persister );
-		if ( !AbstractStateManagement.isUpdatePossible( persister ) ) {
-			return new UpdateRowsCoordinatorNoOp( mutationTarget );
-		}
-		else if ( persister.isOneToMany() ) {
-			return StandardStateManagement.INSTANCE.createUpdateRowsCoordinator( persister );
-		}
-		else {
-			return new UpdateRowsCoordinatorAudit(
-					mutationTarget,
-					StandardStateManagement.INSTANCE.createUpdateRowsCoordinator( persister ),
-					persister.getIndexColumnIsSettable(),
-					persister.getElementColumnIsSettable(),
-					persister.getIndexIncrementer(),
-					persister.getFactory()
-			);
-		}
+		// Collection audit rows are always ADD/DEL (never MOD).
+		// The semantic diff in InsertRowsCoordinatorAudit handles all audit writes.
+		return StandardStateManagement.INSTANCE.createUpdateRowsCoordinator( persister );
 	}
 
 	@Override
 	public DeleteRowsCoordinator createDeleteRowsCoordinator(CollectionPersister persister) {
-		final var mutationTarget = resolveMutationTarget( persister );
-		if ( !persister.needsRemove() ) {
-			return new DeleteRowsCoordinatorNoOp( mutationTarget );
-		}
-		else {
-			return new DeleteRowsCoordinatorAudit(
-					mutationTarget,
-					StandardStateManagement.INSTANCE.createDeleteRowsCoordinator( persister )
-			);
-		}
+		// Collection audit rows are always ADD/DEL (never MOD).
+		// The semantic diff in InsertRowsCoordinatorAudit handles all audit writes.
+		return StandardStateManagement.INSTANCE.createDeleteRowsCoordinator( persister );
 	}
 
 	@Override

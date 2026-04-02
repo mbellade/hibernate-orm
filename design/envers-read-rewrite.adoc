@@ -1030,12 +1030,11 @@ is impractical or impossible for many users.
 | Yes — defaults match
 
 | Primary key
-| Composite PK: `(entity_id, REV)` for entities; `(REV, owner_id, element_cols...)` for collections
-| No PK defined on audit tables
-| Yes — existing PK is harmless, core reads work regardless.
-  *TODO*: core should create matching PKs and NOT NULL constraints for data integrity and
-  envers schema compatibility. Envers collection audit tables have NOT NULL on all element/key
-  columns (DEL rows store the full entry, not nulls). Verify and replicate constraints.
+| Composite PK: `(REV, entity_id)` for entities; `(REV, all_source_cols)` for collections
+| [green]#DONE# — Matching composite PKs on all audit tables. Entity audit tables use
+  `(REV, id_cols)` from source PK. Collection audit tables use `(REV, all_source_cols)`
+  to allow DEL+ADD rows for the same key within a single revision. REVTYPE kept NOT NULL
+  (stricter than envers, which leaves it nullable).
 
 | FK to REVINFO
 | `REV` → `REVINFO.REV` (always present)

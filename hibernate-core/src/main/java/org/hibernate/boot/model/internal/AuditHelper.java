@@ -5,6 +5,7 @@
 package org.hibernate.boot.model.internal;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -18,6 +19,7 @@ import org.hibernate.mapping.BasicValue;
 import org.hibernate.mapping.Collection;
 import org.hibernate.mapping.Column;
 import org.hibernate.mapping.PersistentClass;
+import org.hibernate.mapping.PrimaryKey;
 import org.hibernate.mapping.RootClass;
 import org.hibernate.mapping.Stateful;
 import org.hibernate.mapping.Table;
@@ -101,6 +103,14 @@ public final class AuditHelper {
 							Byte.class, auditTable, context );
 			auditTable.addColumn( transactionIdColumn );
 			auditTable.addColumn( modificationTypeColumn );
+			if ( auditable instanceof Collection ) {
+				// Collection audit PK: (REV, all_source_cols)
+				createAuditPrimaryKey( auditTable, transactionIdColumn, table.getColumns() );
+			}
+			else {
+				// Entity audit PK: (REV, entity_id_cols) from source table's PK
+				createAuditPrimaryKey( auditTable, transactionIdColumn, table.getPrimaryKey().getColumns() );
+			}
 			enableAudit( auditable, auditTable, transactionIdColumn, modificationTypeColumn );
 		} );
 	}
@@ -111,7 +121,6 @@ public final class AuditHelper {
 			MetadataBuildingContext context) {
 		final var collector = context.getMetadataCollector();
 		final String txIdColumnName = audited.transactionId();
-		final String modTypeColumnName = audited.modificationType();
 		collector.addSecondPass( (OptionalDeterminationSecondPass) ignored -> {
 			for ( var join : rootClass.getJoins() ) {
 				final var joinTable = join.getTable();
@@ -130,6 +139,7 @@ public final class AuditHelper {
 						createAuditColumn( txIdColumnName,
 								getTransactionIdType( context ), auditTable, context );
 				auditTable.addColumn( transactionIdColumn );
+				createAuditPrimaryKey( auditTable, transactionIdColumn, joinTable.getPrimaryKey().getColumns() );
 				// Secondary tables only get tx-id, not mod type
 				join.setAuxiliaryTable( auditTable );
 				join.addAuxiliaryColumn( TRANSACTION_ID, transactionIdColumn );
@@ -164,6 +174,7 @@ public final class AuditHelper {
 							createAuditColumn( txIdColumnName,
 									getTransactionIdType( context ), subAuditTable, context );
 					subAuditTable.addColumn( transactionIdColumn );
+					createAuditPrimaryKey( subAuditTable, transactionIdColumn, subTable.getPrimaryKey().getColumns() );
 					subclass.addAuxiliaryColumn( TRANSACTION_ID, transactionIdColumn );
 					// TABLE_PER_CLASS: each table is self-contained, needs REVTYPE
 					// JOINED: REVTYPE only on root table (matches envers behavior)
@@ -224,12 +235,14 @@ public final class AuditHelper {
 		final String txIdColumnName = audited.transactionId();
 		final String modTypeColumnName = audited.modificationType();
 		collector.addSecondPass( (OptionalDeterminationSecondPass) ignored -> {
+			final var keyColumns = new ArrayList<Column>();
 			// Copy the FK columns (parent key) from the collection's key
 			for ( var column : collection.getKey().getColumns() ) {
 				final var copy = column.clone();
 				copy.setUnique( false );
 				copy.setUniqueKeyName( null );
 				auditTable.addColumn( copy );
+				keyColumns.add( copy );
 			}
 			// Copy the child identifier columns from the referenced entity
 			for ( var column : referencedEntity.getKey().getColumns() ) {
@@ -237,6 +250,7 @@ public final class AuditHelper {
 				copy.setUnique( false );
 				copy.setUniqueKeyName( null );
 				auditTable.addColumn( copy );
+				keyColumns.add( copy );
 			}
 			// Audit columns
 			final var transactionIdColumn = createAuditColumn(
@@ -253,8 +267,21 @@ public final class AuditHelper {
 			);
 			auditTable.addColumn( transactionIdColumn );
 			auditTable.addColumn( modificationTypeColumn );
+			createAuditPrimaryKey( auditTable, transactionIdColumn, keyColumns );
 			enableAudit( collection, auditTable, transactionIdColumn, modificationTypeColumn );
 		} );
+	}
+
+	private static void createAuditPrimaryKey(
+			Table auditTable,
+			Column transactionIdColumn,
+			Iterable<Column> sourceKeyColumns) {
+		final var pk = new PrimaryKey( auditTable );
+		pk.addColumn( transactionIdColumn );
+		for ( var sourceCol : sourceKeyColumns ) {
+			pk.addColumn( auditTable.getColumn( sourceCol ) );
+		}
+		auditTable.setPrimaryKey( pk );
 	}
 
 	private static Class<?> getTransactionIdType(MetadataBuildingContext context) {
