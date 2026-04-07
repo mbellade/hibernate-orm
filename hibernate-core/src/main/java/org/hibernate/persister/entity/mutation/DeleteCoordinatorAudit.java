@@ -35,24 +35,21 @@ public class DeleteCoordinatorAudit extends AbstractAuditCoordinator implements 
 			Object id,
 			Object version,
 			SharedSessionContractImplementor session) {
-		final var state = resolveDeleteState( entity, session );
-		currentDeleteCoordinator.delete( entity, id, version, session );
-		if ( state != null ) {
-			enqueueAuditEntry( entity, id, state, ModificationType.DEL, session );
-		}
-	}
+		final var entityEntry = session.getPersistenceContextInternal().getEntry( entity );
+		final var state = entityEntry.getLoadedState() != null
+				? entityEntry.getLoadedState()
+				: entityPersister().getValues( entity );
 
-	private Object[] resolveDeleteState(Object entity, SharedSessionContractImplementor session) {
-		if ( entity == null ) {
-			return null;
-		}
-		else {
-			final var persistenceContext = session.getPersistenceContextInternal();
-			final var entry = persistenceContext.getEntry( entity );
-			return entry != null
-				&& entry.getLoadedState() != null
-					? entry.getLoadedState()
-					: entityPersister().getValues( entity );
-		}
+		currentDeleteCoordinator.delete( entity, id, version, session );
+
+		session.getAuditWorkQueue().enqueue(
+				entityEntry.getEntityKey(),
+				entity,
+				entityEntry.getId(),
+				state,
+				ModificationType.DEL,
+				this,
+				session
+		);
 	}
 }

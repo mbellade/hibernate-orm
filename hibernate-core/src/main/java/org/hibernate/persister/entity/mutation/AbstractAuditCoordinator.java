@@ -96,23 +96,14 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator impl
 	 */
 	protected void enqueueAuditEntry(
 			Object entity,
-			Object id,
 			Object[] values,
 			ModificationType modificationType,
 			SharedSessionContractImplementor session) {
-		if ( values == null ) {
-			return;
-		}
-		final Object resolvedId = id != null
-				? id
-				: entity != null ? entityPersister().getIdentifier( entity, session ) : null;
-		if ( resolvedId == null ) {
-			return;
-		}
+		final var entityEntry = session.getPersistenceContextInternal().getEntry( entity );
 		session.getAuditWorkQueue().enqueue(
-				entityPersister(),
+				entityEntry.getEntityKey(),
 				entity,
-				resolvedId,
+				entityEntry.getId(),
 				values,
 				modificationType,
 				this,

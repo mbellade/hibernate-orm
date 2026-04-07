@@ -4,9 +4,7 @@
  */
 package org.hibernate.audit.spi;
 
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 
 import org.hibernate.Incubating;
@@ -17,7 +15,6 @@ import org.hibernate.engine.spi.EntityKey;
 import org.hibernate.engine.spi.SharedSessionContractImplementor;
 import org.hibernate.engine.spi.TransactionCompletionCallbacks;
 import org.hibernate.persister.collection.CollectionPersister;
-import org.hibernate.persister.entity.EntityPersister;
 
 /**
  * Transaction-scoped queue for deferred audit row writes.
@@ -54,7 +51,6 @@ public class AuditWorkQueue implements TransactionCompletionCallbacks.BeforeComp
 		Object[] values;
 		ModificationType modificationType;
 		final AuditWriter writer;
-		final List<CollectionKey> collectionKeys = new ArrayList<>( 0 );
 
 		QueuedEntry(Object entity, Object id, Object[] values,
 				ModificationType modificationType, AuditWriter writer) {
@@ -70,20 +66,11 @@ public class AuditWorkQueue implements TransactionCompletionCallbacks.BeforeComp
 	 * A queued collection audit entry, holding the original snapshot
 	 * captured before the first flush.
 	 */
-	private static class QueuedCollectionEntry {
-		final PersistentCollection<?> collection;
-		final Object ownerId;
-		final Object originalSnapshot;
-		final CollectionAuditWriter writer;
-
-		QueuedCollectionEntry(PersistentCollection<?> collection, Object ownerId,
-				Object originalSnapshot, CollectionAuditWriter writer) {
-			this.collection = collection;
-			this.ownerId = ownerId;
-			this.originalSnapshot = originalSnapshot;
-			this.writer = writer;
-		}
-	}
+	private record QueuedCollectionEntry(
+			PersistentCollection<?> collection,
+			Object ownerId,
+			Object originalSnapshot,
+			CollectionAuditWriter writer) {}
 
 	private final Map<EntityKey, QueuedEntry> entries = new LinkedHashMap<>();
 	private final Map<CollectionKey, QueuedCollectionEntry> collectionEntries = new LinkedHashMap<>();
@@ -93,7 +80,7 @@ public class AuditWorkQueue implements TransactionCompletionCallbacks.BeforeComp
 	 * Enqueue an audit entry for deferred writing. If an entry
 	 * for the same entity already exists, the entries are merged.
 	 *
-	 * @param persister the entity persister
+	 * @param entityKey the entity key (reused from the persistence context)
 	 * @param entity the entity instance (may be null for delete)
 	 * @param id the entity identifier
 	 * @param values the entity state
@@ -102,7 +89,7 @@ public class AuditWorkQueue implements TransactionCompletionCallbacks.BeforeComp
 	 * @param session the current session
 	 */
 	public void enqueue(
-			EntityPersister persister,
+			EntityKey entityKey,
 			Object entity,
 			Object id,
 			Object[] values,
@@ -114,13 +101,12 @@ public class AuditWorkQueue implements TransactionCompletionCallbacks.BeforeComp
 			registered = true;
 		}
 
-		final var key = new EntityKey( id, persister );
-		final var existing = entries.get( key );
+		final var existing = entries.get( entityKey );
 		if ( existing == null ) {
-			entries.put( key, new QueuedEntry( entity, id, values, modificationType, writer ) );
+			entries.put( entityKey, new QueuedEntry( entity, id, values, modificationType, writer ) );
 		}
 		else {
-			merge( key, existing, entity, values, modificationType );
+			merge( entityKey, existing, entity, values, modificationType );
 		}
 	}
 
@@ -152,16 +138,8 @@ public class AuditWorkQueue implements TransactionCompletionCallbacks.BeforeComp
 		final var key = new CollectionKey( collectionPersister, ownerId );
 		// Only store the first snapshot — subsequent flushes are ignored,
 		// the diff at completion will use original vs final state
-		if ( collectionEntries.putIfAbsent( key,
-				new QueuedCollectionEntry( collection, ownerId, originalSnapshot, writer ) ) == null ) {
-			// Register this collection key on the owning entity's queue entry
-			// so it can be cleaned up if the entity is cancelled (ADD+DEL)
-			final var ownerKey = new EntityKey( ownerId, collectionPersister.getOwnerEntityPersister() );
-			final var ownerEntry = entries.get( ownerKey );
-			if ( ownerEntry != null ) {
-				ownerEntry.collectionKeys.add( key );
-			}
-		}
+		collectionEntries.putIfAbsent( key,
+				new QueuedCollectionEntry( collection, ownerId, originalSnapshot, writer ) );
 	}
 
 	private void merge(
@@ -172,11 +150,10 @@ public class AuditWorkQueue implements TransactionCompletionCallbacks.BeforeComp
 			ModificationType incoming) {
 		final var merged = mergeModificationType( existing.modificationType, incoming );
 		if ( merged == null ) {
-			// ADD + DEL = cancel out — no audit row for entity or its collections
+			// ADD + DEL = cancel out — no entity audit row.
+			// Collection entries may remain (orphaned) — this matches envers behavior
+			// and the orphaned rows are unreachable by any query.
 			entries.remove( key );
-			for ( var collectionKey : existing.collectionKeys ) {
-				collectionEntries.remove( collectionKey );
-			}
 		}
 		else {
 			existing.modificationType = merged;

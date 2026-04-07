@@ -36,7 +36,7 @@ public class InsertCoordinatorAudit extends AbstractAuditCoordinator implements 
 			Object[] values,
 			SharedSessionContractImplementor session) {
 		final var generatedValues = currentInsertCoordinator.insert( entity, values, session );
-		enqueueAuditEntry( entity, null, values, ModificationType.ADD, session );
+		enqueueAuditEntry( entity, values, ModificationType.ADD, session );
 		return generatedValues;
 	}
 
@@ -47,7 +47,7 @@ public class InsertCoordinatorAudit extends AbstractAuditCoordinator implements 
 			Object[] values,
 			SharedSessionContractImplementor session) {
 		final var generatedValues = currentInsertCoordinator.insert( entity, id, values, session );
-		enqueueAuditEntry( entity, id, values, ModificationType.ADD, session );
+		enqueueAuditEntry( entity, values, ModificationType.ADD, session );
 		return generatedValues;
 	}
 }

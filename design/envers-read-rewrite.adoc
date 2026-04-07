@@ -520,8 +520,14 @@ Mutation coordinators enqueue audit entries instead of writing them directly.
 * [x] Test: ADD+DEL cancellation (`testAddDeleteCancellation`, `testAddDeleteCancellationWithCollection`)
 * [x] Test: ADD+MOD merge (`testAddModMerge`)
 * [x] Test: collection multi-flush (`testCollectionMultiFlush`)
-* [x] Verified: ADD+DEL cancellation does NOT orphan collection entries — deleted entity has
-  empty collection, so the deferred diff produces no rows
+* [x] ADD+DEL cancellation: entity audit row cancelled. Collection entries may remain as
+  orphaned rows (unreachable by any query) — matches envers behavior (verified via envers test).
+  Cleaning up collections at cancellation time was rejected: would require constructing an
+  `EntityKey` per collection entry, which is too expensive.
+* [x] Entity `enqueueAuditEntry` reuses the existing `EntityKey` from the persistence context's
+  `EntityEntry` — zero `EntityKey` construction cost for entity audit operations.
+* [x] `AuditWorkQueue.enqueue` accepts `EntityKey` directly (not `EntityPersister`).
+* [x] `DeleteCoordinatorAudit`: single `EntityEntry` lookup for both state and key (no double PC lookup).
 
 NOTE: `@Temporal` entities with `HISTORY_TABLE` strategy have the same multi-flush problem
 (inline `insertHistoryRow` with same `row_start` → PK violation). This is a broader architectural
