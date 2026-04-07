@@ -8874,7 +8874,7 @@ public abstract class AbstractSqlAstTranslator<T extends JdbcOperation> implemen
 						sqlBuffer.append( " is null" );
 					}
 					else {
-						sqlBuffer.append( columnValueBinding.isNegated() ? "<>" : "=" );
+						sqlBuffer.append( "=" );
 						columnValueBinding.getValueExpression().accept( this );
 					}
 				} );

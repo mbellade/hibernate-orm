@@ -47,15 +47,13 @@ public class AuditWorkQueue implements TransactionCompletionCallbacks.BeforeComp
 	 */
 	private static class QueuedEntry {
 		Object entity;
-		final Object id;
 		Object[] values;
 		ModificationType modificationType;
 		final AuditWriter writer;
 
-		QueuedEntry(Object entity, Object id, Object[] values,
+		QueuedEntry(Object entity, Object[] values,
 				ModificationType modificationType, AuditWriter writer) {
 			this.entity = entity;
-			this.id = id;
 			this.values = values;
 			this.modificationType = modificationType;
 			this.writer = writer;
@@ -82,7 +80,6 @@ public class AuditWorkQueue implements TransactionCompletionCallbacks.BeforeComp
 	 *
 	 * @param entityKey the entity key (reused from the persistence context)
 	 * @param entity the entity instance (may be null for delete)
-	 * @param id the entity identifier
 	 * @param values the entity state
 	 * @param modificationType the modification type (ADD/MOD/DEL)
 	 * @param writer callback to perform the actual write
@@ -91,7 +88,6 @@ public class AuditWorkQueue implements TransactionCompletionCallbacks.BeforeComp
 	public void enqueue(
 			EntityKey entityKey,
 			Object entity,
-			Object id,
 			Object[] values,
 			ModificationType modificationType,
 			AuditWriter writer,
@@ -103,7 +99,7 @@ public class AuditWorkQueue implements TransactionCompletionCallbacks.BeforeComp
 
 		final var existing = entries.get( entityKey );
 		if ( existing == null ) {
-			entries.put( entityKey, new QueuedEntry( entity, id, values, modificationType, writer ) );
+			entries.put( entityKey, new QueuedEntry( entity, values, modificationType, writer ) );
 		}
 		else {
 			merge( entityKey, existing, entity, values, modificationType );
@@ -194,10 +190,11 @@ public class AuditWorkQueue implements TransactionCompletionCallbacks.BeforeComp
 	public void doBeforeTransactionCompletion(SharedSessionContractImplementor session) {
 		try {
 			// Entity audit rows first
-			for ( var entry : entries.values() ) {
+			for ( var mapEntry : entries.entrySet() ) {
+				final var entry = mapEntry.getValue();
 				entry.writer.writeAuditRow(
+						mapEntry.getKey(),
 						entry.entity,
-						entry.id,
 						entry.values,
 						entry.modificationType,
 						session

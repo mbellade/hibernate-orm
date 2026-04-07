@@ -26,8 +26,8 @@ import org.hibernate.metamodel.mapping.internal.SelectableMappingImpl;
 import org.hibernate.type.spi.TypeConfiguration;
 
 import static org.hibernate.boot.model.internal.AuditHelper.MODIFICATION_TYPE;
-import static org.hibernate.boot.model.internal.AuditHelper.REVISION_END;
-import static org.hibernate.boot.model.internal.AuditHelper.REVISION_END_TIMESTAMP;
+import static org.hibernate.boot.model.internal.AuditHelper.TRANSACTION_END;
+import static org.hibernate.boot.model.internal.AuditHelper.TRANSACTION_END_TIMESTAMP;
 import static org.hibernate.boot.model.internal.AuditHelper.TRANSACTION_ID;
 import org.hibernate.metamodel.mapping.AuditMapping;
 import org.hibernate.metamodel.mapping.PluralAttributeMapping;
@@ -185,11 +185,11 @@ public class AuditStateManagement implements StateManagement {
 					rootInfo.transactionIdMapping().getSelectionExpression(),
 					rootInfo.modificationTypeMapping().getSelectionExpression()
 			) );
-			if ( rootInfo.revisionEndMapping() != null ) {
-				extras.add( rootInfo.revisionEndMapping().getSelectionExpression() );
+			if ( rootInfo.transactionEndMapping() != null ) {
+				extras.add( rootInfo.transactionEndMapping().getSelectionExpression() );
 			}
-			if ( rootInfo.revisionEndTimestampMapping() != null ) {
-				extras.add( rootInfo.revisionEndTimestampMapping().getSelectionExpression() );
+			if ( rootInfo.transactionEndTimestampMapping() != null ) {
+				extras.add( rootInfo.transactionEndTimestampMapping().getSelectionExpression() );
 			}
 			extraColumns = extras;
 		}
@@ -247,8 +247,8 @@ public class AuditStateManagement implements StateManagement {
 				auditSubquery,
 				rootInfo.transactionIdMapping(),
 				rootInfo.modificationTypeMapping(),
-				rootInfo.revisionEndMapping(),
-				rootInfo.revisionEndTimestampMapping()
+				rootInfo.transactionEndMapping(),
+				rootInfo.transactionEndTimestampMapping()
 		) );
 	}
 
@@ -281,9 +281,9 @@ public class AuditStateManagement implements StateManagement {
 						txIdJdbcMapping, creationProcess ),
 				toSelectableMapping( auditTableName, holder.getAuxiliaryColumn( MODIFICATION_TYPE ),
 						modTypeJdbcMapping, creationProcess ),
-				toSelectableMapping( auditTableName, holder.getAuxiliaryColumn( REVISION_END ),
+				toSelectableMapping( auditTableName, holder.getAuxiliaryColumn( TRANSACTION_END ),
 						txIdJdbcMapping, creationProcess ),
-				toSelectableMapping( auditTableName, holder.getAuxiliaryColumn( REVISION_END_TIMESTAMP ),
+				toSelectableMapping( auditTableName, holder.getAuxiliaryColumn( TRANSACTION_END_TIMESTAMP ),
 						resolveJdbcMapping( typeConfiguration, java.time.Instant.class ), creationProcess )
 		);
 	}

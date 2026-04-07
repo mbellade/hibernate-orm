@@ -31,7 +31,7 @@ public final class AuditCollectionHelper {
 	private final CollectionTableMapping auditTableMapping;
 	private final SelectableMapping transactionIdMapping;
 	private final SelectableMapping modificationTypeMapping;
-	private final SelectableMapping revisionEndMapping;
+	private final SelectableMapping transactionEndMapping;
 	private final boolean useServerTransactionTimestamps;
 	private final String currentTimestampFunctionName;
 	private final boolean[] indexColumnIsSettable;
@@ -39,7 +39,7 @@ public final class AuditCollectionHelper {
 	private final UnaryOperator<Object> indexIncrementer;
 
 	private MutationOperationGroup auditInsertOperationGroup;
-	private MutationOperationGroup revisionEndUpdateGroup;
+	private MutationOperationGroup transactionEndUpdateGroup;
 	private AuditCollectionRowMutationHelper rowMutationHelper;
 
 	AuditCollectionHelper(
@@ -61,7 +61,7 @@ public final class AuditCollectionHelper {
 		);
 		this.transactionIdMapping = auditMapping.getTransactionIdMapping( collectionTableName );
 		this.modificationTypeMapping = auditMapping.getModificationTypeMapping( collectionTableName );
-		this.revisionEndMapping = auditMapping.getRevisionEndMapping( collectionTableName );
+		this.transactionEndMapping = auditMapping.getTransactionEndMapping( collectionTableName );
 		this.useServerTransactionTimestamps =
 				sessionFactory.getTransactionIdentifierService().isDisabled();
 		this.currentTimestampFunctionName = useServerTransactionTimestamps
@@ -96,11 +96,11 @@ public final class AuditCollectionHelper {
 		return rowMutationHelper;
 	}
 
-	MutationOperationGroup getRevisionEndUpdateGroup() {
-		if ( revisionEndUpdateGroup == null && revisionEndMapping != null ) {
-			revisionEndUpdateGroup = buildRevisionEndUpdateGroup();
+	MutationOperationGroup getTransactionEndUpdateGroup() {
+		if ( transactionEndUpdateGroup == null && transactionEndMapping != null ) {
+			transactionEndUpdateGroup = buildTransactionEndUpdateGroup();
 		}
-		return revisionEndUpdateGroup;
+		return transactionEndUpdateGroup;
 	}
 
 	private MutationOperationGroup buildAuditInsertOperationGroup() {
@@ -146,17 +146,24 @@ public final class AuditCollectionHelper {
 		insertBuilder.addValueColumn( "?", modificationTypeMapping );
 	}
 
-	private MutationOperationGroup buildRevisionEndUpdateGroup() {
+	private MutationOperationGroup buildTransactionEndUpdateGroup() {
 		final var updateBuilder =
 				new TableUpdateBuilderStandard<>( mutationTarget, auditTableMapping, sessionFactory );
 		final var attributeMapping = mutationTarget.getTargetPart();
 
 		// SET REVEND = ?
 		if ( useServerTransactionTimestamps ) {
-			updateBuilder.addValueColumn( currentTimestampFunctionName, revisionEndMapping );
+			updateBuilder.addValueColumn( currentTimestampFunctionName, transactionEndMapping );
 		}
 		else {
-			updateBuilder.addValueColumn( "?", revisionEndMapping );
+			updateBuilder.addValueColumn( "?", transactionEndMapping );
+		}
+
+		// SET REVEND_TSTMP = ? (if configured)
+		final var revEndTsMapping = mutationTarget.getTargetPart().getAuditMapping()
+				.getTransactionEndTimestampMapping( mutationTarget.getCollectionTableMapping().getTableName() );
+		if ( revEndTsMapping != null ) {
+			updateBuilder.addValueColumn( "?", revEndTsMapping );
 		}
 
 		// WHERE: same identity columns as the INSERT (key + index/identifier + element)
@@ -190,10 +197,10 @@ public final class AuditCollectionHelper {
 
 		// WHERE REVEND IS NULL
 		final var revEndColumnRef = new ColumnReference(
-				updateBuilder.getMutatingTable(), revisionEndMapping );
+				updateBuilder.getMutatingTable(), transactionEndMapping );
 		updateBuilder.addNonKeyRestriction( new ColumnValueBinding(
 				revEndColumnRef,
-				new ColumnWriteFragment( null, List.of(), revisionEndMapping )
+				new ColumnWriteFragment( null, List.of(), transactionEndMapping )
 		) );
 
 		final var tableUpdate = updateBuilder.buildMutation();

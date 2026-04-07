@@ -38,8 +38,8 @@ import static org.hibernate.internal.util.StringHelper.isBlank;
 public final class AuditHelper {
 	public static final String TRANSACTION_ID = "transactionId";
 	public static final String MODIFICATION_TYPE = "modificationType";
-	public static final String REVISION_END = "revisionEnd";
-	public static final String REVISION_END_TIMESTAMP = "revisionEndTimestamp";
+	public static final String TRANSACTION_END = "transactionEnd";
+	public static final String TRANSACTION_END_TIMESTAMP = "transactionEndTimestamp";
 
 	// defaults for backward compatibility with envers
 
@@ -116,7 +116,7 @@ public final class AuditHelper {
 				createAuditPrimaryKey( auditTable, transactionIdColumn, table.getPrimaryKey().getColumns() );
 			}
 			enableAudit( auditable, auditTable, transactionIdColumn, modificationTypeColumn );
-			addRevisionEndColumns( audited, auditable, auditTable, context );
+			addTransactionEndColumns( audited, auditable, auditTable, context );
 		} );
 	}
 
@@ -194,7 +194,7 @@ public final class AuditHelper {
 					// TABLE_PER_CLASS: each table is self-contained, needs REVEND
 					// JOINED: REVEND only on root table (matches envers behavior)
 					if ( subclass instanceof UnionSubclass ) {
-						addRevisionEndColumns( audited, subclass, subAuditTable, context );
+						addTransactionEndColumns( audited, subclass, subAuditTable, context );
 					}
 				}
 			}
@@ -279,7 +279,7 @@ public final class AuditHelper {
 			auditTable.addColumn( modificationTypeColumn );
 			createAuditPrimaryKey( auditTable, transactionIdColumn, keyColumns );
 			enableAudit( collection, auditTable, transactionIdColumn, modificationTypeColumn );
-			addRevisionEndColumns( audited, collection, auditTable, context );
+			addTransactionEndColumns( audited, collection, auditTable, context );
 		} );
 	}
 
@@ -364,7 +364,7 @@ public final class AuditHelper {
 		return "validity".equalsIgnoreCase( value );
 	}
 
-	private static void addRevisionEndColumns(
+	private static void addTransactionEndColumns(
 			Audited audited,
 			AuxiliaryTableHolder holder,
 			Table auditTable,
@@ -373,20 +373,20 @@ public final class AuditHelper {
 			return;
 		}
 		final var revEndColumn =
-				createAuditColumn( audited.revisionEnd(),
+				createAuditColumn( audited.transactionEnd(),
 						getTransactionIdType( context ), auditTable, context );
 		revEndColumn.setNullable( true );
 		auditTable.addColumn( revEndColumn );
-		holder.addAuxiliaryColumn( REVISION_END, revEndColumn );
+		holder.addAuxiliaryColumn( TRANSACTION_END, revEndColumn );
 
-		final String revEndTsName = audited.revisionEndTimestamp();
+		final String revEndTsName = audited.transactionEndTimestamp();
 		if ( !isBlank( revEndTsName ) ) {
 			final var revEndTsColumn =
 					createAuditColumn( revEndTsName,
 							Instant.class, auditTable, context );
 			revEndTsColumn.setNullable( true );
 			auditTable.addColumn( revEndTsColumn );
-			holder.addAuxiliaryColumn( REVISION_END_TIMESTAMP, revEndTsColumn );
+			holder.addAuxiliaryColumn( TRANSACTION_END_TIMESTAMP, revEndTsColumn );
 		}
 	}
 

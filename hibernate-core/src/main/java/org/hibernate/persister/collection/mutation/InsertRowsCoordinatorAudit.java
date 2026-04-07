@@ -145,8 +145,8 @@ public class InsertRowsCoordinatorAudit implements InsertRowsCoordinator, Collec
 			else {
 				// Diff original snapshot vs final collection state
 				final var changes = computeCollectionChanges( collection, collectionDescriptor, originalSnapshot );
-				// Close previous rows' REVEND for elements being removed/replaced
-				updateElementRevisionEnd( collection, id, changes, session );
+				// Close previous rows' transaction end for elements being removed/replaced
+				updateElementTransactionEnd( collection, id, changes, session );
 				// Write ADD/DEL audit rows
 				for ( var change : changes ) {
 					bindings.bindInsertValues(
@@ -171,12 +171,12 @@ public class InsertRowsCoordinatorAudit implements InsertRowsCoordinator, Collec
 	 * For each DEL entry in the diff, update the corresponding previous
 	 * audit row's REVEND to mark it as superseded.
 	 */
-	private void updateElementRevisionEnd(
+	private void updateElementTransactionEnd(
 			PersistentCollection<?> collection,
 			Object ownerId,
 			List<AuditChange> changes,
 			SharedSessionContractImplementor session) {
-		final var updateGroup = getAuditHelper().getRevisionEndUpdateGroup();
+		final var updateGroup = getAuditHelper().getTransactionEndUpdateGroup();
 		if ( updateGroup == null ) {
 			return;
 		}
@@ -190,7 +190,7 @@ public class InsertRowsCoordinatorAudit implements InsertRowsCoordinator, Collec
 			final var txId = session.getCurrentTransactionIdentifier();
 			final var auditMapping = mutationTarget.getTargetPart().getAuditMapping();
 			final var collectionTableName = mutationTarget.getCollectionTableMapping().getTableName();
-			final var revEndMapping = auditMapping.getRevisionEndMapping( collectionTableName );
+			final var revEndMapping = auditMapping.getTransactionEndMapping( collectionTableName );
 			final var bindings = getAuditHelper().getRowMutationHelper();
 
 			// Update REVEND for ALL changes (not just DEL) to cover both removed and replaced elements
@@ -200,6 +200,13 @@ public class InsertRowsCoordinatorAudit implements InsertRowsCoordinator, Collec
 				// SET REVEND = :txId
 				jdbcValueBindings.bindValue( txId, tableName,
 						revEndMapping.getSelectionExpression(), ParameterUsage.SET );
+
+				// SET REVEND_TSTMP = :tstmp (if configured)
+				final var revEndTsMapping = auditMapping.getTransactionEndTimestampMapping( collectionTableName );
+				if ( revEndTsMapping != null ) {
+					jdbcValueBindings.bindValue( java.time.Instant.now(), tableName,
+							revEndTsMapping.getSelectionExpression(), ParameterUsage.SET );
+				}
 
 				// WHERE: bind key + index/element columns (same as INSERT but RESTRICT)
 				bindings.bindRestrictValues(

@@ -1571,7 +1571,7 @@ The following capabilities were verified with dedicated smoke tests (`AuditSmoke
 | G6
 | **ValidityAuditStrategy** (REVEND / REVEND_TSTMP columns)
 | [green]#DONE#
-| `hibernate.audit.strategy=validity` + `@Audited(revisionEnd, revisionEndTimestamp)`.
+| `hibernate.audit.strategy=validity` + `@Audited(transactionEnd, transactionEndTimestamp)`.
   REVEND on root, TPC subclass, and collection audit tables (not secondary, not JOINED —
   matching envers). Range-based read predicate. Per-element REVEND UPDATE for collections.
   Deferred audit writes via `AuditWorkQueue` prevent multi-flush PK violations.
@@ -1795,8 +1795,8 @@ Global property `hibernate.audit.strategy` with values `default` (MAX subquery) 
 
 `@Audited` annotation gets new attributes:
 
-* `revisionEnd()` — REVEND column name (default `"REVEND"`)
-* `revisionEndTimestamp()` — optional REVEND_TSTMP column name (default `""`, disabled)
+* `transactionEnd()` — REVEND column name (default `"REVEND"`)
+* `transactionEndTimestamp()` — optional REVEND_TSTMP column name (default `""`, disabled)
 
 === Schema
 
@@ -1852,7 +1852,7 @@ For default strategy, `revisionEndMapping` is null — existing code paths are u
 === Implementation Tasks
 
 * [x] Add `hibernate.audit.strategy` property to `StateManagementSettings`
-* [x] Add `revisionEnd()` and `revisionEndTimestamp()` attributes to `@Audited`
+* [x] Add `transactionEnd()` and `transactionEndTimestamp()` attributes to `@Audited`
 * [x] Boot-time: create REVEND (+ optional REVEND_TSTMP) column in `AuditHelper` when validity active
 * [x] Extend `TableAuditInfo` with `revisionEndMapping` and `revisionEndTimestampMapping`
 * [x] Wire REVEND mapping in `AuditStateManagement.createTableAuditInfo()`
@@ -1888,7 +1888,7 @@ A custom strategy cannot be plugged in without modifying these classes.
    introduced later if third-party strategies emerge as a real need.
 
 **Current decision**: keep internal (option 2). The `hibernate.audit.strategy` property and
-`@Audited.revisionEnd()` annotation are the user-facing configuration points. The implementation
+`@Audited.transactionEnd()` annotation are the user-facing configuration points. The implementation
 is internal and can be refactored into an SPI later without breaking public API.
 
 == Open Questions

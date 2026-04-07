@@ -113,7 +113,7 @@ public interface StateManagementSettings {
 	 * @settingDefault {@code "default"}
 	 * @see org.hibernate.annotations.Audited
 	 *
-	 * @since 7.4
+	 * @since envers-rewrite
 	 */
 	@Incubating
 	String AUDIT_STRATEGY = "hibernate.audit.strategy";

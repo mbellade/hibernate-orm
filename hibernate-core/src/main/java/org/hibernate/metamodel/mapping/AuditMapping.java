@@ -31,19 +31,19 @@ public interface AuditMapping extends AuxiliaryMapping {
 	@Nullable SelectableMapping getModificationTypeMapping(String originalTableName);
 
 	/**
-	 * Get the revision end selectable mapping for the given original table,
+	 * Get the transaction end selectable mapping for the given original table,
 	 * or {@code null} if the validity audit strategy is not active.
 	 *
 	 * @since envers-rewrite
 	 */
-	@Nullable SelectableMapping getRevisionEndMapping(String originalTableName);
+	@Nullable SelectableMapping getTransactionEndMapping(String originalTableName);
 
 	/**
-	 * Get the revision end timestamp selectable mapping for the given original table,
+	 * Get the transaction end timestamp selectable mapping for the given original table,
 	 * or {@code null} if not configured.
 	 *
 	 * @since envers-rewrite
 	 */
-	@Nullable SelectableMapping getRevisionEndTimestampMapping(String originalTableName);
+	@Nullable SelectableMapping getTransactionEndTimestampMapping(String originalTableName);
 
 }

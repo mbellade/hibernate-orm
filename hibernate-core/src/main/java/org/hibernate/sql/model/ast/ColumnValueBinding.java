@@ -19,18 +19,12 @@ import org.hibernate.sql.ast.tree.expression.ColumnReference;
 public class ColumnValueBinding {
 	private final ColumnReference columnReference;
 	private final ColumnWriteFragment valueExpression;
-	private final boolean negated;
 	private final boolean attributeInsertable;
 	private final boolean attributeUpdatable;
 
 	public ColumnValueBinding(ColumnReference columnReference, ColumnWriteFragment valueExpression) {
-		this( columnReference, valueExpression, false );
-	}
-
-	public ColumnValueBinding(ColumnReference columnReference, ColumnWriteFragment valueExpression, boolean negated) {
 		this.columnReference = columnReference;
 		this.valueExpression = valueExpression;
-		this.negated = negated;
 		this.attributeInsertable = determineAttributeInsertable( valueExpression );
 		this.attributeUpdatable = determineAttributeUpdatable( valueExpression );
 	}
@@ -61,10 +55,6 @@ public class ColumnValueBinding {
 		return valueExpression == null
 			|| !(valueExpression.getSqlTypedMapping() instanceof SelectableMapping selectableMapping)
 			|| selectableMapping.isUpdateable();
-	}
-
-	public boolean isNegated() {
-		return negated;
 	}
 
 	@Override

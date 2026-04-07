@@ -13,6 +13,7 @@ import org.hibernate.engine.jdbc.batch.spi.BatchKey;
 import org.hibernate.engine.jdbc.mutation.JdbcValueBindings;
 import org.hibernate.engine.jdbc.mutation.ParameterUsage;
 import org.hibernate.engine.jdbc.mutation.group.PreparedStatementDetails;
+import org.hibernate.engine.spi.EntityKey;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.hibernate.engine.spi.SharedSessionContractImplementor;
 import org.hibernate.MappingException;
@@ -55,7 +56,7 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator impl
 	private final boolean useServerTransactionTimestamps;
 	private final String currentTimestampFunctionName;
 	private final MutationOperationGroup staticAuditInsertGroup;
-	private final MutationOperationGroup revisionEndUpdateGroup;
+	private final MutationOperationGroup transactionEndUpdateGroup;
 
 	protected AbstractAuditCoordinator(EntityPersister entityPersister, SessionFactoryImplementor factory) {
 		super( entityPersister, factory );
@@ -74,7 +75,7 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator impl
 		this.staticAuditInsertGroup = entityPersister.isDynamicInsert()
 				? null
 				: buildAuditInsertGroup( applyAuditMask( entityPersister.getPropertyInsertability() ), null, null );
-		this.revisionEndUpdateGroup = buildRevisionEndUpdateGroup();
+		this.transactionEndUpdateGroup = buildTransactionEndUpdateGroup();
 	}
 
 	private EntityTableMapping[] buildAuditTableMappings(EntityPersister persister, AuditMapping auditMapping) {
@@ -103,7 +104,6 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator impl
 		session.getAuditWorkQueue().enqueue(
 				entityEntry.getEntityKey(),
 				entity,
-				entityEntry.getId(),
 				values,
 				modificationType,
 				this,
@@ -117,12 +117,13 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator impl
 	 */
 	@Override
 	public void writeAuditRow(
+			EntityKey entityKey,
 			Object entity,
-			Object id,
 			Object[] values,
 			ModificationType modificationType,
 			SharedSessionContractImplementor session) {
-		updatePreviousRevisionEnd( id, modificationType, session );
+		final var id = entityKey.getIdentifier();
+		updatePreviousTransactionEnd( id, modificationType, session );
 
 		final boolean dynamicInsert = entityPersister().isDynamicInsert();
 		final boolean[] propertyInclusions = applyAuditMask(
@@ -307,7 +308,7 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator impl
 	}
 
 	/**
-	 * Update the previous audit row's REVEND column for the validity strategy.
+	 * Update the previous audit row's transaction end column for the validity strategy.
 	 * Sets {@code REVEND = :currentTxId} on the row with
 	 * {@code REVEND IS NULL} for the given entity ID.
 	 * <p>
@@ -318,16 +319,16 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator impl
 	 * @param modificationType the modification type of the new audit row
 	 * @param session the current session
 	 */
-	private void updatePreviousRevisionEnd(
+	private void updatePreviousTransactionEnd(
 			Object id,
 			ModificationType modificationType,
 			SharedSessionContractImplementor session) {
-		if ( revisionEndUpdateGroup == null ) {
+		if ( transactionEndUpdateGroup == null ) {
 			return;
 		}
 		final var mutationExecutor = mutationExecutorService.createExecutor(
 				() -> auditBatchKey,
-				revisionEndUpdateGroup,
+				transactionEndUpdateGroup,
 				session
 		);
 		try {
@@ -339,7 +340,7 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator impl
 				}
 				final String tableName = auditTableMappings[tableIndex].getTableName();
 				final String sourceTableName = sourceMappings[tableIndex].getTableName();
-				final var revEndMapping = auditMapping.getRevisionEndMapping( sourceTableName );
+				final var revEndMapping = auditMapping.getTransactionEndMapping( sourceTableName );
 				if ( revEndMapping == null ) {
 					continue;
 				}
@@ -353,7 +354,7 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator impl
 				);
 
 				// SET REVEND_TSTMP = :tstmp (if configured)
-				final var revEndTsMapping = auditMapping.getRevisionEndTimestampMapping( sourceTableName );
+				final var revEndTsMapping = auditMapping.getTransactionEndTimestampMapping( sourceTableName );
 				if ( revEndTsMapping != null ) {
 					jdbcValueBindings.bindValue(
 							java.time.Instant.now(), tableName,
@@ -375,7 +376,7 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator impl
 			mutationExecutor.execute(
 					null, null, null,
 					(statementDetails, affectedRowCount, batchPosition) ->
-							verifyRevisionEndOutcome( affectedRowCount, modificationType, entityName, id ),
+							verifyTransactionEndOutcome( affectedRowCount, modificationType, entityName, id ),
 					session
 			);
 		}
@@ -384,7 +385,7 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator impl
 		}
 	}
 
-	private static boolean verifyRevisionEndOutcome(
+	private static boolean verifyTransactionEndOutcome(
 			int affectedRowCount,
 			ModificationType modificationType,
 			String entityName,
@@ -401,7 +402,7 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator impl
 		return true;
 	}
 
-	private MutationOperationGroup buildRevisionEndUpdateGroup() {
+	private MutationOperationGroup buildTransactionEndUpdateGroup() {
 		final EntityTableMapping[] sourceMappings = entityPersister().getTableMappings();
 		final List<TableMutation<?>> mutations = new ArrayList<>();
 		for ( int i = 0; i < auditTableMappings.length; i++ ) {
@@ -409,7 +410,7 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator impl
 				continue;
 			}
 			final String sourceTableName = sourceMappings[i].getTableName();
-			final var revEndMapping = auditMapping.getRevisionEndMapping( sourceTableName );
+			final var revEndMapping = auditMapping.getTransactionEndMapping( sourceTableName );
 			if ( revEndMapping == null ) {
 				continue;
 			}
@@ -425,7 +426,7 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator impl
 			}
 
 			// SET REVEND_TSTMP = ? (if configured)
-			final var revEndTsMapping = auditMapping.getRevisionEndTimestampMapping( sourceTableName );
+			final var revEndTsMapping = auditMapping.getTransactionEndTimestampMapping( sourceTableName );
 			if ( revEndTsMapping != null ) {
 				updateBuilder.addValueColumn( "?", revEndTsMapping );
 			}

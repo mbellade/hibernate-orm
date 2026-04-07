@@ -45,7 +45,6 @@ public class DeleteCoordinatorAudit extends AbstractAuditCoordinator implements 
 		session.getAuditWorkQueue().enqueue(
 				entityEntry.getEntityKey(),
 				entity,
-				entityEntry.getId(),
 				state,
 				ModificationType.DEL,
 				this,

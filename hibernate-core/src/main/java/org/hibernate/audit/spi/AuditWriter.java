@@ -6,6 +6,7 @@ package org.hibernate.audit.spi;
 
 import org.hibernate.Incubating;
 import org.hibernate.audit.ModificationType;
+import org.hibernate.engine.spi.EntityKey;
 import org.hibernate.engine.spi.SharedSessionContractImplementor;
 
 /**
@@ -23,15 +24,15 @@ public interface AuditWriter {
 	 * Write an audit row for the given entity state and modification type.
 	 * Called by the {@link AuditWorkQueue} at transaction completion.
 	 *
+	 * @param entityKey the entity key
 	 * @param entity the entity instance (may be null)
-	 * @param id the entity identifier
 	 * @param values the entity state
 	 * @param modificationType the modification type (ADD/MOD/DEL)
 	 * @param session the current session
 	 */
 	void writeAuditRow(
+			EntityKey entityKey,
 			Object entity,
-			Object id,
 			Object[] values,
 			ModificationType modificationType,
 			SharedSessionContractImplementor session);

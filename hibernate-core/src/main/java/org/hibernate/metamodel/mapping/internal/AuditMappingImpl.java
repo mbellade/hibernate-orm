@@ -74,8 +74,8 @@ public class AuditMappingImpl implements AuditMapping {
 			String auditTableName,
 			SelectableMapping transactionIdMapping,
 			@Nullable SelectableMapping modificationTypeMapping,
-			@Nullable SelectableMapping revisionEndMapping,
-			@Nullable SelectableMapping revisionEndTimestampMapping
+			@Nullable SelectableMapping transactionEndMapping,
+			@Nullable SelectableMapping transactionEndTimestampMapping
 	) {
 		public TableAuditInfo(
 				String auditTableName,
@@ -146,13 +146,13 @@ public class AuditMappingImpl implements AuditMapping {
 	}
 
 	@Override
-	public SelectableMapping getRevisionEndMapping(String originalTableName) {
-		return resolveInfo( originalTableName ).revisionEndMapping;
+	public SelectableMapping getTransactionEndMapping(String originalTableName) {
+		return resolveInfo( originalTableName ).transactionEndMapping;
 	}
 
 	@Override
-	public SelectableMapping getRevisionEndTimestampMapping(String originalTableName) {
-		return resolveInfo( originalTableName ).revisionEndTimestampMapping;
+	public SelectableMapping getTransactionEndTimestampMapping(String originalTableName) {
+		return resolveInfo( originalTableName ).transactionEndTimestampMapping;
 	}
 
 	@Override
@@ -162,11 +162,11 @@ public class AuditMappingImpl implements AuditMapping {
 				anyInfo.transactionIdMapping.getSelectionExpression(),
 				anyInfo.modificationTypeMapping.getSelectionExpression()
 		) );
-		if ( anyInfo.revisionEndMapping != null ) {
-			exprs.add( anyInfo.revisionEndMapping.getSelectionExpression() );
+		if ( anyInfo.transactionEndMapping != null ) {
+			exprs.add( anyInfo.transactionEndMapping.getSelectionExpression() );
 		}
-		if ( anyInfo.revisionEndTimestampMapping != null ) {
-			exprs.add( anyInfo.revisionEndTimestampMapping.getSelectionExpression() );
+		if ( anyInfo.transactionEndTimestampMapping != null ) {
+			exprs.add( anyInfo.transactionEndTimestampMapping.getSelectionExpression() );
 		}
 		return exprs;
 	}
@@ -210,7 +210,7 @@ public class AuditMappingImpl implements AuditMapping {
 			SqlAliasBaseGenerator sqlAliasBaseGenerator,
 			TableAuditInfo info,
 			Expression upperBound) {
-		if ( info.revisionEndMapping != null ) {
+		if ( info.transactionEndMapping != null ) {
 			return createValidityRestriction( tableReference, info, upperBound );
 		}
 		final var subQuerySpec = new QuerySpec( false, 1 );
@@ -282,7 +282,7 @@ public class AuditMappingImpl implements AuditMapping {
 		) );
 
 		// (REVEND > upperBound OR REVEND IS NULL)
-		final var revEndRef = new ColumnReference( tableReference, info.revisionEndMapping );
+		final var revEndRef = new ColumnReference( tableReference, info.transactionEndMapping );
 		final var revEndDisjunction = new Junction( Junction.Nature.DISJUNCTION );
 		revEndDisjunction.add( new ComparisonPredicate( revEndRef, GREATER_THAN, upperBound ) );
 		revEndDisjunction.add( new NullnessPredicate( revEndRef ) );
