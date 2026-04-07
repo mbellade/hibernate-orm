@@ -19,6 +19,7 @@ import org.hibernate.SharedSessionContract;
 import org.hibernate.temporal.spi.TransactionIdentifierSupplier;
 import org.hibernate.testing.orm.junit.DomainModel;
 import org.hibernate.testing.orm.junit.ServiceRegistry;
+import org.hibernate.testing.orm.junit.AuditedTest;
 import org.hibernate.testing.orm.junit.SessionFactory;
 import org.hibernate.testing.orm.junit.SessionFactoryScope;
 import org.hibernate.testing.orm.junit.Setting;
@@ -31,6 +32,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Each table in the hierarchy has its own audit table with per-table
  * temporal predicates.
  */
+@AuditedTest
 @SessionFactory
 @DomainModel(annotatedClasses = {
 		AuditJoinedInheritanceTest.Vehicle.class,

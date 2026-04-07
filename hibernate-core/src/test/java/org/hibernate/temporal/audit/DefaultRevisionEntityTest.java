@@ -9,6 +9,7 @@ import jakarta.persistence.Id;
 import org.hibernate.annotations.Audited;
 import org.hibernate.audit.DefaultRevisionEntity;
 import org.hibernate.testing.orm.junit.DomainModel;
+import org.hibernate.testing.orm.junit.AuditedTest;
 import org.hibernate.testing.orm.junit.SessionFactory;
 import org.hibernate.testing.orm.junit.SessionFactoryScope;
 import org.junit.jupiter.api.Test;
@@ -24,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * auto-detected via {@link org.hibernate.audit.RevisionEntity @RevisionEntity}
  * — no explicit supplier configuration needed.
  */
+@AuditedTest
 @SessionFactory
 @DomainModel(annotatedClasses = {
 		DefaultRevisionEntityTest.Book.class,

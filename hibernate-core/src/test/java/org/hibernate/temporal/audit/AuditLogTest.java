@@ -12,10 +12,11 @@ import org.hibernate.audit.ModificationType;
 import org.hibernate.cfg.StateManagementSettings;
 import org.hibernate.testing.orm.junit.DomainModel;
 import org.hibernate.testing.orm.junit.ServiceRegistry;
+import org.hibernate.testing.orm.junit.AuditedTest;
+import org.hibernate.testing.orm.junit.BeforeClassTemplate;
 import org.hibernate.testing.orm.junit.SessionFactory;
 import org.hibernate.testing.orm.junit.SessionFactoryScope;
 import org.hibernate.testing.orm.junit.Setting;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -36,6 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Tests for the {@link AuditLog} service API.
  */
+@AuditedTest
 @SessionFactory
 @DomainModel(annotatedClasses = {
 		AuditLogTest.AuditedEntity.class,
@@ -76,7 +78,7 @@ class AuditLogTest {
 	private int revUpdate;
 	private int revDelete;
 
-	@BeforeAll
+	@BeforeClassTemplate
 	void setupData(SessionFactoryScope scope) {
 		currentTxId = 0;
 

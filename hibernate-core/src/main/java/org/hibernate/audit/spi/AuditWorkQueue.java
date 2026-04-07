@@ -4,7 +4,9 @@
  */
 package org.hibernate.audit.spi;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.hibernate.Incubating;
@@ -52,6 +54,7 @@ public class AuditWorkQueue implements TransactionCompletionCallbacks.BeforeComp
 		Object[] values;
 		ModificationType modificationType;
 		final AuditWriter writer;
+		final List<CollectionKey> collectionKeys = new ArrayList<>( 0 );
 
 		QueuedEntry(Object entity, Object id, Object[] values,
 				ModificationType modificationType, AuditWriter writer) {
@@ -149,8 +152,16 @@ public class AuditWorkQueue implements TransactionCompletionCallbacks.BeforeComp
 		final var key = new CollectionKey( collectionPersister, ownerId );
 		// Only store the first snapshot — subsequent flushes are ignored,
 		// the diff at completion will use original vs final state
-		collectionEntries.putIfAbsent( key,
-				new QueuedCollectionEntry( collection, ownerId, originalSnapshot, writer ) );
+		if ( collectionEntries.putIfAbsent( key,
+				new QueuedCollectionEntry( collection, ownerId, originalSnapshot, writer ) ) == null ) {
+			// Register this collection key on the owning entity's queue entry
+			// so it can be cleaned up if the entity is cancelled (ADD+DEL)
+			final var ownerKey = new EntityKey( ownerId, collectionPersister.getOwnerEntityPersister() );
+			final var ownerEntry = entries.get( ownerKey );
+			if ( ownerEntry != null ) {
+				ownerEntry.collectionKeys.add( key );
+			}
+		}
 	}
 
 	private void merge(
@@ -161,8 +172,11 @@ public class AuditWorkQueue implements TransactionCompletionCallbacks.BeforeComp
 			ModificationType incoming) {
 		final var merged = mergeModificationType( existing.modificationType, incoming );
 		if ( merged == null ) {
-			// ADD + DEL = cancel out — no audit row
+			// ADD + DEL = cancel out — no audit row for entity or its collections
 			entries.remove( key );
+			for ( var collectionKey : existing.collectionKeys ) {
+				collectionEntries.remove( collectionKey );
+			}
 		}
 		else {
 			existing.modificationType = merged;

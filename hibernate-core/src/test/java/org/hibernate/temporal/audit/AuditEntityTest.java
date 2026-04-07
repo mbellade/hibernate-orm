@@ -247,6 +247,72 @@ class AuditEntityTest {
 		} );
 	}
 
+	/**
+	 * Test collection multi-flush: modify the same collection twice
+	 * with explicit flush between — should produce correct audit rows.
+	 */
+	@Test
+	void testCollectionMultiFlush(SessionFactoryScope scope) {
+		currentTxId = 500;
+
+		// Revision 501: create entity with collection
+		scope.getSessionFactory().inTransaction( session -> {
+			var e = new AuditEntity();
+			e.id = 66L;
+			e.text = "coll-test";
+			e.stringSet.add( "a" );
+			session.persist( e );
+		} );
+
+		// Revision 502: modify collection twice with flush between
+		scope.getSessionFactory().inTransaction( session -> {
+			var e = session.find( AuditEntity.class, 66L );
+			e.stringSet.add( "b" );
+			session.flush();
+			e.stringSet.add( "c" );
+		} );
+
+		// Verify: at revision 502, collection has a, b, c
+		try ( var s = scope.getSessionFactory().withOptions().atTransaction( 502 ).open() ) {
+			var e = s.find( AuditEntity.class, 66L );
+			assertEquals( Set.of( "a", "b", "c" ), e.stringSet );
+		}
+	}
+
+	/**
+	 * Test ADD+DEL cancellation for entity with collection:
+	 * no orphaned collection audit rows should exist.
+	 */
+	@Test
+	void testAddDeleteCancellationWithCollection(SessionFactoryScope scope) {
+		currentTxId = 600;
+
+		scope.getSessionFactory().inTransaction( session -> {
+			var e = new AuditEntity();
+			e.id = 55L;
+			e.text = "ephemeral-coll";
+			e.stringSet.add( "x" );
+			session.persist( e );
+			session.flush();
+			session.remove( e );
+		} );
+
+		// Verify: no entity audit rows
+		scope.getSessionFactory().inSession( session -> {
+			final var revisions = session.getAuditLog().getRevisions( AuditEntity.class, 55L );
+			assertEquals( 0, revisions.size() );
+		} );
+
+		// Verify: no orphaned collection audit rows in the audit table
+		scope.getSessionFactory().inSession( session -> {
+			final var count = session.createNativeQuery(
+					"select count(*) from AuditEntity_stringSet_aud where AuditEntity_id = 55",
+					Long.class
+			).getSingleResult();
+			assertEquals( 0L, count );
+		} );
+	}
+
 	// ---- Entity classes ----
 
 	@Audited

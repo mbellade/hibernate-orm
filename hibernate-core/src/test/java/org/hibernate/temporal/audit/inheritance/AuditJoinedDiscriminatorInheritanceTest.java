@@ -21,6 +21,7 @@ import org.hibernate.SharedSessionContract;
 import org.hibernate.temporal.spi.TransactionIdentifierSupplier;
 import org.hibernate.testing.orm.junit.DomainModel;
 import org.hibernate.testing.orm.junit.ServiceRegistry;
+import org.hibernate.testing.orm.junit.AuditedTest;
 import org.hibernate.testing.orm.junit.SessionFactory;
 import org.hibernate.testing.orm.junit.SessionFactoryScope;
 import org.hibernate.testing.orm.junit.Setting;
@@ -31,6 +32,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Tests @Audited with JOINED inheritance and an explicit discriminator column.
  */
+@AuditedTest
 @SessionFactory
 @DomainModel(annotatedClasses = {
 		AuditJoinedDiscriminatorInheritanceTest.Vehicle.class,

@@ -23,13 +23,13 @@ import org.hibernate.metamodel.mapping.AttributeMapping;
 import org.hibernate.metamodel.mapping.DiscriminatorValue;
 import org.hibernate.metamodel.mapping.PluralAttributeMapping;
 import org.hibernate.persister.entity.EntityPersister;
+import org.hibernate.audit.AuditException;
 import org.hibernate.audit.ModificationType;
 import org.hibernate.audit.spi.AuditWriter;
 import org.hibernate.sql.ast.tree.expression.ColumnReference;
 import org.hibernate.sql.model.MutationOperationGroup;
 import org.hibernate.sql.model.MutationType;
 import org.hibernate.sql.model.ast.ColumnValueBinding;
-import org.hibernate.sql.model.ast.ColumnValueParameter;
 import org.hibernate.sql.model.ast.ColumnWriteFragment;
 import org.hibernate.sql.model.ast.TableMutation;
 import org.hibernate.sql.model.ast.builder.TableInsertBuilderStandard;
@@ -131,7 +131,7 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator impl
 			Object[] values,
 			ModificationType modificationType,
 			SharedSessionContractImplementor session) {
-		updatePreviousRevisionEnd( id, session );
+		updatePreviousRevisionEnd( id, modificationType, session );
 
 		final boolean dynamicInsert = entityPersister().isDynamicInsert();
 		final boolean[] propertyInclusions = applyAuditMask(
@@ -318,10 +318,18 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator impl
 	/**
 	 * Update the previous audit row's REVEND column for the validity strategy.
 	 * Sets {@code REVEND = :currentTxId} on the row with
-	 * {@code REVEND IS NULL AND REV <> :currentTxId} for the given entity ID.
+	 * {@code REVEND IS NULL} for the given entity ID.
+	 * <p>
+	 * Called before the new audit row INSERT, so the just-inserted row
+	 * does not exist yet and there's no risk of self-update.
+	 *
+	 * @param id the entity identifier
+	 * @param modificationType the modification type of the new audit row
+	 * @param session the current session
 	 */
-	protected void updatePreviousRevisionEnd(
+	private void updatePreviousRevisionEnd(
 			Object id,
+			ModificationType modificationType,
 			SharedSessionContractImplementor session) {
 		if ( revisionEndUpdateGroup == null ) {
 			return;
@@ -345,11 +353,10 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator impl
 					continue;
 				}
 
-				final var txId = session.getCurrentTransactionIdentifier();
-
 				// SET REVEND = :txId
 				jdbcValueBindings.bindValue(
-						txId, tableName,
+						session.getCurrentTransactionIdentifier(),
+						tableName,
 						revEndMapping.getSelectionExpression(),
 						ParameterUsage.SET
 				);
@@ -372,20 +379,35 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator impl
 						),
 						session
 				);
-
-				// WHERE REV <> :txId (via the transaction ID column)
-				jdbcValueBindings.bindValue(
-						txId, tableName,
-						auditMapping.getTransactionIdMapping( sourceTableName ).getSelectionExpression(),
-						ParameterUsage.RESTRICT
-				);
 			}
-			// 0 rows affected is valid (e.g. INSERT of a new entity - no previous row to close)
-			mutationExecutor.execute( null, null, null, (s, c, b) -> true, session );
+			final String entityName = entityPersister().getEntityName();
+			mutationExecutor.execute(
+					null, null, null,
+					(statementDetails, affectedRowCount, batchPosition) ->
+							verifyRevisionEndOutcome( affectedRowCount, modificationType, entityName, id ),
+					session
+			);
 		}
 		finally {
 			mutationExecutor.release();
 		}
+	}
+
+	private static boolean verifyRevisionEndOutcome(
+			int affectedRowCount,
+			ModificationType modificationType,
+			String entityName,
+			Object id) {
+		// ADD allows 0 (new entity) or 1 (ID reuse); MOD/DEL requires exactly 1
+		if ( affectedRowCount > 1
+				|| affectedRowCount == 0 && modificationType != ModificationType.ADD ) {
+			throw new AuditException(
+					"Cannot update previous revision for entity "
+							+ entityName + " and id " + id
+							+ " (" + affectedRowCount + " rows modified)."
+			);
+		}
+		return true;
 	}
 
 	private MutationOperationGroup buildRevisionEndUpdateGroup() {
@@ -421,19 +443,6 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator impl
 			sourceMappings[i].getKeyMapping().forEachKeyColumn(
 					(position, keyColumn) -> updateBuilder.addKeyRestrictionBinding( keyColumn )
 			);
-
-			// WHERE REV <> ? (exclude the row we just inserted)
-			final var txIdMapping = auditMapping.getTransactionIdMapping( sourceTableName );
-			final var txIdColumnRef = new ColumnReference( updateBuilder.getMutatingTable(), txIdMapping );
-			updateBuilder.addNonKeyRestriction( new ColumnValueBinding(
-					txIdColumnRef,
-					new ColumnWriteFragment(
-							"?",
-							new ColumnValueParameter( txIdColumnRef, ParameterUsage.RESTRICT ),
-							txIdMapping
-					),
-					true
-			) );
 
 			// WHERE REVEND IS NULL (only update the current row)
 			final var revEndColumnRef = new ColumnReference( updateBuilder.getMutatingTable(), revEndMapping );

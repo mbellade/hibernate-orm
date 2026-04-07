@@ -5,6 +5,7 @@
 package org.hibernate.persister.collection.mutation;
 
 import org.hibernate.audit.ModificationType;
+import org.hibernate.engine.jdbc.mutation.ParameterUsage;
 import org.hibernate.audit.spi.AuditWorkQueue;
 import org.hibernate.audit.spi.CollectionAuditWriter;
 import org.hibernate.collection.spi.PersistentArrayHolder;
@@ -143,7 +144,11 @@ public class InsertRowsCoordinatorAudit implements InsertRowsCoordinator, Collec
 			}
 			else {
 				// Diff original snapshot vs final collection state
-				for ( var change : computeCollectionChanges( collection, collectionDescriptor, originalSnapshot ) ) {
+				final var changes = computeCollectionChanges( collection, collectionDescriptor, originalSnapshot );
+				// Close previous rows' REVEND for elements being removed/replaced
+				updateElementRevisionEnd( collection, id, changes, session );
+				// Write ADD/DEL audit rows
+				for ( var change : changes ) {
 					bindings.bindInsertValues(
 							collection,
 							id,
@@ -155,6 +160,54 @@ public class InsertRowsCoordinatorAudit implements InsertRowsCoordinator, Collec
 					);
 					mutationExecutor.execute( change.rawEntry, null, null, null, session );
 				}
+			}
+		}
+		finally {
+			mutationExecutor.release();
+		}
+	}
+
+	/**
+	 * For each DEL entry in the diff, update the corresponding previous
+	 * audit row's REVEND to mark it as superseded.
+	 */
+	private void updateElementRevisionEnd(
+			PersistentCollection<?> collection,
+			Object ownerId,
+			List<AuditChange> changes,
+			SharedSessionContractImplementor session) {
+		final var updateGroup = getAuditHelper().getRevisionEndUpdateGroup();
+		if ( updateGroup == null ) {
+			return;
+		}
+		final var mutationExecutor = mutationExecutorService.createExecutor(
+				() -> auditBatchKey,
+				updateGroup,
+				session
+		);
+		try {
+			final var tableName = getAuditHelper().getAuditTableMapping().getTableName();
+			final var txId = session.getCurrentTransactionIdentifier();
+			final var auditMapping = mutationTarget.getTargetPart().getAuditMapping();
+			final var collectionTableName = mutationTarget.getCollectionTableMapping().getTableName();
+			final var revEndMapping = auditMapping.getRevisionEndMapping( collectionTableName );
+			final var bindings = getAuditHelper().getRowMutationHelper();
+
+			// Update REVEND for ALL changes (not just DEL) to cover both removed and replaced elements
+			for ( var change : changes ) {
+				final var jdbcValueBindings = mutationExecutor.getJdbcValueBindings();
+
+				// SET REVEND = :txId
+				jdbcValueBindings.bindValue( txId, tableName,
+						revEndMapping.getSelectionExpression(), ParameterUsage.SET );
+
+				// WHERE: bind key + index/element columns (same as INSERT but RESTRICT)
+				bindings.bindRestrictValues(
+						collection, ownerId, change.rawEntry, change.position,
+						session, jdbcValueBindings );
+
+				// 0 rows is valid (element might not have a previous audit row)
+				mutationExecutor.execute( null, null, null, (s, c, b) -> true, session );
 			}
 		}
 		finally {

@@ -509,16 +509,19 @@ Mutation coordinators enqueue audit entries instead of writing them directly.
 
 ==== Implementation tasks
 
-* [ ] Define `AuditWorkQueue` (or `AuditProcess`) — transaction-scoped, keyed by `(entityName, id)`
-* [ ] Define merge logic for `ModificationType` transitions
-* [ ] Register `beforeTransactionCompletion` callback to flush the queue
-* [ ] Refactor `AbstractAuditCoordinator.insertAuditRow()` → enqueue instead of write
-* [ ] Refactor `updatePreviousRevisionEnd()` → run at transaction completion
-* [ ] Refactor collection audit coordinators → enqueue instead of write
-* [ ] Test: multi-flush scenario (modify same entity twice in one tx)
-* [ ] Test: ADD+DEL cancellation (insert and delete in same tx → no audit row)
-* [ ] Test: normal single-flush scenario still works
-* [ ] Collection audit coordinators: defer writes via `AuditWorkQueue` (keyed by `(ownerId, collectionRole)`)
+* [x] Define `AuditWorkQueue` SPI — transaction-scoped, keyed by `EntityKey` (entities)
+  and `CollectionKey` (collections)
+* [x] Define merge logic for `ModificationType` transitions
+* [x] Register `BeforeCompletionCallback` to flush the queue
+* [x] Refactor `AbstractAuditCoordinator` → `enqueueAuditEntry()` + `writeAuditRow()` (via `AuditWriter` SPI)
+* [x] Refactor collection coordinators → `enqueueCollection()` + `writeCollectionAuditRows()`
+  (via `CollectionAuditWriter` SPI, snapshot capture for deferred diff)
+* [x] Test: multi-flush scenario (`testMultiFlushMerge`)
+* [x] Test: ADD+DEL cancellation (`testAddDeleteCancellation`, `testAddDeleteCancellationWithCollection`)
+* [x] Test: ADD+MOD merge (`testAddModMerge`)
+* [x] Test: collection multi-flush (`testCollectionMultiFlush`)
+* [x] Verified: ADD+DEL cancellation does NOT orphan collection entries — deleted entity has
+  empty collection, so the deferred diff produces no rows
 
 NOTE: `@Temporal` entities with `HISTORY_TABLE` strategy have the same multi-flush problem
 (inline `insertHistoryRow` with same `row_start` → PK violation). This is a broader architectural
@@ -1561,16 +1564,14 @@ The following capabilities were verified with dedicated smoke tests (`AuditSmoke
 
 | G6
 | **ValidityAuditStrategy** (REVEND / REVEND_TSTMP columns)
-| High
-| Read-side performance optimization: range query (`REV \<= ? AND REVEND > ?`) instead of
-  MAX subquery. Widely used in production for large audit tables. Migration concern: users
-  moving from envers ValidityAuditStrategy get slower reads even though data is compatible.
-  Write-side: update previous audit row's REVEND on each new audit row.
-  Envers has 6 related settings (`audit_strategy`, `validity_end_rev_field_name`,
-  `validity_store_revend_timestamp`, `validity_revend_timestamp_field_name`,
-  `validity_revend_timestamp_numeric`, `validity_revend_timestamp_legacy_placement`,
-  `allow_identifier_reuse`).
-  See <<ValidityAuditStrategy Design>> for implementation plan.
+| [green]#DONE#
+| `hibernate.audit.strategy=validity` + `@Audited(revisionEnd, revisionEndTimestamp)`.
+  REVEND on root, TPC subclass, and collection audit tables (not secondary, not JOINED —
+  matching envers). Range-based read predicate. Per-element REVEND UPDATE for collections.
+  Deferred audit writes via `AuditWorkQueue` prevent multi-flush PK violations.
+  `@AuditedTest` runs all tests with both strategies.
+  Minor difference from envers: `allow_identifier_reuse` not exposed as a setting — ID reuse
+  is handled implicitly (REVEND UPDATE for ADD accepts 0 or 1 affected rows).
 |===
 
 NOTE: G1 (inheritance), G2 (OneToMany), G3 (ManyToMany), G4 (composite keys), G13 (secondary tables)
@@ -1844,20 +1845,18 @@ For default strategy, `revisionEndMapping` is null — existing code paths are u
 
 === Implementation Tasks
 
-* [ ] Add `hibernate.audit.strategy` property to `StateManagementSettings`
-* [ ] Add `revisionEnd()` and `revisionEndTimestamp()` attributes to `@Audited`
-* [ ] Boot-time: create REVEND (+ optional REVEND_TSTMP) column in `AuditHelper` when validity active
-* [ ] Extend `TableAuditInfo` with `revisionEndMapping` and `revisionEndTimestampMapping`
-* [ ] Wire REVEND mapping in `AuditStateManagement.createTableAuditInfo()`
-* [ ] Read-side: `createValidityRestriction()` in `AuditMappingImpl` (range predicate)
-* [ ] Write-side: `updatePreviousRevisionEnd()` in `AbstractAuditCoordinator`
-* [ ] Wire REVEND UPDATE in entity audit coordinators (Insert/Update/Delete)
-* [ ] Wire REVEND UPDATE in collection audit coordinators
-* [ ] REVEND in TABLE_PER_CLASS union subquery branches
-* [ ] Tests: schema, reads, writes, inheritance strategies, collections, ALL_REVISIONS mode
-
-NOTE: The write-side tasks above depend on <<Deferred Audit Writes>> — both the audit INSERT
-and REVEND UPDATE must happen at transaction completion, not inline at flush time.
+* [x] Add `hibernate.audit.strategy` property to `StateManagementSettings`
+* [x] Add `revisionEnd()` and `revisionEndTimestamp()` attributes to `@Audited`
+* [x] Boot-time: create REVEND (+ optional REVEND_TSTMP) column in `AuditHelper` when validity active
+* [x] Extend `TableAuditInfo` with `revisionEndMapping` and `revisionEndTimestampMapping`
+* [x] Wire REVEND mapping in `AuditStateManagement.createTableAuditInfo()`
+* [x] Read-side: `createValidityRestriction()` in `AuditMappingImpl` (range predicate)
+* [x] Write-side: `updatePreviousRevisionEnd()` in `AbstractAuditCoordinator`
+* [x] Wire REVEND UPDATE in entity audit coordinators (Insert/Update/Delete)
+* [x] Wire REVEND UPDATE in collection audit coordinators (per-element, matching envers HHH-5967)
+* [x] REVEND in TABLE_PER_CLASS union subquery branches
+* [x] Tests: all 19 audit test classes run with both strategies via `@AuditedTest`
+* [x] Deferred audit writes via `AuditWorkQueue` — prerequisite for correctness
 
 === Design Consideration: AuditStrategy as SPI
 

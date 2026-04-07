@@ -10,9 +10,15 @@ import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.hibernate.metamodel.mapping.AuditMapping;
 import org.hibernate.metamodel.mapping.SelectableMapping;
 import org.hibernate.metamodel.mapping.internal.OneToManyCollectionPart;
+import org.hibernate.sql.ast.tree.expression.ColumnReference;
 import org.hibernate.sql.model.MutationOperationGroup;
 import org.hibernate.sql.model.MutationType;
+import org.hibernate.sql.model.ast.ColumnValueBinding;
+import org.hibernate.sql.model.ast.ColumnWriteFragment;
 import org.hibernate.sql.model.ast.builder.TableInsertBuilderStandard;
+import org.hibernate.sql.model.ast.builder.TableUpdateBuilderStandard;
+
+import java.util.List;
 
 import static org.hibernate.sql.model.internal.MutationOperationGroupFactory.singleOperation;
 
@@ -25,6 +31,7 @@ public final class AuditCollectionHelper {
 	private final CollectionTableMapping auditTableMapping;
 	private final SelectableMapping transactionIdMapping;
 	private final SelectableMapping modificationTypeMapping;
+	private final SelectableMapping revisionEndMapping;
 	private final boolean useServerTransactionTimestamps;
 	private final String currentTimestampFunctionName;
 	private final boolean[] indexColumnIsSettable;
@@ -32,6 +39,7 @@ public final class AuditCollectionHelper {
 	private final UnaryOperator<Object> indexIncrementer;
 
 	private MutationOperationGroup auditInsertOperationGroup;
+	private MutationOperationGroup revisionEndUpdateGroup;
 	private AuditCollectionRowMutationHelper rowMutationHelper;
 
 	AuditCollectionHelper(
@@ -53,6 +61,7 @@ public final class AuditCollectionHelper {
 		);
 		this.transactionIdMapping = auditMapping.getTransactionIdMapping( collectionTableName );
 		this.modificationTypeMapping = auditMapping.getModificationTypeMapping( collectionTableName );
+		this.revisionEndMapping = auditMapping.getRevisionEndMapping( collectionTableName );
 		this.useServerTransactionTimestamps =
 				sessionFactory.getTransactionIdentifierService().isDisabled();
 		this.currentTimestampFunctionName = useServerTransactionTimestamps
@@ -85,6 +94,13 @@ public final class AuditCollectionHelper {
 			);
 		}
 		return rowMutationHelper;
+	}
+
+	MutationOperationGroup getRevisionEndUpdateGroup() {
+		if ( revisionEndUpdateGroup == null && revisionEndMapping != null ) {
+			revisionEndUpdateGroup = buildRevisionEndUpdateGroup();
+		}
+		return revisionEndUpdateGroup;
 	}
 
 	private MutationOperationGroup buildAuditInsertOperationGroup() {
@@ -128,5 +144,60 @@ public final class AuditCollectionHelper {
 			insertBuilder.addValueColumn( "?", transactionIdMapping );
 		}
 		insertBuilder.addValueColumn( "?", modificationTypeMapping );
+	}
+
+	private MutationOperationGroup buildRevisionEndUpdateGroup() {
+		final var updateBuilder =
+				new TableUpdateBuilderStandard<>( mutationTarget, auditTableMapping, sessionFactory );
+		final var attributeMapping = mutationTarget.getTargetPart();
+
+		// SET REVEND = ?
+		if ( useServerTransactionTimestamps ) {
+			updateBuilder.addValueColumn( currentTimestampFunctionName, revisionEndMapping );
+		}
+		else {
+			updateBuilder.addValueColumn( "?", revisionEndMapping );
+		}
+
+		// WHERE: same identity columns as the INSERT (key + index/identifier + element)
+		attributeMapping.getKeyDescriptor().getKeyPart()
+				.forEachSelectable( (index, selectable) ->
+						updateBuilder.addKeyRestrictionBinding( selectable ) );
+
+		final var identifierDescriptor = attributeMapping.getIdentifierDescriptor();
+		if ( identifierDescriptor != null ) {
+			identifierDescriptor.forEachSelectable( (index, selectable) ->
+					updateBuilder.addKeyRestrictionBinding( selectable ) );
+		}
+		else {
+			final var indexDescriptor = attributeMapping.getIndexDescriptor();
+			if ( indexDescriptor != null ) {
+				indexDescriptor.forEachSelectable( (index, selectable) ->
+						updateBuilder.addKeyRestrictionBinding( selectable ) );
+			}
+		}
+
+		final var elementDescriptor = attributeMapping.getElementDescriptor();
+		if ( elementDescriptor instanceof OneToManyCollectionPart oneToMany ) {
+			oneToMany.getAssociatedEntityMappingType().getIdentifierMapping()
+					.forEachSelectable( (index, selectable) ->
+							updateBuilder.addKeyRestrictionBinding( selectable ) );
+		}
+		else {
+			elementDescriptor.forEachSelectable( (index, selectable) ->
+					updateBuilder.addKeyRestrictionBinding( selectable ) );
+		}
+
+		// WHERE REVEND IS NULL
+		final var revEndColumnRef = new ColumnReference(
+				updateBuilder.getMutatingTable(), revisionEndMapping );
+		updateBuilder.addNonKeyRestriction( new ColumnValueBinding(
+				revEndColumnRef,
+				new ColumnWriteFragment( null, List.of(), revisionEndMapping )
+		) );
+
+		final var tableUpdate = updateBuilder.buildMutation();
+		final var operation = tableUpdate.createMutationOperation( null, sessionFactory );
+		return operation == null ? null : singleOperation( MutationType.UPDATE, mutationTarget, operation );
 	}
 }

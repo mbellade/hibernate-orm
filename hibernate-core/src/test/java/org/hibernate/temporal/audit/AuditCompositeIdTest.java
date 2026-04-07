@@ -18,6 +18,7 @@ import org.hibernate.SharedSessionContract;
 import org.hibernate.temporal.spi.TransactionIdentifierSupplier;
 import org.hibernate.testing.orm.junit.DomainModel;
 import org.hibernate.testing.orm.junit.ServiceRegistry;
+import org.hibernate.testing.orm.junit.AuditedTest;
 import org.hibernate.testing.orm.junit.SessionFactory;
 import org.hibernate.testing.orm.junit.SessionFactoryScope;
 import org.hibernate.testing.orm.junit.Setting;
@@ -29,6 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Tests @Audited with composite identifiers: @EmbeddedId, @IdClass,
  * and non-aggregated multiple @Id.
  */
+@AuditedTest
 @SessionFactory
 @DomainModel(annotatedClasses = {
 		AuditCompositeIdTest.EmbeddedIdEntity.class,

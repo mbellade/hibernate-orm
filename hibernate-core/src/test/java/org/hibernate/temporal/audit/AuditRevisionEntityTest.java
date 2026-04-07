@@ -15,6 +15,7 @@ import org.hibernate.audit.RevisionListener;
 import org.hibernate.audit.RevisionNumber;
 import org.hibernate.audit.RevisionTimestamp;
 import org.hibernate.testing.orm.junit.DomainModel;
+import org.hibernate.testing.orm.junit.AuditedTest;
 import org.hibernate.testing.orm.junit.SessionFactory;
 import org.hibernate.testing.orm.junit.SessionFactoryScope;
 import org.junit.jupiter.api.Test;
@@ -29,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * auto-detection with a custom revision entity and
  * {@link RevisionListener}.
  */
+@AuditedTest
 @SessionFactory
 @DomainModel(annotatedClasses = {
 		AuditRevisionEntityTest.MyEntity.class,

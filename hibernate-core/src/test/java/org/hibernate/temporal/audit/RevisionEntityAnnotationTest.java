@@ -14,6 +14,7 @@ import org.hibernate.audit.RevisionEntity;
 import org.hibernate.audit.RevisionNumber;
 import org.hibernate.audit.RevisionTimestamp;
 import org.hibernate.testing.orm.junit.DomainModel;
+import org.hibernate.testing.orm.junit.AuditedTest;
 import org.hibernate.testing.orm.junit.SessionFactory;
 import org.hibernate.testing.orm.junit.SessionFactoryScope;
 import org.junit.jupiter.api.Test;
@@ -27,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
  * works without an explicit {@code hibernate.temporal.transaction_id_supplier}
  * setting.
  */
+@AuditedTest
 @SessionFactory
 @DomainModel(annotatedClasses = {
 		RevisionEntityAnnotationTest.Book.class,
