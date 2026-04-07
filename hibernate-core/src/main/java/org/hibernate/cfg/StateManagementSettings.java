@@ -92,4 +92,29 @@ public interface StateManagementSettings {
 	 * @since 7.4
 	 */
 	String TRANSACTION_ID_SUPPLIER = "hibernate.temporal.transaction_id_supplier";
+
+	/**
+	 * Specifies the audit strategy for
+	 * {@linkplain org.hibernate.annotations.Audited audited} entities.
+	 * <p>
+	 * Accepts:
+	 * <ul>
+	 *     <li>{@code "default"} — each point-in-time query uses a
+	 *     {@code MAX(REV)} subquery to find the current audit row
+	 *     (no additional schema requirements), or
+	 *     <li>{@code "validity"} — each audit row carries a
+	 *     {@code REVEND} column marking when it was superseded;
+	 *     point-in-time queries use a simple range predicate
+	 *     ({@code REV <= :txId AND (REVEND > :txId OR REVEND IS NULL)})
+	 *     instead of a subquery, which is significantly faster for
+	 *     large audit tables.
+	 * </ul>
+	 *
+	 * @settingDefault {@code "default"}
+	 * @see org.hibernate.annotations.Audited
+	 *
+	 * @since 7.4
+	 */
+	@Incubating
+	String AUDIT_STRATEGY = "hibernate.audit.strategy";
 }

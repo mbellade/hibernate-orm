@@ -4,9 +4,14 @@
  */
 package org.hibernate.persister.state.internal;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
+import org.checkerframework.checker.nullness.qual.Nullable;
+
+import org.hibernate.mapping.Column;
 import java.util.function.Function;
 
 import org.hibernate.audit.ModificationType;
@@ -16,10 +21,13 @@ import org.hibernate.mapping.PersistentClass;
 import org.hibernate.mapping.RootClass;
 import org.hibernate.mapping.Table;
 import org.hibernate.metamodel.mapping.JdbcMapping;
+import org.hibernate.metamodel.mapping.SelectableMapping;
 import org.hibernate.metamodel.mapping.internal.SelectableMappingImpl;
 import org.hibernate.type.spi.TypeConfiguration;
 
 import static org.hibernate.boot.model.internal.AuditHelper.MODIFICATION_TYPE;
+import static org.hibernate.boot.model.internal.AuditHelper.REVISION_END;
+import static org.hibernate.boot.model.internal.AuditHelper.REVISION_END_TIMESTAMP;
 import static org.hibernate.boot.model.internal.AuditHelper.TRANSACTION_ID;
 import org.hibernate.metamodel.mapping.AuditMapping;
 import org.hibernate.metamodel.mapping.PluralAttributeMapping;
@@ -173,10 +181,17 @@ public class AuditStateManagement implements StateManagement {
 		if ( persister instanceof UnionSubclassEntityPersister ) {
 			tableNameResolver = originalName -> map.get( originalName ).auditTableName();
 			final var rootInfo = map.values().iterator().next();
-			extraColumns = List.of(
+			final var extras = new ArrayList<>( List.of(
 					rootInfo.transactionIdMapping().getSelectionExpression(),
 					rootInfo.modificationTypeMapping().getSelectionExpression()
-			);
+			) );
+			if ( rootInfo.revisionEndMapping() != null ) {
+				extras.add( rootInfo.revisionEndMapping().getSelectionExpression() );
+			}
+			if ( rootInfo.revisionEndTimestampMapping() != null ) {
+				extras.add( rootInfo.revisionEndTimestampMapping().getSelectionExpression() );
+			}
+			extraColumns = extras;
 		}
 		else {
 			tableNameResolver = null;
@@ -231,7 +246,9 @@ public class AuditStateManagement implements StateManagement {
 		map.put( originalSubquery, new AuditMappingImpl.TableAuditInfo(
 				auditSubquery,
 				rootInfo.transactionIdMapping(),
-				rootInfo.modificationTypeMapping()
+				rootInfo.modificationTypeMapping(),
+				rootInfo.revisionEndMapping(),
+				rootInfo.revisionEndTimestampMapping()
 		) );
 	}
 
@@ -258,24 +275,39 @@ public class AuditStateManagement implements StateManagement {
 			MappingModelCreationProcess creationProcess) {
 		final var creationContext = creationProcess.getCreationContext();
 		final var typeConfiguration = creationContext.getTypeConfiguration();
-		final var dialect = creationContext.getDialect();
-		final var sqmFunctionRegistry =
-				creationContext.getSessionFactory().getQueryEngine().getSqmFunctionRegistry();
-		final var modTypeColumn = holder.getAuxiliaryColumn( MODIFICATION_TYPE );
 		return new AuditMappingImpl.TableAuditInfo(
 				auditTableName,
-				SelectableMappingImpl.from(
-						auditTableName, holder.getAuxiliaryColumn( TRANSACTION_ID ),
-						txIdJdbcMapping, typeConfiguration, true, false, false,
-						dialect, sqmFunctionRegistry, creationContext
-				),
-				modTypeColumn != null
-						? SelectableMappingImpl.from(
-								auditTableName, modTypeColumn,
-								modTypeJdbcMapping, typeConfiguration, true, false, false,
-								dialect, sqmFunctionRegistry, creationContext
-						)
-						: null
+				toSelectableMapping( auditTableName, holder.getAuxiliaryColumn( TRANSACTION_ID ),
+						txIdJdbcMapping, creationProcess ),
+				toSelectableMapping( auditTableName, holder.getAuxiliaryColumn( MODIFICATION_TYPE ),
+						modTypeJdbcMapping, creationProcess ),
+				toSelectableMapping( auditTableName, holder.getAuxiliaryColumn( REVISION_END ),
+						txIdJdbcMapping, creationProcess ),
+				toSelectableMapping( auditTableName, holder.getAuxiliaryColumn( REVISION_END_TIMESTAMP ),
+						resolveJdbcMapping( typeConfiguration, java.time.Instant.class ), creationProcess )
+		);
+	}
+
+	private static @Nullable SelectableMapping toSelectableMapping(
+			String tableName,
+			@Nullable Column column,
+			JdbcMapping jdbcMapping,
+			MappingModelCreationProcess creationProcess) {
+		if ( column == null ) {
+			return null;
+		}
+		final var creationContext = creationProcess.getCreationContext();
+		return SelectableMappingImpl.from(
+				tableName,
+				column,
+				jdbcMapping,
+				creationContext.getTypeConfiguration(),
+				true,
+				false,
+				false,
+				creationContext.getDialect(),
+				creationContext.getSessionFactory().getQueryEngine().getSqmFunctionRegistry(),
+				creationContext
 		);
 	}
 

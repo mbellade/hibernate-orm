@@ -4,6 +4,8 @@
  */
 package org.hibernate.engine.spi;
 
+import org.hibernate.audit.spi.AuditWorkQueue;
+
 import jakarta.persistence.EntityGraph;
 import jakarta.persistence.TypedQueryReference;
 import jakarta.persistence.criteria.CriteriaDelete;
@@ -80,6 +82,11 @@ public class SharedSessionDelegatorBaseImpl implements SharedSessionContractImpl
 	@Override
 	public org.hibernate.audit.AuditLog getAuditLog() {
 		return delegate.getAuditLog();
+	}
+
+	@Override
+	public AuditWorkQueue getAuditWorkQueue() {
+		return delegate.getAuditWorkQueue();
 	}
 
 	@Override

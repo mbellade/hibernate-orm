@@ -35,10 +35,10 @@ public class DeleteCoordinatorAudit extends AbstractAuditCoordinator implements 
 			Object id,
 			Object version,
 			SharedSessionContractImplementor session) {
-		currentDeleteCoordinator.delete( entity, id, version, session );
 		final var state = resolveDeleteState( entity, session );
+		currentDeleteCoordinator.delete( entity, id, version, session );
 		if ( state != null ) {
-			insertAuditRow( entity, id, state, ModificationType.DEL, session );
+			enqueueAuditEntry( entity, id, state, ModificationType.DEL, session );
 		}
 	}
 

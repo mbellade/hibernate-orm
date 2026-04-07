@@ -40,6 +40,7 @@ import org.hibernate.sql.ast.tree.from.TableReference;
 import org.hibernate.sql.ast.tree.from.TableReferenceJoin;
 import org.hibernate.sql.ast.tree.predicate.ComparisonPredicate;
 import org.hibernate.sql.ast.tree.predicate.Junction;
+import org.hibernate.sql.ast.tree.predicate.NullnessPredicate;
 import org.hibernate.sql.ast.tree.predicate.Predicate;
 import org.hibernate.sql.ast.tree.select.QuerySpec;
 import org.hibernate.sql.ast.tree.select.SelectStatement;
@@ -48,8 +49,11 @@ import org.hibernate.sql.results.internal.SqlSelectionImpl;
 import org.hibernate.type.BasicType;
 import org.hibernate.type.spi.TypeConfiguration;
 
+import org.checkerframework.checker.nullness.qual.Nullable;
+
 import static java.util.Collections.singletonList;
 import static org.hibernate.query.sqm.ComparisonOperator.EQUAL;
+import static org.hibernate.query.sqm.ComparisonOperator.GREATER_THAN;
 import static org.hibernate.query.sqm.ComparisonOperator.LESS_THAN_OR_EQUAL;
 import static org.hibernate.query.sqm.ComparisonOperator.NOT_EQUAL;
 
@@ -69,8 +73,17 @@ public class AuditMappingImpl implements AuditMapping {
 	public record TableAuditInfo(
 			String auditTableName,
 			SelectableMapping transactionIdMapping,
-			SelectableMapping modificationTypeMapping
-	) {}
+			@Nullable SelectableMapping modificationTypeMapping,
+			@Nullable SelectableMapping revisionEndMapping,
+			@Nullable SelectableMapping revisionEndTimestampMapping
+	) {
+		public TableAuditInfo(
+				String auditTableName,
+				SelectableMapping transactionIdMapping,
+				@Nullable SelectableMapping modificationTypeMapping) {
+			this( auditTableName, transactionIdMapping, modificationTypeMapping, null, null );
+		}
+	}
 
 	private final Map<String, TableAuditInfo> tableAuditInfoMap;
 
@@ -133,12 +146,29 @@ public class AuditMappingImpl implements AuditMapping {
 	}
 
 	@Override
+	public SelectableMapping getRevisionEndMapping(String originalTableName) {
+		return resolveInfo( originalTableName ).revisionEndMapping;
+	}
+
+	@Override
+	public SelectableMapping getRevisionEndTimestampMapping(String originalTableName) {
+		return resolveInfo( originalTableName ).revisionEndTimestampMapping;
+	}
+
+	@Override
 	public List<String> getExtraSelectExpressions() {
 		final var anyInfo = tableAuditInfoMap.values().iterator().next();
-		return List.of(
+		final var exprs = new ArrayList<>( List.of(
 				anyInfo.transactionIdMapping.getSelectionExpression(),
 				anyInfo.modificationTypeMapping.getSelectionExpression()
-		);
+		) );
+		if ( anyInfo.revisionEndMapping != null ) {
+			exprs.add( anyInfo.revisionEndMapping.getSelectionExpression() );
+		}
+		if ( anyInfo.revisionEndTimestampMapping != null ) {
+			exprs.add( anyInfo.revisionEndTimestampMapping.getSelectionExpression() );
+		}
+		return exprs;
 	}
 
 	@Override
@@ -165,8 +195,13 @@ public class AuditMappingImpl implements AuditMapping {
 	}
 
 	/**
-	 * Build the temporal restriction predicate:
+	 * Build the temporal restriction predicate.
+	 * <p>
+	 * For the default strategy:
 	 * {@code REV = (SELECT MAX(REV) ... WHERE REV <= upperBound) AND REVTYPE <> 2}
+	 * <p>
+	 * For the validity strategy:
+	 * {@code REV <= upperBound AND (REVEND > upperBound OR REVEND IS NULL) AND REVTYPE <> 2}
 	 */
 	private Predicate createRestriction(
 			TableGroupProducer tableGroupProducer,
@@ -175,6 +210,9 @@ public class AuditMappingImpl implements AuditMapping {
 			SqlAliasBaseGenerator sqlAliasBaseGenerator,
 			TableAuditInfo info,
 			Expression upperBound) {
+		if ( info.revisionEndMapping != null ) {
+			return createValidityRestriction( tableReference, info, upperBound );
+		}
 		final var subQuerySpec = new QuerySpec( false, 1 );
 		final String stem = tableGroupProducer.getSqlAliasStem();
 		final String aliasStem = stem == null ? SUBQUERY_ALIAS_STEM : stem;
@@ -224,6 +262,41 @@ public class AuditMappingImpl implements AuditMapping {
 			) );
 		}
 		return auditPredicate;
+	}
+
+	/**
+	 * Build the validity strategy restriction:
+	 * {@code REV <= upperBound AND (REVEND > upperBound OR REVEND IS NULL) AND REVTYPE <> DEL}
+	 */
+	private static Predicate createValidityRestriction(
+			TableReference tableReference,
+			TableAuditInfo info,
+			Expression upperBound) {
+		final var predicate = new Junction( Junction.Nature.CONJUNCTION );
+
+		// REV <= upperBound
+		predicate.add( new ComparisonPredicate(
+				new ColumnReference( tableReference, info.transactionIdMapping ),
+				LESS_THAN_OR_EQUAL,
+				upperBound
+		) );
+
+		// (REVEND > upperBound OR REVEND IS NULL)
+		final var revEndRef = new ColumnReference( tableReference, info.revisionEndMapping );
+		final var revEndDisjunction = new Junction( Junction.Nature.DISJUNCTION );
+		revEndDisjunction.add( new ComparisonPredicate( revEndRef, GREATER_THAN, upperBound ) );
+		revEndDisjunction.add( new NullnessPredicate( revEndRef ) );
+		predicate.add( revEndDisjunction );
+
+		// REVTYPE <> DEL (when applicable)
+		if ( info.modificationTypeMapping != null ) {
+			predicate.add( new ComparisonPredicate(
+					new ColumnReference( tableReference, info.modificationTypeMapping ),
+					NOT_EQUAL,
+					new JdbcLiteral<>( ModificationType.DEL, info.modificationTypeMapping.getJdbcMapping() )
+			) );
+		}
+		return predicate;
 	}
 
 	private AggregateFunctionExpression buildMaxExpression(ColumnReference expression) {

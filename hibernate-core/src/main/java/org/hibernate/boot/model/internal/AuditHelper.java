@@ -14,6 +14,8 @@ import org.hibernate.boot.model.naming.Identifier;
 import org.hibernate.boot.model.naming.PhysicalNamingStrategy;
 import org.hibernate.boot.model.relational.Database;
 import org.hibernate.boot.spi.MetadataBuildingContext;
+import org.hibernate.cfg.StateManagementSettings;
+import org.hibernate.mapping.AuxiliaryTableHolder;
 import org.hibernate.mapping.Backref;
 import org.hibernate.mapping.BasicValue;
 import org.hibernate.mapping.Collection;
@@ -36,6 +38,8 @@ import static org.hibernate.internal.util.StringHelper.isBlank;
 public final class AuditHelper {
 	public static final String TRANSACTION_ID = "transactionId";
 	public static final String MODIFICATION_TYPE = "modificationType";
+	public static final String REVISION_END = "revisionEnd";
+	public static final String REVISION_END_TIMESTAMP = "revisionEndTimestamp";
 
 	// defaults for backward compatibility with envers
 
@@ -112,6 +116,7 @@ public final class AuditHelper {
 				createAuditPrimaryKey( auditTable, transactionIdColumn, table.getPrimaryKey().getColumns() );
 			}
 			enableAudit( auditable, auditTable, transactionIdColumn, modificationTypeColumn );
+			addRevisionEndColumns( audited, auditable, auditTable, context );
 		} );
 	}
 
@@ -140,7 +145,7 @@ public final class AuditHelper {
 								getTransactionIdType( context ), auditTable, context );
 				auditTable.addColumn( transactionIdColumn );
 				createAuditPrimaryKey( auditTable, transactionIdColumn, joinTable.getPrimaryKey().getColumns() );
-				// Secondary tables only get tx-id, not mod type
+				// Secondary tables only get tx-id (no mod type, no REVEND)
 				join.setAuxiliaryTable( auditTable );
 				join.addAuxiliaryColumn( TRANSACTION_ID, transactionIdColumn );
 			}
@@ -186,6 +191,11 @@ public final class AuditHelper {
 						subclass.addAuxiliaryColumn( MODIFICATION_TYPE, modificationTypeColumn );
 					}
 					subclass.setAuxiliaryTable( subAuditTable );
+					// TABLE_PER_CLASS: each table is self-contained, needs REVEND
+					// JOINED: REVEND only on root table (matches envers behavior)
+					if ( subclass instanceof UnionSubclass ) {
+						addRevisionEndColumns( audited, subclass, subAuditTable, context );
+					}
 				}
 			}
 		} );
@@ -269,6 +279,7 @@ public final class AuditHelper {
 			auditTable.addColumn( modificationTypeColumn );
 			createAuditPrimaryKey( auditTable, transactionIdColumn, keyColumns );
 			enableAudit( collection, auditTable, transactionIdColumn, modificationTypeColumn );
+			addRevisionEndColumns( audited, collection, auditTable, context );
 		} );
 	}
 
@@ -344,6 +355,39 @@ public final class AuditHelper {
 					database.getJdbcEnvironment()
 				);
 		column.setName( physicalColumnName.render( database.getDialect() ) );
+	}
+
+	static boolean isValidityStrategy(MetadataBuildingContext context) {
+		final var value = context.getBootstrapContext().getServiceRegistry()
+				.requireService( org.hibernate.engine.config.spi.ConfigurationService.class )
+				.getSetting( StateManagementSettings.AUDIT_STRATEGY, String.class, "default" );
+		return "validity".equalsIgnoreCase( value );
+	}
+
+	private static void addRevisionEndColumns(
+			Audited audited,
+			AuxiliaryTableHolder holder,
+			Table auditTable,
+			MetadataBuildingContext context) {
+		if ( !isValidityStrategy( context ) ) {
+			return;
+		}
+		final var revEndColumn =
+				createAuditColumn( audited.revisionEnd(),
+						getTransactionIdType( context ), auditTable, context );
+		revEndColumn.setNullable( true );
+		auditTable.addColumn( revEndColumn );
+		holder.addAuxiliaryColumn( REVISION_END, revEndColumn );
+
+		final String revEndTsName = audited.revisionEndTimestamp();
+		if ( !isBlank( revEndTsName ) ) {
+			final var revEndTsColumn =
+					createAuditColumn( revEndTsName,
+							Instant.class, auditTable, context );
+			revEndTsColumn.setNullable( true );
+			auditTable.addColumn( revEndTsColumn );
+			holder.addAuxiliaryColumn( REVISION_END_TIMESTAMP, revEndTsColumn );
+		}
 	}
 
 	private static Set<String> resolveExcludedColumns(RootClass rootClass) {

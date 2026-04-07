@@ -12,6 +12,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Version;
 import org.hibernate.annotations.Audited;
 import org.hibernate.cfg.StateManagementSettings;
+import org.hibernate.testing.orm.junit.AuditedTest;
 import org.hibernate.testing.orm.junit.DomainModel;
 import org.hibernate.testing.orm.junit.ServiceRegistry;
 import org.hibernate.testing.orm.junit.SessionFactory;
@@ -29,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
+@AuditedTest
 @SessionFactory
 @DomainModel(annotatedClasses = {
 		AuditEntityTest.AuditEntity.class,
@@ -49,6 +51,7 @@ class AuditEntityTest {
 
 	@Test
 	void test(SessionFactoryScope scope) {
+		currentTxId = 0;
 		scope.getSessionFactory().inTransaction(
 				session -> {
 					AuditEntity entity = new AuditEntity();
@@ -148,6 +151,100 @@ class AuditEntityTest {
 			assertEquals( "456 Oak Ave", e.address.street );
 			assertEquals( "Shelbyville", e.address.city );
 		}
+	}
+
+	/**
+	 * Test that multiple flushes within the same transaction produce
+	 * a single audit row with the latest state (MOD+MOD → MOD).
+	 */
+	@Test
+	void testMultiFlushMerge(SessionFactoryScope scope) {
+		currentTxId = 200;
+
+		// Revision 201: create entity
+		scope.getSessionFactory().inTransaction( session -> {
+			var e = new AuditEntity();
+			e.id = 99L;
+			e.text = "initial";
+			session.persist( e );
+		} );
+
+		// Revision 202: modify twice with explicit flush between
+		scope.getSessionFactory().inTransaction( session -> {
+			var e = session.find( AuditEntity.class, 99L );
+			e.text = "first change";
+			session.flush();
+			e.text = "second change";
+			// second flush happens at commit
+		} );
+
+		// Verify: revision 201 = ADD with "initial"
+		try ( var s = scope.getSessionFactory().withOptions().atTransaction( 201 ).open() ) {
+			var e = s.find( AuditEntity.class, 99L );
+			assertEquals( "initial", e.text );
+		}
+
+		// Verify: revision 202 = single MOD with "second change" (not two rows)
+		try ( var s = scope.getSessionFactory().withOptions().atTransaction( 202 ).open() ) {
+			var e = s.find( AuditEntity.class, 99L );
+			assertEquals( "second change", e.text );
+		}
+
+		// Verify via AuditLog: exactly 2 revisions for this entity
+		scope.getSessionFactory().inSession( session -> {
+			final var revisions = session.getAuditLog().getRevisions( AuditEntity.class, 99L );
+			assertEquals( 2, revisions.size() );
+		} );
+	}
+
+	/**
+	 * Test that ADD + DEL in the same transaction cancels out — no audit row.
+	 */
+	@Test
+	void testAddDeleteCancellation(SessionFactoryScope scope) {
+		currentTxId = 300;
+
+		// Single transaction: persist + flush + remove
+		scope.getSessionFactory().inTransaction( session -> {
+			var e = new AuditEntity();
+			e.id = 88L;
+			e.text = "ephemeral";
+			session.persist( e );
+			session.flush();
+			session.remove( e );
+		} );
+
+		// Verify: no audit rows exist for this entity
+		scope.getSessionFactory().inSession( session -> {
+			final var revisions = session.getAuditLog().getRevisions( AuditEntity.class, 88L );
+			assertEquals( 0, revisions.size() );
+		} );
+	}
+
+	/**
+	 * Test ADD + MOD merge: insert then modify in same transaction
+	 * should produce a single ADD row with the final state.
+	 */
+	@Test
+	void testAddModMerge(SessionFactoryScope scope) {
+		currentTxId = 400;
+
+		scope.getSessionFactory().inTransaction( session -> {
+			var e = new AuditEntity();
+			e.id = 77L;
+			e.text = "before";
+			session.persist( e );
+			session.flush();
+			e.text = "after";
+		} );
+
+		// Verify: single revision, modification type = ADD, final state
+		scope.getSessionFactory().inSession( session -> {
+			final var history = session.getAuditLog().getHistory( AuditEntity.class, 77L );
+			assertEquals( 1, history.size() );
+			assertEquals( org.hibernate.audit.ModificationType.ADD, history.get( 0 ).modificationType() );
+			assertEquals( "after", ( (AuditEntity) history.get( 0 ).entity() ).text );
+		} );
 	}
 
 	// ---- Entity classes ----

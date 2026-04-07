@@ -14,6 +14,7 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 import org.hibernate.CacheMode;
 import org.hibernate.EntityNameResolver;
 import org.hibernate.audit.AuditLog;
+import org.hibernate.audit.spi.AuditWorkQueue;
 import org.hibernate.Filter;
 import org.hibernate.HibernateException;
 import org.hibernate.Interceptor;
@@ -855,6 +856,16 @@ abstract class AbstractSharedSessionContract implements SharedSessionContractImp
 	@Override
 	public org.hibernate.audit.AuditLog getAuditLog() {
 		return new org.hibernate.audit.internal.AuditLogImpl( this );
+	}
+
+	private AuditWorkQueue auditWorkQueue;
+
+	@Override
+	public AuditWorkQueue getAuditWorkQueue() {
+		if ( auditWorkQueue == null ) {
+			auditWorkQueue = new AuditWorkQueue();
+		}
+		return auditWorkQueue;
 	}
 
 	@Override

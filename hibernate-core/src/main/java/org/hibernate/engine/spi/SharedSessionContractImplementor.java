@@ -9,6 +9,7 @@ import java.util.UUID;
 import jakarta.persistence.TransactionRequiredException;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
+import org.hibernate.audit.spi.AuditWorkQueue;
 import org.hibernate.FlushMode;
 import org.hibernate.HibernateException;
 import org.hibernate.Incubating;
@@ -281,6 +282,15 @@ public interface SharedSessionContractImplementor
 	 */
 	@Incubating
 	TransactionCompletionCallbacksImplementor getTransactionCompletionCallbacksImplementor();
+
+	/**
+	 * Access the transaction-scoped audit work queue for deferred
+	 * audit row writes. Lazily initialized on first access.
+	 *
+	 * @since envers-rewrite
+	 */
+	@Incubating
+	AuditWorkQueue getAuditWorkQueue();
 
 	/**
 	 * Instantiate an {@link EntityKey} with the given id and for the

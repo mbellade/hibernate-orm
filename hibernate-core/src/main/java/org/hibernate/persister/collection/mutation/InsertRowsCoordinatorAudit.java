@@ -5,6 +5,8 @@
 package org.hibernate.persister.collection.mutation;
 
 import org.hibernate.audit.ModificationType;
+import org.hibernate.audit.spi.AuditWorkQueue;
+import org.hibernate.audit.spi.CollectionAuditWriter;
 import org.hibernate.collection.spi.PersistentArrayHolder;
 import org.hibernate.collection.spi.PersistentCollection;
 import org.hibernate.engine.jdbc.batch.internal.BasicBatchKey;
@@ -13,7 +15,6 @@ import org.hibernate.engine.spi.CollectionKey;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.hibernate.engine.spi.SharedSessionContractImplementor;
 import org.hibernate.persister.collection.CollectionPersister;
-import org.hibernate.sql.model.MutationOperationGroup;
 import org.hibernate.type.Type;
 
 import java.lang.reflect.Array;
@@ -26,7 +27,7 @@ import java.util.function.UnaryOperator;
 /**
  * InsertRowsCoordinator for audited collections.
  */
-public class InsertRowsCoordinatorAudit implements InsertRowsCoordinator {
+public class InsertRowsCoordinatorAudit implements InsertRowsCoordinator, CollectionAuditWriter {
 	private final CollectionMutationTarget mutationTarget;
 	private final InsertRowsCoordinator currentInsertCoordinator;
 	private final SessionFactoryImplementor sessionFactory;
@@ -36,7 +37,6 @@ public class InsertRowsCoordinatorAudit implements InsertRowsCoordinator {
 	private final boolean[] elementColumnIsSettable;
 	private final UnaryOperator<Object> indexIncrementer;
 
-	private MutationOperationGroup auditOperationGroup;
 	private AuditCollectionHelper auditHelper;
 
 	public InsertRowsCoordinatorAudit(
@@ -69,73 +69,81 @@ public class InsertRowsCoordinatorAudit implements InsertRowsCoordinator {
 			SharedSessionContractImplementor session) {
 		currentInsertCoordinator.insertRows( collection, id, entryChecker, session );
 
-		if ( auditOperationGroup == null ) {
-			auditOperationGroup = getAuditHelper().getAuditInsertOperationGroup();
+		// Capture the snapshot before it's replaced by the flush, and enqueue
+		final var snapshot = resolveSnapshot( collection, id, session );
+		final var collectionDescriptor = mutationTarget.getTargetPart().getCollectionDescriptor();
+		session.getAuditWorkQueue().enqueueCollection(
+				collectionDescriptor,
+				collection,
+				id,
+				snapshot,
+				this,
+				session
+		);
+	}
+
+	private Object resolveSnapshot(PersistentCollection<?> collection, Object id, SharedSessionContractImplementor session) {
+		final var persistenceContext = session.getPersistenceContextInternal();
+		final var collectionEntry = persistenceContext.getCollectionEntry( collection );
+		if ( collectionEntry != null && collectionEntry.getLoadedPersister() != null ) {
+			return collection.getStoredSnapshot();
 		}
-		if ( auditOperationGroup == null ) {
+		else if ( collection instanceof PersistentArrayHolder<?> ) {
+			// Array holders are always newly wrapped references, need to retrieve the old instance from the PC
+			final var collectionDescriptor = mutationTarget.getTargetPart().getCollectionDescriptor();
+			final var oldCollection = persistenceContext.getCollection( new CollectionKey( collectionDescriptor, id ) );
+			return oldCollection != null ? oldCollection.getStoredSnapshot() : null;
+		}
+		return null;
+	}
+
+	/**
+	 * Called by {@link AuditWorkQueue} at transaction completion.
+	 * Computes the diff between the original snapshot and the current
+	 * collection state, then writes ADD/DEL audit rows.
+	 */
+	@Override
+	public void writeCollectionAuditRows(
+			PersistentCollection<?> collection,
+			Object id,
+			Object originalSnapshot,
+			SharedSessionContractImplementor session) {
+		final var operationGroup = getAuditHelper().getAuditInsertOperationGroup();
+		if ( operationGroup == null ) {
 			return;
 		}
 
-		final var pluralAttribute = mutationTarget.getTargetPart();
-		final var collectionDescriptor = pluralAttribute.getCollectionDescriptor();
-
+		final var collectionDescriptor = mutationTarget.getTargetPart().getCollectionDescriptor();
 		final var mutationExecutor = mutationExecutorService.createExecutor(
 				() -> auditBatchKey,
-				auditOperationGroup,
+				operationGroup,
 				session
 		);
 
 		try {
 			final var bindings = getAuditHelper().getRowMutationHelper();
-			final var persistenceContext = session.getPersistenceContextInternal();
-			final var collectionEntry = persistenceContext.getCollectionEntry( collection );
-			final boolean hasPriorDbState;
-			final Object snapshot;
-			if ( collectionEntry != null && collectionEntry.getLoadedPersister() != null ) {
-				// Standard collections: snapshot from collection entry
-				hasPriorDbState = true;
-				snapshot = collection.getStoredSnapshot();
-			}
-			else if ( collection instanceof PersistentArrayHolder<?> ) {
-				// for arrays loadedPersister is always null because arrays are re-wrapped
-				// on every flush. Look up the old collection entry via CollectionKey
-				final var oldCollection = persistenceContext.getCollection( new CollectionKey(
-						collectionDescriptor,
-						id
-				) );
-				final var oldSnapshot = oldCollection != null ? oldCollection.getStoredSnapshot() : null;
-				hasPriorDbState = oldSnapshot != null;
-				snapshot = oldSnapshot;
-			}
-			else {
-				hasPriorDbState = false;
-				snapshot = null;
-			}
-
-			if ( !hasPriorDbState ) {
-				// New collection, write ADD for all entries
+			if ( originalSnapshot == null ) {
+				// New collection — write ADD for all current entries
 				final var entries = collection.entries( collectionDescriptor );
 				int entryCount = 0;
 				while ( entries.hasNext() ) {
 					final Object entry = entries.next();
-					if ( entryChecker.include( entry, entryCount, collection, pluralAttribute ) ) {
-						bindings.bindInsertValues(
-								collection,
-								id,
-								entry,
-								entryCount,
-								ModificationType.ADD,
-								session,
-								mutationExecutor.getJdbcValueBindings()
-						);
-						mutationExecutor.execute( entry, null, null, null, session );
-					}
+					bindings.bindInsertValues(
+							collection,
+							id,
+							entry,
+							entryCount,
+							ModificationType.ADD,
+							session,
+							mutationExecutor.getJdbcValueBindings()
+					);
+					mutationExecutor.execute( entry, null, null, null, session );
 					entryCount++;
 				}
 			}
 			else {
-				// Existing collection, compute semantic diff
-				for ( var change : computeCollectionChanges( collection, collectionDescriptor, snapshot ) ) {
+				// Diff original snapshot vs final collection state
+				for ( var change : computeCollectionChanges( collection, collectionDescriptor, originalSnapshot ) ) {
 					bindings.bindInsertValues(
 							collection,
 							id,

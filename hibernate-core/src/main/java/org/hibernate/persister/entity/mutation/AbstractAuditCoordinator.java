@@ -24,10 +24,16 @@ import org.hibernate.metamodel.mapping.DiscriminatorValue;
 import org.hibernate.metamodel.mapping.PluralAttributeMapping;
 import org.hibernate.persister.entity.EntityPersister;
 import org.hibernate.audit.ModificationType;
+import org.hibernate.audit.spi.AuditWriter;
+import org.hibernate.sql.ast.tree.expression.ColumnReference;
 import org.hibernate.sql.model.MutationOperationGroup;
 import org.hibernate.sql.model.MutationType;
+import org.hibernate.sql.model.ast.ColumnValueBinding;
+import org.hibernate.sql.model.ast.ColumnValueParameter;
+import org.hibernate.sql.model.ast.ColumnWriteFragment;
 import org.hibernate.sql.model.ast.TableMutation;
 import org.hibernate.sql.model.ast.builder.TableInsertBuilderStandard;
+import org.hibernate.sql.model.ast.builder.TableUpdateBuilderStandard;
 import org.hibernate.sql.model.internal.MutationGroupSingle;
 import org.hibernate.sql.model.internal.MutationGroupStandard;
 
@@ -41,7 +47,7 @@ import static org.hibernate.sql.model.internal.MutationOperationGroupFactory.sin
  * there is one audit table; for JOINED there is one per entity table.
  * The static operation group is cached for reuse.
  */
-abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator {
+abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator implements AuditWriter {
 	private final AuditMapping auditMapping;
 	private final EntityTableMapping[] auditTableMappings;
 	protected final boolean[] auditedPropertyMask;
@@ -49,6 +55,7 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator {
 	private final boolean useServerTransactionTimestamps;
 	private final String currentTimestampFunctionName;
 	private final MutationOperationGroup staticAuditInsertGroup;
+	private final MutationOperationGroup revisionEndUpdateGroup;
 
 	protected AbstractAuditCoordinator(EntityPersister entityPersister, SessionFactoryImplementor factory) {
 		super( entityPersister, factory );
@@ -67,6 +74,7 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator {
 		this.staticAuditInsertGroup = entityPersister.isDynamicInsert()
 				? null
 				: buildAuditInsertGroup( applyAuditMask( entityPersister.getPropertyInsertability() ), null, null );
+		this.revisionEndUpdateGroup = buildRevisionEndUpdateGroup();
 	}
 
 	private EntityTableMapping[] buildAuditTableMappings(EntityPersister persister, AuditMapping auditMapping) {
@@ -83,43 +91,72 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator {
 		return result;
 	}
 
-	protected void insertAuditRow(
+	/**
+	 * Enqueue an audit entry for deferred writing at transaction completion.
+	 */
+	protected void enqueueAuditEntry(
 			Object entity,
 			Object id,
 			Object[] values,
 			ModificationType modificationType,
 			SharedSessionContractImplementor session) {
-		if ( values != null ) {
-			final boolean dynamicInsert = entityPersister().isDynamicInsert();
-			final boolean[] propertyInclusions = applyAuditMask(
-					dynamicInsert
-							? getPropertiesToInsert( entityPersister(), values )
-							: entityPersister().getPropertyInsertability()
-			);
-			final MutationOperationGroup operationGroup = dynamicInsert
-					? buildAuditInsertGroup( propertyInclusions, entity, session )
-					: staticAuditInsertGroup;
+		if ( values == null ) {
+			return;
+		}
+		final Object resolvedId = id != null
+				? id
+				: entity != null ? entityPersister().getIdentifier( entity, session ) : null;
+		if ( resolvedId == null ) {
+			return;
+		}
+		session.getAuditWorkQueue().enqueue(
+				entityPersister(),
+				entity,
+				resolvedId,
+				values,
+				modificationType,
+				this,
+				session
+		);
+	}
 
-			final Object resolvedId = id != null
-					? id
-					: entity != null ? entityPersister().getIdentifier( entity, session ) : null;
-			if ( resolvedId == null || operationGroup == null ) {
-				return;
-			}
+	/**
+	 * Write an audit row — called by {@link org.hibernate.audit.spi.AuditWorkQueue}
+	 * at transaction completion.
+	 */
+	@Override
+	public void writeAuditRow(
+			Object entity,
+			Object id,
+			Object[] values,
+			ModificationType modificationType,
+			SharedSessionContractImplementor session) {
+		updatePreviousRevisionEnd( id, session );
 
-			final var mutationExecutor = mutationExecutorService.createExecutor(
-					resolveBatchKeyAccess( dynamicInsert, session ),
-					operationGroup,
-					session
-			);
-			try {
-				bindAuditValues( resolvedId, values, propertyInclusions, modificationType, session,
-						mutationExecutor.getJdbcValueBindings() );
-				mutationExecutor.execute( entity, null, null, AbstractAuditCoordinator::verifyOutcome, session );
-			}
-			finally {
-				mutationExecutor.release();
-			}
+		final boolean dynamicInsert = entityPersister().isDynamicInsert();
+		final boolean[] propertyInclusions = applyAuditMask(
+				dynamicInsert
+						? getPropertiesToInsert( entityPersister(), values )
+						: entityPersister().getPropertyInsertability()
+		);
+		final MutationOperationGroup operationGroup = dynamicInsert
+				? buildAuditInsertGroup( propertyInclusions, entity, session )
+				: staticAuditInsertGroup;
+		if ( operationGroup == null ) {
+			return;
+		}
+
+		final var mutationExecutor = mutationExecutorService.createExecutor(
+				resolveBatchKeyAccess( dynamicInsert, session ),
+				operationGroup,
+				session
+		);
+		try {
+			bindAuditValues( id, values, propertyInclusions, modificationType, session, mutationExecutor.getJdbcValueBindings() );
+			mutationExecutor.execute( entity, null, null, AbstractAuditCoordinator::verifyOutcome, session );
+		}
+		finally {
+			mutationExecutor.release();
 		}
 	}
 
@@ -276,6 +313,148 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator {
 				);
 			}
 		}
+	}
+
+	/**
+	 * Update the previous audit row's REVEND column for the validity strategy.
+	 * Sets {@code REVEND = :currentTxId} on the row with
+	 * {@code REVEND IS NULL AND REV <> :currentTxId} for the given entity ID.
+	 */
+	protected void updatePreviousRevisionEnd(
+			Object id,
+			SharedSessionContractImplementor session) {
+		if ( revisionEndUpdateGroup == null ) {
+			return;
+		}
+		final var mutationExecutor = mutationExecutorService.createExecutor(
+				() -> auditBatchKey,
+				revisionEndUpdateGroup,
+				session
+		);
+		try {
+			final var jdbcValueBindings = mutationExecutor.getJdbcValueBindings();
+			final EntityTableMapping[] sourceMappings = entityPersister().getTableMappings();
+			for ( int tableIndex = 0; tableIndex < auditTableMappings.length; tableIndex++ ) {
+				if ( auditTableMappings[tableIndex] == null ) {
+					continue;
+				}
+				final String tableName = auditTableMappings[tableIndex].getTableName();
+				final String sourceTableName = sourceMappings[tableIndex].getTableName();
+				final var revEndMapping = auditMapping.getRevisionEndMapping( sourceTableName );
+				if ( revEndMapping == null ) {
+					continue;
+				}
+
+				final var txId = session.getCurrentTransactionIdentifier();
+
+				// SET REVEND = :txId
+				jdbcValueBindings.bindValue(
+						txId, tableName,
+						revEndMapping.getSelectionExpression(),
+						ParameterUsage.SET
+				);
+
+				// SET REVEND_TSTMP = :tstmp (if configured)
+				final var revEndTsMapping = auditMapping.getRevisionEndTimestampMapping( sourceTableName );
+				if ( revEndTsMapping != null ) {
+					jdbcValueBindings.bindValue(
+							java.time.Instant.now(), tableName,
+							revEndTsMapping.getSelectionExpression(),
+							ParameterUsage.SET
+					);
+				}
+
+				// WHERE id = :id
+				sourceMappings[tableIndex].getKeyMapping().breakDownKeyJdbcValues(
+						id,
+						(jdbcValue, columnMapping) -> jdbcValueBindings.bindValue(
+								jdbcValue, tableName, columnMapping.getColumnName(), ParameterUsage.RESTRICT
+						),
+						session
+				);
+
+				// WHERE REV <> :txId (via the transaction ID column)
+				jdbcValueBindings.bindValue(
+						txId, tableName,
+						auditMapping.getTransactionIdMapping( sourceTableName ).getSelectionExpression(),
+						ParameterUsage.RESTRICT
+				);
+			}
+			// 0 rows affected is valid (e.g. INSERT of a new entity - no previous row to close)
+			mutationExecutor.execute( null, null, null, (s, c, b) -> true, session );
+		}
+		finally {
+			mutationExecutor.release();
+		}
+	}
+
+	private MutationOperationGroup buildRevisionEndUpdateGroup() {
+		final EntityTableMapping[] sourceMappings = entityPersister().getTableMappings();
+		final List<TableMutation<?>> mutations = new ArrayList<>();
+		for ( int i = 0; i < auditTableMappings.length; i++ ) {
+			if ( auditTableMappings[i] == null ) {
+				continue;
+			}
+			final String sourceTableName = sourceMappings[i].getTableName();
+			final var revEndMapping = auditMapping.getRevisionEndMapping( sourceTableName );
+			if ( revEndMapping == null ) {
+				continue;
+			}
+			final var updateBuilder =
+					new TableUpdateBuilderStandard<>( entityPersister(), auditTableMappings[i], factory() );
+
+			// SET REVEND = ?
+			if ( useServerTransactionTimestamps ) {
+				updateBuilder.addValueColumn( currentTimestampFunctionName, revEndMapping );
+			}
+			else {
+				updateBuilder.addValueColumn( "?", revEndMapping );
+			}
+
+			// SET REVEND_TSTMP = ? (if configured)
+			final var revEndTsMapping = auditMapping.getRevisionEndTimestampMapping( sourceTableName );
+			if ( revEndTsMapping != null ) {
+				updateBuilder.addValueColumn( "?", revEndTsMapping );
+			}
+
+			// WHERE id columns
+			sourceMappings[i].getKeyMapping().forEachKeyColumn(
+					(position, keyColumn) -> updateBuilder.addKeyRestrictionBinding( keyColumn )
+			);
+
+			// WHERE REV <> ? (exclude the row we just inserted)
+			final var txIdMapping = auditMapping.getTransactionIdMapping( sourceTableName );
+			final var txIdColumnRef = new ColumnReference( updateBuilder.getMutatingTable(), txIdMapping );
+			updateBuilder.addNonKeyRestriction( new ColumnValueBinding(
+					txIdColumnRef,
+					new ColumnWriteFragment(
+							"?",
+							new ColumnValueParameter( txIdColumnRef, ParameterUsage.RESTRICT ),
+							txIdMapping
+					),
+					true
+			) );
+
+			// WHERE REVEND IS NULL (only update the current row)
+			final var revEndColumnRef = new ColumnReference( updateBuilder.getMutatingTable(), revEndMapping );
+			updateBuilder.addNonKeyRestriction( new ColumnValueBinding(
+					revEndColumnRef,
+					new ColumnWriteFragment( null, List.of(), revEndMapping )
+			) );
+
+			mutations.add( updateBuilder.buildMutation() );
+		}
+		if ( mutations.isEmpty() ) {
+			return null;
+		}
+		if ( mutations.size() == 1 ) {
+			return singleOperation(
+					new MutationGroupSingle( MutationType.UPDATE, entityPersister(), mutations.get( 0 ) ),
+					mutations.get( 0 ).createMutationOperation( null, factory() )
+			);
+		}
+		return createOperationGroup( null,
+				new MutationGroupStandard( MutationType.UPDATE, entityPersister(), mutations ) );
 	}
 
 	private boolean[] applyAuditMask(boolean[] propertyInclusions) {

@@ -4,6 +4,8 @@
  */
 package org.hibernate.engine.spi;
 
+import org.hibernate.audit.spi.AuditWorkQueue;
+
 import jakarta.persistence.CacheRetrieveMode;
 import jakarta.persistence.CacheStoreMode;
 import jakarta.persistence.EntityGraph;
@@ -115,6 +117,11 @@ public class SessionDelegatorBaseImpl implements SessionImplementor {
 	@Override
 	public org.hibernate.audit.AuditLog getAuditLog() {
 		return delegate.getAuditLog();
+	}
+
+	@Override
+	public AuditWorkQueue getAuditWorkQueue() {
+		return delegate.getAuditWorkQueue();
 	}
 
 	@Override

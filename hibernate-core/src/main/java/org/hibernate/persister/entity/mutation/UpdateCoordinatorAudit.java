@@ -53,7 +53,7 @@ public class UpdateCoordinatorAudit extends AbstractAuditCoordinator implements 
 				session
 		);
 		if ( shouldAuditUpdate( dirtyAttributeIndexes, hasDirtyCollection ) ) {
-			insertAuditRow( entity, id, values, ModificationType.MOD, session );
+			enqueueAuditEntry( entity, id, values, ModificationType.MOD, session );
 		}
 		return generatedValues;
 	}
