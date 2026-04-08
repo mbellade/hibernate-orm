@@ -14,11 +14,14 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import org.hibernate.AssertionFailure;
 import org.hibernate.HibernateException;
+
 import org.hibernate.Internal;
 import org.hibernate.MappingException;
 import org.hibernate.cache.spi.access.EntityDataAccess;
@@ -217,9 +220,30 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 	public UnionTableReference createPrimaryTableReference(
 			SqlAliasBase sqlAliasBase,
 			SqlAstCreationState creationState) {
-		return new UnionTableReference(
-				getTableName(),
-				subclassTableExpressions,
+		final var loadQueryInfluencers = creationState.getLoadQueryInfluencers();
+		final var auxMapping = getAuxiliaryMapping();
+		final boolean useAuxiliaryTable =
+				auxMapping != null
+						&& auxMapping.useAuxiliaryTable( loadQueryInfluencers );
+		final String resolvedTableName = useAuxiliaryTable
+				? auxMapping.resolveTableName( getTableName() )
+				: getTableName();
+		final String[] resolvedTableExpressions;
+		if ( useAuxiliaryTable ) {
+			// Include both original and audit table expressions for resolution
+			final var resolved = new ArrayList<String>( subclassTableExpressions.length * 2 );
+			for ( String expr : subclassTableExpressions ) {
+				resolved.add( expr );
+				resolved.add( auxMapping.resolveTableName( expr ) );
+			}
+			resolvedTableExpressions = resolved.toArray( String[]::new );
+		}
+		else {
+			resolvedTableExpressions = subclassTableExpressions;
+		}
+		final var tableReference = new UnionTableReference(
+				resolvedTableName,
+				resolvedTableExpressions,
 				SqlAliasBase.from(
 						sqlAliasBase,
 						null,
@@ -227,6 +251,8 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 						creationState.getSqlAliasBaseGenerator()
 				).generateNewAlias()
 		);
+		tableReference.applyAuxiliaryTable( auxMapping, loadQueryInfluencers );
+		return tableReference;
 	}
 
 	@Override
@@ -244,16 +270,17 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 				this,
 				explicitSourceAlias
 		);
-		final var softDeleteMapping = getSoftDeleteMapping();
-		if ( additionalPredicateCollectorAccess != null && softDeleteMapping != null ) {
-			final var tableReference =
-					tableGroup.resolveTableReference( getSoftDeleteTableDetails().getTableName() );
-			additionalPredicateCollectorAccess.get().accept(
-					softDeleteMapping.createNonDeletedRestriction(
-							tableReference,
-							creationState.getSqlExpressionResolver()
-					)
-			);
+		if ( additionalPredicateCollectorAccess != null ) {
+			final var auxMapping = getAuxiliaryMapping();
+			if ( auxMapping != null ) {
+				auxMapping.applyPredicate(
+						additionalPredicateCollectorAccess,
+						creationState,
+						tableGroup,
+						tableGroup.getPrimaryTableReference(),
+						this
+				);
+			}
 		}
 		return tableGroup;
 	}
@@ -373,8 +400,10 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 		if ( tableReference == null ) {
 			throw new UnknownTableReferenceException( getRootTableName(), "Couldn't find table reference" );
 		}
-		// Replace the default union sub-query with a specially created one that only selects the tables for the treated entity names
-		tableReference.setPrunedTableExpression( generateSubquery( entityNameUses ) );
+		tableReference.setPrunedTableExpression( generateSubquery(
+				entityNameUses,
+				tableReference.getTableExpression()
+		) );
 	}
 
 	@Override
@@ -421,16 +450,33 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 		return 1;
 	}
 
+
 	@Override
 	protected int[] getPropertyTableNumbers() {
 		return new int[getPropertySpan()];
 	}
 
 	protected String generateSubquery(PersistentClass model) {
+		return generateSubquery( model, null, null );
+	}
+
+	/**
+	 * Generate a union subquery for the given model.
+	 *
+	 * @param tableNameResolver when non-null, resolves original table names to
+	 *                          alternative names (e.g. audit table names)
+	 * @param extraSelectExpressions additional column expressions to include in
+	 *                               each SELECT of the union (e.g. REV, REVTYPE)
+	 */
+	public String generateSubquery(
+			PersistentClass model,
+			Function<String, String> tableNameResolver,
+			List<String> extraSelectExpressions) {
 		final var factory = getFactory();
 		final var sqlStringGenerationContext = factory.getSqlStringGenerationContext();
 		if ( !model.hasSubclasses() ) {
-			return model.getTable().getQualifiedName( sqlStringGenerationContext );
+			final String qualifiedName = model.getTable().getQualifiedName( sqlStringGenerationContext );
+			return tableNameResolver != null ? tableNameResolver.apply( qualifiedName ) : qualifiedName;
 		}
 		else {
 			final Set<Column> columns = new LinkedHashSet<>();
@@ -463,9 +509,18 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 						subquery.append( column.getQuotedName( dialect ) )
 								.append( ", " );
 					}
+					if ( extraSelectExpressions != null ) {
+						for ( var expr : extraSelectExpressions ) {
+							subquery.append( expr ).append( ", " );
+						}
+					}
 					subquery.append( persistentClass.getSubclassId() )
-							.append( " as clazz_ from " )
-							.append( table.getQualifiedName( sqlStringGenerationContext ) );
+							.append( " as clazz_" );
+					final String qualifiedName = table.getQualifiedName( sqlStringGenerationContext );
+					subquery.append( " from " )
+							.append( tableNameResolver != null
+									? tableNameResolver.apply( qualifiedName )
+									: qualifiedName );
 				}
 			}
 			return subquery.append( ")" ).toString();
@@ -487,9 +542,10 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 		);
 	}
 
-	protected String generateSubquery(Map<String, EntityNameUse> entityNameUses) {
+	protected String generateSubquery(Map<String, EntityNameUse> entityNameUses, String currentTableExpression) {
+		final var auxMapping = currentTableExpression.equals( getTableName() ) ? null : getAuxiliaryMapping();
 		if ( !hasSubclasses() ) {
-			return getTableName();
+			return currentTableExpression;
 		}
 
 		final var factory = getFactory();
@@ -519,7 +575,7 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 			}
 			if ( tablesToUnion.isEmpty() ) {
 				// If there are only projection or expression uses, we can't optimize anything
-				return getTableName();
+				return currentTableExpression;
 			}
 		}
 
@@ -561,9 +617,17 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 					unionSubquery.append( selectable )
 							.append( ", " );
 				}
+				if ( auxMapping != null ) {
+					for ( var expr : auxMapping.getExtraSelectExpressions() ) {
+						unionSubquery.append( expr ).append( ", " );
+					}
+				}
 				unionSubquery.append( persister.getDiscriminatorSQLValue() )
-						.append( " as clazz_ from " )
-						.append( subclassTableName );
+						.append( " as clazz_" );
+				unionSubquery.append( " from " )
+						.append( auxMapping != null
+								? auxMapping.resolveTableName( subclassTableName )
+								: subclassTableName );
 			}
 		}
 		return unionSubquery.append( ")" ).toString();

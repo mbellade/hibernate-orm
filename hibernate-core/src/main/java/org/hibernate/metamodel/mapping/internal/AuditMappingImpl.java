@@ -6,18 +6,19 @@ package org.hibernate.metamodel.mapping.internal;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 import org.hibernate.engine.spi.LoadQueryInfluencers;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
-import org.hibernate.mapping.Stateful;
 import org.hibernate.metamodel.mapping.AuditMapping;
 import org.hibernate.metamodel.mapping.EntityMappingType;
+import org.hibernate.metamodel.mapping.EntityValuedModelPart;
 import org.hibernate.metamodel.mapping.JdbcMapping;
 import org.hibernate.metamodel.mapping.PluralAttributeMapping;
 import org.hibernate.metamodel.mapping.SelectableMapping;
-import org.hibernate.persister.state.internal.AuditStateManagement;
+import org.hibernate.audit.ModificationType;
 import org.hibernate.query.sqm.function.AbstractSqmSelfRenderingFunctionDescriptor;
 import org.hibernate.query.sqm.function.FunctionRenderer;
 import org.hibernate.query.sqm.function.SelfRenderingAggregateFunctionSqlAstExpression;
@@ -26,6 +27,7 @@ import org.hibernate.sql.ast.spi.SqlAliasBaseGenerator;
 import org.hibernate.sql.ast.spi.SqlAstCreationState;
 import org.hibernate.sql.ast.tree.expression.AggregateFunctionExpression;
 import org.hibernate.sql.ast.tree.expression.ColumnReference;
+import org.hibernate.sql.ast.tree.expression.Expression;
 import org.hibernate.sql.ast.tree.expression.JdbcLiteral;
 import org.hibernate.sql.ast.tree.expression.SelfRenderingSqlFragmentExpression;
 import org.hibernate.sql.ast.tree.from.LazyTableGroup;
@@ -35,8 +37,10 @@ import org.hibernate.sql.ast.tree.from.TableGroup;
 import org.hibernate.sql.ast.tree.from.TableGroupJoin;
 import org.hibernate.sql.ast.tree.from.TableGroupProducer;
 import org.hibernate.sql.ast.tree.from.TableReference;
+import org.hibernate.sql.ast.tree.from.TableReferenceJoin;
 import org.hibernate.sql.ast.tree.predicate.ComparisonPredicate;
 import org.hibernate.sql.ast.tree.predicate.Junction;
+import org.hibernate.sql.ast.tree.predicate.NullnessPredicate;
 import org.hibernate.sql.ast.tree.predicate.Predicate;
 import org.hibernate.sql.ast.tree.select.QuerySpec;
 import org.hibernate.sql.ast.tree.select.SelectStatement;
@@ -45,10 +49,11 @@ import org.hibernate.sql.results.internal.SqlSelectionImpl;
 import org.hibernate.type.BasicType;
 import org.hibernate.type.spi.TypeConfiguration;
 
+import org.checkerframework.checker.nullness.qual.Nullable;
+
 import static java.util.Collections.singletonList;
-import static org.hibernate.boot.model.internal.AuditHelper.MODIFICATION_TYPE;
-import static org.hibernate.boot.model.internal.AuditHelper.TRANSACTION_ID;
 import static org.hibernate.query.sqm.ComparisonOperator.EQUAL;
+import static org.hibernate.query.sqm.ComparisonOperator.GREATER_THAN;
 import static org.hibernate.query.sqm.ComparisonOperator.LESS_THAN_OR_EQUAL;
 import static org.hibernate.query.sqm.ComparisonOperator.NOT_EQUAL;
 
@@ -56,72 +61,51 @@ import static org.hibernate.query.sqm.ComparisonOperator.NOT_EQUAL;
  * Audit mapping implementation.
  *
  * @author Gavin King
- *
  * @since 7.4
  */
 public class AuditMappingImpl implements AuditMapping {
 	private static final String SUBQUERY_ALIAS_STEM = "audit";
 	public static final String MAX = "max";
 
-	private final String tableName;
-	private final SelectableMapping transactionIdMapping;
-	private final SelectableMapping modificationTypeMapping;
+	/**
+	 * Per-table audit info.
+	 */
+	public record TableAuditInfo(
+			String auditTableName,
+			SelectableMapping transactionIdMapping,
+			@Nullable SelectableMapping modificationTypeMapping,
+			@Nullable SelectableMapping transactionEndMapping,
+			@Nullable SelectableMapping transactionEndTimestampMapping
+	) {
+		public TableAuditInfo(
+				String auditTableName,
+				SelectableMapping transactionIdMapping,
+				@Nullable SelectableMapping modificationTypeMapping) {
+			this( auditTableName, transactionIdMapping, modificationTypeMapping, null, null );
+		}
+	}
+
+	private final Map<String, TableAuditInfo> tableAuditInfoMap;
+
 	private final JdbcMapping jdbcMapping;
 	private final BasicType<?> transactionIdBasicType;
 	private final String currentTimestampFunctionName;
 	private final FunctionRenderer maxFunctionDescriptor;
 
 	public AuditMappingImpl(
-			Stateful auditable,
-			String tableName,
+			Map<String, TableAuditInfo> tableAuditInfoMap,
 			MappingModelCreationProcess creationProcess) {
-		this.tableName = tableName;
-
-		final var transactionIdColumnName = auditable.getAuxiliaryColumn( TRANSACTION_ID );
-		final var modificationTypeColumnName = auditable.getAuxiliaryColumn( MODIFICATION_TYPE );
+		this.tableAuditInfoMap = Map.copyOf( tableAuditInfoMap );
 
 		final var creationContext = creationProcess.getCreationContext();
 		final var typeConfiguration = creationContext.getTypeConfiguration();
-		final var dialect = creationContext.getDialect();
 		final var sessionFactory = creationContext.getSessionFactory();
 		final var transactionIdJavaType = sessionFactory.getTransactionIdentifierService().getIdentifierType();
-		final var sqmFunctionRegistry = sessionFactory.getQueryEngine().getSqmFunctionRegistry();
 
 		jdbcMapping = resolveJdbcMapping( typeConfiguration, transactionIdJavaType );
 		transactionIdBasicType = resolveBasicType( typeConfiguration, transactionIdJavaType );
 
-		transactionIdMapping = SelectableMappingImpl.from(
-				tableName,
-				transactionIdColumnName,
-				null,
-				null,
-				jdbcMapping,
-				typeConfiguration,
-				true,
-				false,
-				false,
-				false,
-				dialect,
-				sqmFunctionRegistry,
-				creationContext
-		);
-
-		modificationTypeMapping = SelectableMappingImpl.from(
-				tableName,
-				modificationTypeColumnName,
-				null,
-				null,
-				jdbcMapping,
-				typeConfiguration,
-				true,
-				false,
-				false,
-				false,
-				dialect,
-				sqmFunctionRegistry,
-				creationContext
-		);
-
+		final var dialect = sessionFactory.getJdbcServices().getDialect();
 		currentTimestampFunctionName =
 				sessionFactory.getTransactionIdentifierService().useServerTimestamp( dialect )
 						? dialect.currentTimestamp()
@@ -130,19 +114,62 @@ public class AuditMappingImpl implements AuditMapping {
 		maxFunctionDescriptor = resolveMaxFunction( sessionFactory );
 	}
 
+	private TableAuditInfo resolveInfo(String originalTableName) {
+		final var info = tableAuditInfoMap.get( originalTableName );
+		if ( info == null ) {
+			throw new IllegalArgumentException(
+					"No audit table info for table '" + originalTableName
+							+ "' (known tables: " + tableAuditInfoMap.keySet() + ")" );
+		}
+		return info;
+	}
+
 	@Override
 	public String getTableName() {
-		return tableName;
+		throw new UnsupportedOperationException(
+				"Invalid call to getTableName() for multi-table aware AuditMapping implementation"
+		);
 	}
 
 	@Override
-	public SelectableMapping getTransactionIdMapping() {
-		return transactionIdMapping;
+	public String resolveTableName(String originalTableName) {
+		return resolveInfo( originalTableName ).auditTableName;
 	}
 
 	@Override
-	public SelectableMapping getModificationTypeMapping() {
-		return modificationTypeMapping;
+	public SelectableMapping getTransactionIdMapping(String originalTableName) {
+		return resolveInfo( originalTableName ).transactionIdMapping;
+	}
+
+	@Override
+	public SelectableMapping getModificationTypeMapping(String originalTableName) {
+		return resolveInfo( originalTableName ).modificationTypeMapping;
+	}
+
+	@Override
+	public SelectableMapping getTransactionEndMapping(String originalTableName) {
+		return resolveInfo( originalTableName ).transactionEndMapping;
+	}
+
+	@Override
+	public SelectableMapping getTransactionEndTimestampMapping(String originalTableName) {
+		return resolveInfo( originalTableName ).transactionEndTimestampMapping;
+	}
+
+	@Override
+	public List<String> getExtraSelectExpressions() {
+		final var anyInfo = tableAuditInfoMap.values().iterator().next();
+		final var exprs = new ArrayList<>( List.of(
+				anyInfo.transactionIdMapping.getSelectionExpression(),
+				anyInfo.modificationTypeMapping.getSelectionExpression()
+		) );
+		if ( anyInfo.transactionEndMapping != null ) {
+			exprs.add( anyInfo.transactionEndMapping.getSelectionExpression() );
+		}
+		if ( anyInfo.transactionEndTimestampMapping != null ) {
+			exprs.add( anyInfo.transactionEndTimestampMapping.getSelectionExpression() );
+		}
+		return exprs;
 	}
 
 	@Override
@@ -154,43 +181,46 @@ public class AuditMappingImpl implements AuditMapping {
 			TableGroupProducer tableGroupProducer,
 			TableReference tableReference,
 			List<SelectableMapping> keySelectables,
-			SqlAliasBaseGenerator sqlAliasBaseGenerator) {
-		final var subQueryExpression =
-				new SelectStatement( buildSubquery( tableGroupProducer, tableReference, keySelectables, sqlAliasBaseGenerator ) );
-		final var revisionPredicate =
-				new ComparisonPredicate(
-						new ColumnReference( tableReference, transactionIdMapping ),
-						EQUAL,
-						subQueryExpression
-				);
-		final var modificationTypePredicate =
-				new ComparisonPredicate(
-						new ColumnReference( tableReference, modificationTypeMapping ),
-						NOT_EQUAL,
-						new JdbcLiteral<>(
-								AuditStateManagement.ModificationType.DEL.ordinal(),
-								modificationTypeMapping.getJdbcMapping()
-						)
-				);
-
-		final var auditPredicate = new Junction( Junction.Nature.CONJUNCTION );
-		auditPredicate.add( revisionPredicate );
-		auditPredicate.add( modificationTypePredicate );
-		return auditPredicate;
+			SqlAliasBaseGenerator sqlAliasBaseGenerator,
+			TableAuditInfo info) {
+		return createRestriction(
+				tableGroupProducer,
+				tableReference,
+				keySelectables,
+				sqlAliasBaseGenerator,
+				info,
+				currentTimestampFunctionName != null
+						? new SelfRenderingSqlFragmentExpression( currentTimestampFunctionName, jdbcMapping )
+						: new TemporalJdbcParameter( info.transactionIdMapping )
+		);
 	}
 
-	private QuerySpec buildSubquery(
+	/**
+	 * Build the temporal restriction predicate.
+	 * <p>
+	 * For the default strategy:
+	 * {@code REV = (SELECT MAX(REV) ... WHERE REV <= upperBound) AND REVTYPE <> 2}
+	 * <p>
+	 * For the validity strategy:
+	 * {@code REV <= upperBound AND (REVEND > upperBound OR REVEND IS NULL) AND REVTYPE <> 2}
+	 */
+	private Predicate createRestriction(
 			TableGroupProducer tableGroupProducer,
 			TableReference tableReference,
 			List<SelectableMapping> keySelectables,
-			SqlAliasBaseGenerator sqlAliasBaseGenerator) {
+			SqlAliasBaseGenerator sqlAliasBaseGenerator,
+			TableAuditInfo info,
+			Expression upperBound) {
+		if ( info.transactionEndMapping != null ) {
+			return createValidityRestriction( tableReference, info, upperBound );
+		}
 		final var subQuerySpec = new QuerySpec( false, 1 );
 		final String stem = tableGroupProducer.getSqlAliasStem();
 		final String aliasStem = stem == null ? SUBQUERY_ALIAS_STEM : stem;
-		final var subTableReference =
-				new NamedTableReference( tableName,
-						sqlAliasBaseGenerator.createSqlAliasBase( aliasStem )
-								.generateNewAlias() );
+		final var subTableReference = new NamedTableReference(
+				info.auditTableName,
+				sqlAliasBaseGenerator.createSqlAliasBase( aliasStem ).generateNewAlias()
+		);
 		final var subTableGroup = new StandardTableGroup(
 				true,
 				new NavigablePath( stem == null ? "audit-subquery" : stem + "#audit" ),
@@ -202,37 +232,71 @@ public class AuditMappingImpl implements AuditMapping {
 		);
 		subQuerySpec.getFromClause().addRoot( subTableGroup );
 
-		final var transactionId =
-				new ColumnReference( subTableReference, transactionIdMapping );
+		final var transactionId = new ColumnReference( subTableReference, info.transactionIdMapping );
 		subQuerySpec.getSelectClause()
 				.addSqlSelection( new SqlSelectionImpl( buildMaxExpression( transactionId ) ) );
 
-		subQuerySpec.applyPredicate(
-				buildSubqueryPredicate( tableReference, keySelectables, subTableReference, transactionId ) );
-
-		return subQuerySpec;
-	}
-
-	private Junction buildSubqueryPredicate(
-			TableReference tableReference,
-			List<SelectableMapping> keySelectables,
-			NamedTableReference subTableReference,
-			ColumnReference transactionId) {
-		final var predicate = new Junction( Junction.Nature.CONJUNCTION );
+		// Subquery WHERE: id columns match + REV <= upperBound
+		final var subPredicate = new Junction( Junction.Nature.CONJUNCTION );
 		for ( var selectableMapping : keySelectables ) {
-			predicate.add( new ComparisonPredicate(
+			subPredicate.add( new ComparisonPredicate(
 					new ColumnReference( subTableReference, selectableMapping ),
 					EQUAL,
 					new ColumnReference( tableReference, selectableMapping )
 			) );
 		}
-		predicate.add( new ComparisonPredicate(
-				transactionId,
-				LESS_THAN_OR_EQUAL,
-				currentTimestampFunctionName != null
-						? new SelfRenderingSqlFragmentExpression( currentTimestampFunctionName, jdbcMapping )
-						: new TemporalJdbcParameter( transactionIdMapping )
+		subPredicate.add( new ComparisonPredicate( transactionId, LESS_THAN_OR_EQUAL, upperBound ) );
+		subQuerySpec.applyPredicate( subPredicate );
+
+		// Main predicate: REV = (subquery) AND REVTYPE <> DEL (when REVTYPE exists on this table)
+		final var auditPredicate = new Junction( Junction.Nature.CONJUNCTION );
+		auditPredicate.add( new ComparisonPredicate(
+				new ColumnReference( tableReference, info.transactionIdMapping ),
+				EQUAL,
+				new SelectStatement( subQuerySpec )
 		) );
+		if ( info.modificationTypeMapping != null ) {
+			auditPredicate.add( new ComparisonPredicate(
+					new ColumnReference( tableReference, info.modificationTypeMapping ),
+					NOT_EQUAL,
+					new JdbcLiteral<>( ModificationType.DEL, info.modificationTypeMapping.getJdbcMapping() )
+			) );
+		}
+		return auditPredicate;
+	}
+
+	/**
+	 * Build the validity strategy restriction:
+	 * {@code REV <= upperBound AND (REVEND > upperBound OR REVEND IS NULL) AND REVTYPE <> DEL}
+	 */
+	private static Predicate createValidityRestriction(
+			TableReference tableReference,
+			TableAuditInfo info,
+			Expression upperBound) {
+		final var predicate = new Junction( Junction.Nature.CONJUNCTION );
+
+		// REV <= upperBound
+		predicate.add( new ComparisonPredicate(
+				new ColumnReference( tableReference, info.transactionIdMapping ),
+				LESS_THAN_OR_EQUAL,
+				upperBound
+		) );
+
+		// (REVEND > upperBound OR REVEND IS NULL)
+		final var revEndRef = new ColumnReference( tableReference, info.transactionEndMapping );
+		final var revEndDisjunction = new Junction( Junction.Nature.DISJUNCTION );
+		revEndDisjunction.add( new ComparisonPredicate( revEndRef, GREATER_THAN, upperBound ) );
+		revEndDisjunction.add( new NullnessPredicate( revEndRef ) );
+		predicate.add( revEndDisjunction );
+
+		// REVTYPE <> DEL (when applicable)
+		if ( info.modificationTypeMapping != null ) {
+			predicate.add( new ComparisonPredicate(
+					new ColumnReference( tableReference, info.modificationTypeMapping ),
+					NOT_EQUAL,
+					new JdbcLiteral<>( ModificationType.DEL, info.modificationTypeMapping.getJdbcMapping() )
+			) );
+		}
 		return predicate;
 	}
 
@@ -273,62 +337,6 @@ public class AuditMappingImpl implements AuditMapping {
 		return basicType == null
 				? typeConfiguration.standardBasicTypeForJavaType( javaType )
 				: basicType;
-	}
-
-	@Override
-	public void applyPredicate(
-			EntityMappingType associatedEntityMappingType,
-			Consumer<Predicate> predicateConsumer,
-			LazyTableGroup lazyTableGroup,
-			NavigablePath navigablePath,
-			SqlAstCreationState creationState) {
-		if ( creationState.getLoadQueryInfluencers().getTemporalIdentifier() != null ) {
-			predicateConsumer.accept( createRestriction(
-					associatedEntityMappingType.getEntityPersister(),
-					lazyTableGroup.resolveTableReference( navigablePath, getTableName() ),
-					collectEntityKeySelectables( associatedEntityMappingType ),
-					creationState.getSqlAliasBaseGenerator()
-			) );
-		}
-	}
-
-	@Override
-	public void applyPredicate(
-			EntityMappingType associatedEntityDescriptor,
-			Consumer<Predicate> predicateConsumer,
-			TableGroup tableGroup,
-			SqlAliasBaseGenerator sqlAliasBaseGenerator,
-			LoadQueryInfluencers influencers) {
-		if ( influencers.getTemporalIdentifier() != null ) {
-			predicateConsumer.accept( createRestriction(
-					associatedEntityDescriptor.getEntityPersister(),
-					tableGroup.resolveTableReference( getTableName() ),
-					collectEntityKeySelectables( associatedEntityDescriptor ),
-					sqlAliasBaseGenerator
-			) );
-		}
-	}
-
-	@Override
-	public void applyPredicate(
-			PluralAttributeMapping collectionDescriptor,
-			Consumer<Predicate> predicateConsumer,
-			TableGroup tableGroup,
-			SqlAliasBaseGenerator sqlAliasBaseGenerator,
-			LoadQueryInfluencers influencers) {
-		if ( influencers.getTemporalIdentifier() != null ) {
-			predicateConsumer.accept( createRestriction(
-					collectionDescriptor,
-					tableGroup.resolveTableReference( getTableName() ),
-					collectCollectionRowKeySelectables( collectionDescriptor ),
-					sqlAliasBaseGenerator
-			) );
-		}
-	}
-
-	@Override
-	public void applyPredicate(TableGroupJoin tableGroupJoin, LoadQueryInfluencers loadQueryInfluencers) {
-		//TODO!!
 	}
 
 	private static List<SelectableMapping> collectEntityKeySelectables(EntityMappingType entityDescriptor) {
@@ -375,6 +383,15 @@ public class AuditMappingImpl implements AuditMapping {
 					}
 			);
 		}
+		else if ( collectionDescriptor.getElementDescriptor() instanceof OneToManyCollectionPart oneToMany ) {
+			oneToMany.getAssociatedEntityMappingType().getIdentifierMapping().forEachSelectable(
+					(selectionIndex, selectableMapping) -> {
+						if ( !selectableMapping.isFormula() ) {
+							keySelectables.add( selectableMapping );
+						}
+					}
+			);
+		}
 		else {
 			collectionDescriptor.getElementDescriptor().forEachSelectable(
 					(selectionIndex, selectableMapping) -> {
@@ -389,19 +406,157 @@ public class AuditMappingImpl implements AuditMapping {
 
 	@Override
 	public void applyPredicate(
-			Supplier<Consumer<Predicate>> predicateCollector,
-			SqlAstCreationState creationState,
-			StandardTableGroup tableGroup,
-			NamedTableReference rootTableReference,
-			EntityMappingType entityMappingType) {
-		if ( creationState.getLoadQueryInfluencers().getTemporalIdentifier() != null ) {
-			predicateCollector.get().accept( createRestriction(
-					entityMappingType,
-					tableGroup.resolveTableReference( getTableName() ),
-					collectEntityKeySelectables( entityMappingType ),
-					creationState.getSqlAliasBaseGenerator()
+			EntityMappingType associatedEntityMappingType,
+			Consumer<Predicate> predicateConsumer,
+			LazyTableGroup lazyTableGroup,
+			NavigablePath navigablePath,
+			SqlAstCreationState creationState) {
+		final var influencers = creationState.getLoadQueryInfluencers();
+		final var persister = associatedEntityMappingType.getEntityPersister();
+		final var info = resolveInfo( persister.getTableName() );
+		if ( hasTemporalPredicate( influencers ) ) {
+			predicateConsumer.accept( createRestriction(
+					persister,
+					lazyTableGroup.resolveTableReference( navigablePath, info.auditTableName ),
+					collectEntityKeySelectables( associatedEntityMappingType ),
+					creationState.getSqlAliasBaseGenerator(),
+					info
 			) );
 		}
+		else if ( influencers.isAllRevisions() ) {
+			final var parentRevColumn = findParentRevColumn( navigablePath, creationState );
+			if ( parentRevColumn != null ) {
+				predicateConsumer.accept( createRestriction(
+						persister,
+						lazyTableGroup.resolveTableReference( navigablePath, info.auditTableName ),
+						collectEntityKeySelectables( associatedEntityMappingType ),
+						creationState.getSqlAliasBaseGenerator(),
+						info,
+						parentRevColumn
+				) );
+			}
+		}
+	}
+
+	@Override
+	public void applyPredicate(
+			EntityMappingType associatedEntityDescriptor,
+			Consumer<Predicate> predicateConsumer,
+			TableGroup tableGroup,
+			SqlAliasBaseGenerator sqlAliasBaseGenerator,
+			LoadQueryInfluencers influencers) {
+		if ( hasTemporalPredicate( influencers ) ) {
+			final var persister = associatedEntityDescriptor.getEntityPersister();
+			final var info = resolveInfo( persister.getTableName() );
+			predicateConsumer.accept( createRestriction(
+					persister,
+					tableGroup.resolveTableReference( info.auditTableName ),
+					collectEntityKeySelectables( associatedEntityDescriptor ),
+					sqlAliasBaseGenerator,
+					info
+			) );
+		}
+	}
+
+	@Override
+	public void applyPredicate(
+			PluralAttributeMapping collectionDescriptor,
+			Consumer<Predicate> predicateConsumer,
+			TableGroup tableGroup,
+			SqlAliasBaseGenerator sqlAliasBaseGenerator,
+			LoadQueryInfluencers influencers) {
+		if ( hasTemporalPredicate( influencers ) ) {
+			final String collectionTable = collectionDescriptor.getCollectionDescriptor().getTableName();
+			final var info = resolveInfo( collectionTable );
+			predicateConsumer.accept( createRestriction(
+					collectionDescriptor,
+					tableGroup.resolveTableReference( info.auditTableName ),
+					collectCollectionRowKeySelectables( collectionDescriptor ),
+					sqlAliasBaseGenerator,
+					info
+			) );
+		}
+	}
+
+	@Override
+	public void applyPredicate(TableGroupJoin tableGroupJoin, LoadQueryInfluencers loadQueryInfluencers) {
+		//TODO!!
+	}
+
+	@Override
+	public void applyPredicate(
+			Supplier<Consumer<Predicate>> predicateCollector,
+			SqlAstCreationState creationState,
+			TableGroup tableGroup,
+			NamedTableReference rootTableReference,
+			EntityMappingType entityMappingType) {
+		if ( hasTemporalPredicate( creationState.getLoadQueryInfluencers() ) ) {
+			final String originalTable = entityMappingType.getEntityPersister().getTableName();
+			predicateCollector.get().accept( createRestriction(
+					entityMappingType.getEntityPersister(),
+					rootTableReference,
+					collectEntityKeySelectables( entityMappingType ),
+					creationState.getSqlAliasBaseGenerator(),
+					resolveInfo( originalTable )
+			) );
+		}
+	}
+
+	@Override
+	public void applyPredicate(
+			TableReferenceJoin tableReferenceJoin,
+			NamedTableReference primaryTableReference,
+			String originalTableName,
+			EntityMappingType entityMappingType,
+			SqlAliasBaseGenerator sqlAliasBaseGenerator,
+			LoadQueryInfluencers influencers) {
+		if ( influencers.getTemporalIdentifier() != null ) {
+			// Correlate REV between primary and joined tables
+			final String primaryTable = entityMappingType.getMappedTableDetails().getTableName();
+			final var primaryInfo = resolveInfo( primaryTable );
+			final var joinedInfo = resolveInfo( originalTableName );
+			tableReferenceJoin.applyPredicate( new ComparisonPredicate(
+					new ColumnReference( primaryTableReference, primaryInfo.transactionIdMapping() ),
+					EQUAL,
+					new ColumnReference( tableReferenceJoin.getJoinedTableReference(), joinedInfo.transactionIdMapping() )
+			) );
+			// If the joined table carries REVTYPE (i.e. the root table), apply the DEL filter
+			if ( joinedInfo.modificationTypeMapping() != null && hasTemporalPredicate( influencers ) ) {
+				tableReferenceJoin.applyPredicate( new ComparisonPredicate(
+						new ColumnReference( tableReferenceJoin.getJoinedTableReference(), joinedInfo.modificationTypeMapping() ),
+						NOT_EQUAL,
+						new JdbcLiteral<>( ModificationType.DEL, joinedInfo.modificationTypeMapping().getJdbcMapping() )
+				) );
+			}
+		}
+	}
+
+	/**
+	 * Walk up the navigable path to find a parent table group with an
+	 * audit mapping, and return a column reference to its REV column.
+	 */
+	private static ColumnReference findParentRevColumn(
+			NavigablePath navigablePath,
+			SqlAstCreationState creationState) {
+		final var parentPath = navigablePath.getParent();
+		if ( parentPath == null ) {
+			return null;
+		}
+		final var parentTableGroup = creationState.getFromClauseAccess()
+				.findTableGroup( parentPath );
+		if ( parentTableGroup != null
+				&& parentTableGroup.getModelPart() instanceof EntityValuedModelPart entityPart ) {
+			final var parentAuditMapping = entityPart.getEntityMappingType().getAuditMapping();
+			if ( parentAuditMapping != null ) {
+				final String parentTable = entityPart.getEntityMappingType().getMappedTableDetails().getTableName();
+				final String parentAuditTable = parentAuditMapping.resolveTableName( parentTable );
+				return new ColumnReference(
+						parentTableGroup.resolveTableReference( parentAuditTable ),
+						parentAuditMapping.getTransactionIdMapping( parentTable )
+				);
+			}
+		}
+		return null;
 	}
 
 	@Override
@@ -412,5 +567,10 @@ public class AuditMappingImpl implements AuditMapping {
 	@Override
 	public boolean isAffectedByInfluencers(LoadQueryInfluencers influencers) {
 		return influencers.getTemporalIdentifier() != null;
+	}
+
+	private static boolean hasTemporalPredicate(LoadQueryInfluencers influencers) {
+		return influencers.getTemporalIdentifier() != null
+				&& !influencers.isAllRevisions();
 	}
 }

@@ -1569,6 +1569,20 @@ public abstract class CollectionBinder {
 						: foreignJoinColumns.getTable();
 		collection.setCollectionTable( collectionTable );
 
+		// For @OneToMany @JoinColumn on an @Audited entity, create a middle audit table
+		// to track collection membership changes (same approach as @ManyToMany / @JoinTable)
+		if ( !collection.isInverse() ) {
+			final var audited = extract( Audited.class, property, buildingContext );
+			if ( audited != null ) {
+				AuditHelper.bindOneToManyAuditTable(
+						audited,
+						collection,
+						oneToMany.getReferencedEntityName(),
+						buildingContext
+				);
+			}
+		}
+
 		bindSynchronize();
 		bindFilters( false );
 		handleWhere( false );
@@ -2439,6 +2453,11 @@ public abstract class CollectionBinder {
 
 	private void processAudited() {
 		assert collection.getCollectionTable() != null;
+		// Skip inverse collections (mappedBy) — the FK is on the child entity's table,
+		// and auditing is handled by the owning side
+		if ( collection.isInverse() ) {
+			return;
+		}
 		final var audited = extract( Audited.class, property, buildingContext );
 		if ( audited != null ) {
 			AuditHelper.bindAuditTable( audited, collection, buildingContext );
@@ -2448,9 +2467,15 @@ public abstract class CollectionBinder {
 	private static <T extends Annotation> T extract(
 			Class<T> annotationClass, MemberDetails property, MetadataBuildingContext context) {
 		final var fromProperty = property.getDirectAnnotationUsage( annotationClass );
-		return fromProperty == null
-				? extractFromPackage( annotationClass, property.getDeclaringType(), context )
-				: fromProperty;
+		if ( fromProperty != null ) {
+			return fromProperty;
+		}
+		// Check the owning entity class hierarchy (class-level annotation propagates to collections)
+		final var modelsContext = context.getBootstrapContext().getModelsContext();
+		final var fromClass = property.getDeclaringType().getAnnotationUsage( annotationClass, modelsContext );
+		return fromClass == null ?
+				extractFromPackage( annotationClass, property.getDeclaringType(), context ) :
+				fromClass;
 	}
 
 	private void handleUnownedManyToMany(

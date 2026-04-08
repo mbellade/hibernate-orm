@@ -85,6 +85,29 @@ public @interface Audited {
 	String modificationType() default "REVTYPE";
 
 	/**
+	 * The name of the column holding the end transaction
+	 * identifier, used only when the
+	 * {@linkplain StateManagementSettings#AUDIT_STRATEGY
+	 * audit strategy} is set to {@code "validity"}. When a
+	 * new audit row is written, the previous row's end
+	 * transaction id column is updated with the current
+	 * transaction identifier, marking it as superseded.
+	 * A {@code null} value indicates the row is current
+	 * (not yet superseded).
+	 */
+	String transactionEnd() default "REVEND";
+
+	/**
+	 * The name of the column holding the timestamp of the
+	 * end transaction. Only used when the
+	 * {@linkplain StateManagementSettings#AUDIT_STRATEGY
+	 * audit strategy} is set to {@code "validity"} and this
+	 * attribute is set to a non-empty value. Stores the
+	 * timestamp of when the audit row was superseded.
+	 */
+	String transactionEndTimestamp() default "";
+
+	/**
 	 * Excludes the annotated attribute from auditing.
 	 * Updates to an excluded attribute modify the current
 	 * row directly without creating a new revision of the

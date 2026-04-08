@@ -546,6 +546,11 @@ public class SessionLazyDelegator implements Session {
 	}
 
 	@Override
+	public org.hibernate.audit.AuditLog getAuditLog() {
+		return this.lazySession.get().getAuditLog();
+	}
+
+	@Override
 	public SharedStatelessSessionBuilder statelessWithOptions() {
 		return this.lazySession.get().statelessWithOptions();
 	}
