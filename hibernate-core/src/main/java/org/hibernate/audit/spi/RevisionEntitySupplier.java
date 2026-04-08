@@ -74,6 +74,13 @@ public class RevisionEntitySupplier<T> implements TransactionIdentifierSupplier<
 		return revisionEntityClass;
 	}
 
+	/**
+	 * The configured revision listener, or {@code null}.
+	 */
+	public @Nullable RevisionListener getListener() {
+		return listener;
+	}
+
 	@Override
 	@SuppressWarnings("unchecked")
 	public T generateTransactionIdentifier(SharedSessionContract session) {
@@ -85,6 +92,9 @@ public class RevisionEntitySupplier<T> implements TransactionIdentifierSupplier<
 			listener.newRevision( revisionEntity );
 		}
 		persistRevisionEntity( session, revisionEntity );
+		// Store the revision entity on the work queue for
+		// EntityTrackingRevisionListener callbacks
+		sessionImpl.getAuditWorkQueue().setRevisionEntity( revisionEntity );
 		return (T) readRevisionNumber( revisionEntity, persister, sessionImpl );
 	}
 

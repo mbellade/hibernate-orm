@@ -333,7 +333,7 @@ See <<Custom Revision Entity Support>> section below.
 
 | W7
 | Revision listener callbacks (`RevisionListener`, `EntityTrackingRevisionListener`)
-| [yellow]#PARTIAL# — `RevisionListener` callback in core; `EntityTrackingRevisionListener` deferred
+| [green]#DONE# — both `RevisionListener` and `EntityTrackingRevisionListener` implemented
 | High
 
 | W8
@@ -1588,10 +1588,12 @@ The following capabilities were verified with dedicated smoke tests (`AuditSmoke
 
 | G9
 | **`EntityTrackingRevisionListener`** (per-entity-change callback)
-| Medium
-| Only `RevisionListener.newRevision()` exists (once per transaction).
-  Need per-entity callback with entityClass, entityId, modificationType.
-  Prerequisite for `@ModifiedEntityNames` and efficient cross-type queries (G5).
+| [green]#DONE#
+| `o.h.audit.EntityTrackingRevisionListener extends RevisionListener` with
+  `entityChanged(Class, String, Object, ModificationType, Object revisionEntity)`.
+  Called once per merged entity change from `AuditWorkQueue.doBeforeTransactionCompletion()`,
+  inline with the entity write loop (single iteration, null-check guarded by JIT).
+  Revision entity stored on the work queue by `RevisionEntitySupplier` — no re-fetch needed.
 
 | G10
 | **`@AuditOverride`** for inherited properties

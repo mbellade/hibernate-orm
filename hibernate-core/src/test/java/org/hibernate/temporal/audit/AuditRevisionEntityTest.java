@@ -91,13 +91,36 @@ class AuditRevisionEntityTest {
 			entity.name = "updated";
 		} );
 
+		// Read current entity via find() - no revision entity should be created
+		scope.getSessionFactory().inTransaction( session -> {
+			final var entity = session.find( MyEntity.class, 1L );
+			assertNotNull( entity );
+			assertEquals( "updated", entity.name );
+		} );
+
+		// Read current entity via HQL - no revision entity should be created
+		scope.getSessionFactory().inTransaction( session -> {
+			final var entity = session.createSelectionQuery(
+					"from MyEntity where id = 1", MyEntity.class
+			).getSingleResult();
+			assertEquals( "updated", entity.name );
+		} );
+
+		// Verify no extra REVINFO rows were created by the read-only transactions
+		scope.getSessionFactory().inTransaction( session -> {
+			final long revCount = session.createSelectionQuery(
+					"select count(*) from RevisionInfo", Long.class
+			).getSingleResult();
+			assertEquals( 2, revCount, "Read-only queries must not create revision entities" );
+		} );
+
 		// Delete
 		scope.getSessionFactory().inTransaction( session -> {
 			final var entity = session.find( MyEntity.class, 1L );
 			session.remove( entity );
 		} );
 
-		// Verify REVINFO rows were created
+		// Verify REVINFO rows were created for write operations only
 		scope.getSessionFactory().inTransaction( session -> {
 			final var revisions = session.createSelectionQuery(
 					"from RevisionInfo order by id", RevisionInfo.class
@@ -131,7 +154,6 @@ class AuditRevisionEntityTest {
 				final var entity = s.find( MyEntity.class, 1L );
 				assertNull( entity );
 			}
-
 		} );
 	}
 }

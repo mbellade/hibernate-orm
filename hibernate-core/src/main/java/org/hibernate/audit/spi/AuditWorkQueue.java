@@ -8,6 +8,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 import org.hibernate.Incubating;
+import org.hibernate.audit.EntityTrackingRevisionListener;
 import org.hibernate.audit.ModificationType;
 import org.hibernate.collection.spi.PersistentCollection;
 import org.hibernate.engine.spi.CollectionKey;
@@ -72,6 +73,8 @@ public class AuditWorkQueue implements TransactionCompletionCallbacks.BeforeComp
 
 	private final Map<EntityKey, QueuedEntry> entries = new LinkedHashMap<>();
 	private final Map<CollectionKey, QueuedCollectionEntry> collectionEntries = new LinkedHashMap<>();
+	private EntityTrackingRevisionListener trackingListener;
+	private Object revisionEntity;
 	private boolean registered;
 
 	/**
@@ -94,6 +97,7 @@ public class AuditWorkQueue implements TransactionCompletionCallbacks.BeforeComp
 			SharedSessionContractImplementor session) {
 		if ( !registered ) {
 			session.getTransactionCompletionCallbacks().registerCallback( this );
+			trackingListener = resolveTrackingListener( session );
 			registered = true;
 		}
 
@@ -186,19 +190,38 @@ public class AuditWorkQueue implements TransactionCompletionCallbacks.BeforeComp
 		};
 	}
 
+	/**
+	 * Store the revision entity instance for use by
+	 * {@link EntityTrackingRevisionListener} callbacks.
+	 * Called from {@link RevisionEntitySupplier#generateTransactionIdentifier}.
+	 */
+	public void setRevisionEntity(Object revisionEntity) {
+		this.revisionEntity = revisionEntity;
+	}
+
 	@Override
 	public void doBeforeTransactionCompletion(SharedSessionContractImplementor session) {
 		try {
 			// Entity audit rows first
 			for ( var mapEntry : entries.entrySet() ) {
+				final var entityKey = mapEntry.getKey();
 				final var entry = mapEntry.getValue();
 				entry.writer.writeAuditRow(
-						mapEntry.getKey(),
+						entityKey,
 						entry.entity,
 						entry.values,
 						entry.modificationType,
 						session
 				);
+				if ( trackingListener != null ) {
+					trackingListener.entityChanged(
+							entityKey.getPersister().getMappedClass(),
+							entityKey.getEntityName(),
+							entityKey.getIdentifier(),
+							entry.modificationType,
+							revisionEntity
+					);
+				}
 			}
 			// Collection audit rows (diff original snapshot vs final state)
 			for ( var entry : collectionEntries.values() ) {
@@ -213,7 +236,20 @@ public class AuditWorkQueue implements TransactionCompletionCallbacks.BeforeComp
 		finally {
 			entries.clear();
 			collectionEntries.clear();
+			trackingListener = null;
+			revisionEntity = null;
 			registered = false;
 		}
+	}
+
+	private static EntityTrackingRevisionListener resolveTrackingListener(
+			SharedSessionContractImplementor session) {
+		final var supplier = session.getFactory()
+				.getTransactionIdentifierService().getIdentifierSupplier();
+		if ( supplier instanceof RevisionEntitySupplier<?> res
+				&& res.getListener() instanceof EntityTrackingRevisionListener etrl ) {
+			return etrl;
+		}
+		return null;
 	}
 }
