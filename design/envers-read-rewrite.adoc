@@ -222,9 +222,57 @@ projections, joins, and aggregations.
 
 | 20
 | `RelationTargetAuditMode.NOT_AUDITED` (mixed audited/non-audited relations)
-| Needs investigation
-| [yellow]#TODO# — investigate
+| Not needed — works implicitly
+| [green]#DONE# — no annotation required. FK is stored in audit table; non-audited
+  target loads from current table. All `applyPredicate()` call sites are null-guarded.
+  Envers required `@Audited(targetAuditMode = NOT_AUDITED)` because its separate metadata
+  model needed explicit declarations; core reuses entity mappings so no declaration needed.
+  See <<not-audited-target-behavior>> for behavioral differences with envers.
 |===
+
+[[not-audited-target-behavior]]
+=== Associations to Non-Audited Targets: Behavioral Differences
+
+Core auditing handles mixed audited/non-audited entity relationships implicitly — no annotation
+needed (unlike envers' `@Audited(targetAuditMode = NOT_AUDITED)`). The FK is stored in the audit
+table and used to load the target from the current table. However, there are behavioral differences
+with envers when the non-audited target entity has been **deleted**:
+
+[cols="1,2,2"]
+|===
+| Scenario | Envers behavior | Core behavior
+
+| **Eager / `optional=true`**
+| `targetNotFoundAction` controls: ERROR (default) throws, IGNORE returns null
+| LEFT JOIN resolves to null silently (standard Hibernate semantics)
+
+| **Lazy + deleted target**
+| Proxy created; on access, `targetNotFoundAction` controls: ERROR throws `EntityNotFoundException`,
+  IGNORE eagerly loads and returns null (no proxy)
+| Proxy created; on access, throws `EntityNotFoundException` (standard Hibernate proxy behavior)
+
+| **`optional=false` + deleted target**
+| ERROR throws, IGNORE returns null
+| INNER JOIN fails to load the owning entity itself (returns null from `find()`)
+|===
+
+**Root cause**: envers had its own entity reconstruction pipeline (field-by-field mapping from audit
+row data, separate per-association loading via `ToOneEntityLoader`). Core reuses standard Hibernate
+entity loading with JOIN fetching, so association behavior follows standard Hibernate semantics.
+
+**Note**: audit tables have no FK constraints (same as envers), so dangling FKs are always possible.
+For audited-to-audited associations, envers' `AuditReaderImpl.find()` silently returned null for
+missing targets (`NoResultException` caught). Core's JOIN-based approach handles this via the
+temporal predicate + LEFT JOIN.
+
+**Migration options**:
+
+1. **Recommended**: migrating users should annotate audited-to-non-audited lazy associations with
+   `@NotFound(action = IGNORE)` or `@NotFound(action = EXCEPTION)` to explicitly declare the
+   expected behavior when the target is deleted.
+2. **Future**: core could implicitly default to `@NotFound(EXCEPTION)` or `@NotFound(IGNORE)` for
+   associations from audit tables to non-audited entities, matching envers' `targetNotFoundAction`
+   default. This would require changes to how audit table references handle association fetching.
 
 == Write-Side Gap Analysis
 
@@ -363,7 +411,7 @@ See <<Custom Revision Entity Support>> section below.
 
 | W21
 | `RelationTargetAuditMode.NOT_AUDITED` (audit FK but not target entity)
-| [red]#TODO#
+| [green]#DONE# — works implicitly, no annotation needed. See gap 20.
 | Medium
 
 | W22
@@ -1522,10 +1570,13 @@ The following capabilities were verified with dedicated smoke tests (`AuditSmoke
 
 | G7
 | **`RelationTargetAuditMode.NOT_AUDITED`**
-| High
-| Audit FK column without requiring target entity to be `@Audited`.
-  `atTransaction` session should load FK from audit table but target from main table.
-  Envers `@Audited(targetAuditMode = NOT_AUDITED)` — common for dictionary/lookup entities.
+| [green]#DONE#
+| Works implicitly — no annotation needed. FK columns are copied to audit table;
+  non-audited targets load from current table via existing null guards on
+  `getAuxiliaryMapping()`. Envers required explicit `@Audited(targetAuditMode = NOT_AUDITED)`
+  because its separate metadata model needed declarations; core reuses entity mappings.
+  Tested: `@ManyToOne`, `@OneToOne`, `@ManyToMany`, `@OneToMany` to non-audited targets.
+  See <<not-audited-target-behavior>> for behavioral differences with deleted targets.
 
 | G8
 | **`@Version` auto-exclusion**
@@ -1671,8 +1722,8 @@ Envers exposes user-facing interfaces and classes. Core equivalents or gaps:
 | `o.h.audit.DefaultRevisionEntity`.
 
 | `RelationTargetAuditMode` enum
-| [red]#TODO#
-| See G7. `NOT_AUDITED` mode for relations to non-audited entities.
+| [green]#Not needed#
+| See G7. Core handles mixed audited/non-audited implicitly — no enum needed.
 
 | `AuditQuery` / `AuditQueryCreator` / `AuditEntity` DSL
 | [green]#N/A#
