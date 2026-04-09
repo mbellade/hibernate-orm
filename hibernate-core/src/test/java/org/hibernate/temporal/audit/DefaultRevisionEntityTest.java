@@ -146,7 +146,8 @@ class DefaultRevisionEntityTest {
 			var entry2 = history.get( 1 );
 			assertInstanceOf( DefaultRevisionEntity.class, entry2.revision() );
 			var rev2 = (DefaultRevisionEntity) entry2.revision();
-			assertTrue( rev2.getId() > rev1.getId(), "Revisions should be sequential" );
+			assertTrue( rev2.getId() > rev1.getId(),
+					"Revisions should be sequential: rev1=" + rev1.getId() + ", rev2=" + rev2.getId() );
 		} );
 	}
 

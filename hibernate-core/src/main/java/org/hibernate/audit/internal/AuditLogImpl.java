@@ -22,12 +22,15 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Date;
+import org.hibernate.internal.util.cache.InternalCache;
+import org.hibernate.internal.util.cache.InternalCacheFactory;
 
 import static java.util.Objects.requireNonNull;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Session-scoped implementation of {@link AuditLog} that queries
@@ -61,9 +64,21 @@ public class AuditLogImpl implements AuditReader {
 	 */
 	private @Nullable Session allRevisionsSession;
 
+	private final InternalCache<String, AuditFindPlan> findPlanCache;
+
 	public AuditLogImpl(SharedSessionContractImplementor session) {
 		this.session = session; // todo (envers-rewrite) : we could move this back to be SF-scoped
 		this.sessionFactory = session.getSessionFactory();
+		final var auditedCount = new AtomicInteger();
+		sessionFactory.getMappingMetamodel().forEachEntityDescriptor( p -> {
+			if ( p.getAuditMapping() != null ) {
+				auditedCount.incrementAndGet();
+			}
+		} );
+		final var cacheFactory = sessionFactory.getServiceRegistry()
+				.requireService( InternalCacheFactory.class );
+		final int cacheSize = Math.max( auditedCount.get(), 16 );
+		this.findPlanCache = cacheFactory.createInternalCache( cacheSize );
 		final var service = sessionFactory.getServiceRegistry().getService( TransactionIdentifierService.class );
 		if ( service != null && service.getIdentifierSupplier() instanceof RevisionEntitySupplier<?> supplier ) {
 			this.revisionEntitySupplier = supplier;
@@ -156,38 +171,39 @@ public class AuditLogImpl implements AuditReader {
 	@Override
 	public <T> T find(Class<T> entityClass, Object id, Object transactionId, boolean includeDeletions) {
 		requireNonNull( entityClass, "Entity class" );
-		return doFind( entityClass, requireAuditedEntityName( entityClass ), id, transactionId, includeDeletions );
+		return doFind( requireAuditedEntityName( entityClass ), id, transactionId, includeDeletions );
 	}
 
 	@Override
 	public Object find(String entityName, Object id, Object transactionId, boolean includeDeletions) {
 		requireNonNull( entityName, "Entity name" );
 		requireAuditedEntityName( entityName );
-		return doFind( Object.class, entityName, id, transactionId, includeDeletions );
+		return doFind( entityName, id, transactionId, includeDeletions );
 	}
 
-	private <T> T doFind(Class<T> resultType, String entityName, Object id,
+	private <T> T doFind(String entityName, Object id,
 			Object transactionId, boolean includeDeletions) {
 		requireNonNull( id, "Primary key" );
 		requireNonNull( transactionId, "Transaction identifier" );
-		var hql = "from " + entityName + " e"
-				+ " where e.id = :id"
-				+ " and transactionId(e) = :txId";
-		if ( !includeDeletions ) {
-			hql += " and modificationType(e) != :del";
-		}
-		final var query = allRevisionsSession().createSelectionQuery( hql, resultType )
-				.setParameter( "id", id )
-				.setParameter( "txId", transactionId );
-		if ( !includeDeletions ) {
-			query.setParameter( "del", ModificationType.DEL );
-		}
-		return query.getSingleResultOrNull();
+		final var plan = findPlanCache.computeIfAbsent(
+				entityName,
+				name -> new AuditFindPlan(
+						sessionFactory.getMappingMetamodel().getEntityDescriptor( name ),
+						sessionFactory
+				)
+		);
+		return plan.find( id, transactionId, includeDeletions,
+				(SharedSessionContractImplementor) allRevisionsSession() );
 	}
 
 	@Override
 	public <T> T find(Class<T> entityClass, Object id, Instant instant) {
 		return find( entityClass, id, getTransactionId( instant ) );
+	}
+
+	@Override
+	public Object find(String entityName, Object id, Instant instant) {
+		return find( entityName, id, getTransactionId( instant ) );
 	}
 
 	@Override
@@ -205,23 +221,33 @@ public class AuditLogImpl implements AuditReader {
 	@Override
 	public <T> List<AuditEntry<T>> getHistory(Class<T> entityClass, Object id) {
 		requireNonNull( entityClass, "Entity class" );
+		return doGetHistory( requireAuditedEntityName( entityClass ), id );
+	}
+
+	@Override
+	public List<AuditEntry<Object>> getHistory(String entityName, Object id) {
+		requireNonNull( entityName, "Entity name" );
+		requireAuditedEntityName( entityName );
+		return doGetHistory( entityName, id );
+	}
+
+	private <T> List<AuditEntry<T>> doGetHistory(String entityName, Object id) {
 		requireNonNull( id, "Primary key" );
-		final var entityName = requireAuditedEntityName( entityClass );
 
 		final String hql;
 		if ( revisionEntityName != null ) {
 			hql = "select e, r, modificationType(e)"
-				+ " from " + entityName + " e"
-				+ " join " + revisionEntityName + " r"
-				+ " on r.id = transactionId(e)"
-				+ " where e.id = :id"
-				+ " order by transactionId(e)";
+					+ " from " + entityName + " e"
+					+ " join " + revisionEntityName + " r"
+					+ " on r.id = transactionId(e)"
+					+ " where e.id = :id"
+					+ " order by transactionId(e)";
 		}
 		else {
 			hql = "select e, transactionId(e), modificationType(e)"
-				+ " from " + entityName + " e"
-				+ " where e.id = :id"
-				+ " order by transactionId(e)";
+					+ " from " + entityName + " e"
+					+ " where e.id = :id"
+					+ " order by transactionId(e)";
 		}
 
 		final List<Object[]> rows = allRevisionsSession()
@@ -230,10 +256,9 @@ public class AuditLogImpl implements AuditReader {
 
 		final List<AuditEntry<T>> result = new ArrayList<>( rows.size() );
 		for ( var row : rows ) {
-			@SuppressWarnings("unchecked") final var entity = (T) row[0];
-			final var revision = row[1];
-			final var modType = (ModificationType) row[2];
-			result.add( new AuditEntry<>( entity, revision, modType ) );
+			//noinspection unchecked
+			final var entity = (T) row[0];
+			result.add( new AuditEntry<>( entity, row[1], (ModificationType) row[2] ) );
 		}
 		return result;
 	}

@@ -17,7 +17,7 @@ import org.hibernate.Incubating;
  * </ul>
  *
  * @param entity the entity snapshot at this revision
- * @param revision the revision entity or transaction identifier
+ * @param revision the revision entity (if configured) or transaction identifier
  * @param modificationType the type of modification (ADD/MOD/DEL)
  *
  * @param <T> the entity type

@@ -181,6 +181,19 @@ public interface AuditLog {
 	<T> T find(Class<T> entityClass, Object id, Instant instant);
 
 	/**
+	 * Find an entity snapshot by entity name as of the given
+	 * instant.
+	 *
+	 * @param entityName the entity name
+	 * @param id the entity identifier
+	 * @param instant the point in time
+	 * @return the entity state, or {@code null}
+	 *
+	 * @see #find(Class, Object, Instant)
+	 */
+	Object find(String entityName, Object id, Instant instant);
+
+	/**
 	 * Find all entity snapshots of the given type that
 	 * were modified at a specific transaction.
 	 *
@@ -211,6 +224,17 @@ public interface AuditLog {
 	 * @param <T> the entity type
 	 */
 	<T> List<AuditEntry<T>> getHistory(Class<T> entityClass, Object id);
+
+	/**
+	 * Get the full audit history for an entity by entity name.
+	 *
+	 * @param entityName the entity name
+	 * @param id the entity identifier
+	 * @return the audit history as a list of {@link AuditEntry}
+	 *
+	 * @see #getHistory(Class, Object)
+	 */
+	List<AuditEntry<Object>> getHistory(String entityName, Object id);
 
 	/**
 	 * Get the timestamp of a specific revision. Requires

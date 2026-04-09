@@ -1738,6 +1738,42 @@ The following capabilities were verified with dedicated smoke tests (`AuditSmoke
   `schema`/`catalog` attributes. Common use case: separate audit schema for access control.
   Needs attributes on `@Audited` and/or a global configuration property.
 
+| G16
+| **Foreign key constraints on audit tables**
+| High
+| Core audit tables currently have NO FK constraints. Envers created:
+  (1) `_AUD.REV -> REVINFO.REV` on every audit table;
+  (2) `_AUD.REVEND -> REVINFO.REV` for validity strategy;
+  (3) `ChildEntity_AUD.(REV, id) -> ParentEntity_AUD.(REV, id)` for JOINED inheritance;
+  (4) `secondary_AUD.(REV, id) -> PrimaryEntity_AUD.(REV, id)` for `@SecondaryTable`.
+  No FK from `_AUD` back to the main entity table. No unique constraints (composite PKs
+  handle uniqueness). These FKs are important for data integrity and schema compatibility
+  with existing envers databases.
+
+| G18
+| **Pre-built SQL AST for `getHistory()`**
+| Medium
+| `AuditLog.find()` uses pre-built SQL AST via `AuditFindPlan` (zero HQL parsing).
+  `getHistory()` still uses HQL because building a multi-entity `DomainResult`
+  (audit entity + revision entity join) within a single `LoaderSqlAstCreationState`
+  causes SQL selection position mismatches when the revision entity's `DomainResult`
+  reads from wrong JDBC result positions. A `PostProcessor` callback was added to
+  `LoaderSelectBuilder.generateSelect()` to allow adding extra joins/DomainResults
+  using the same creation state, but the revision entity ID column still resolves
+  to the wrong position (reads audit entity's BIGINT id instead of REVINFO's INT rev).
+  The SQL output is correct — the issue is in the `DomainResult` internal position
+  mapping. Further investigation needed. The `PostProcessor` API on `LoaderSelectBuilder`
+  is a useful extension that should be kept regardless.
+
+| G17
+| **`AuditLog` API: builder pattern for entity-scoped queries**
+| Medium
+| Currently every method on `AuditLog` is duplicated for `Class<T>` and `String entityName`
+  parameters. Should refactor to a fluent builder pattern:
+  `auditLog.forEntity(MyEntity.class).find(id, txId)` / `auditLog.forEntity("MyEntity").find(...)`,
+  similar to `session.byId(Class)` returning `IdentifierLoadAccess`. Eliminates the
+  duplication and provides a clear path for future methods.
+
 | G15
 | **Naming: "revision" vs "transaction-id"**
 | Low
