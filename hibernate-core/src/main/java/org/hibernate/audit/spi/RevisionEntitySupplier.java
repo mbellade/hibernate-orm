@@ -75,6 +75,20 @@ public class RevisionEntitySupplier<T> implements TransactionIdentifierSupplier<
 	}
 
 	/**
+	 * The name of the {@link RevisionNumber @RevisionNumber} property.
+	 */
+	public String getRevisionNumberProperty() {
+		return revisionNumberProperty;
+	}
+
+	/**
+	 * The name of the {@link RevisionTimestamp @RevisionTimestamp} property.
+	 */
+	public String getRevisionTimestampProperty() {
+		return revisionTimestampProperty;
+	}
+
+	/**
 	 * The configured revision listener, or {@code null}.
 	 */
 	public @Nullable RevisionListener getListener() {

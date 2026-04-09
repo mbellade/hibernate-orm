@@ -1120,56 +1120,176 @@ and by `allRevisions()` mode with HQL filter `where transactionId(e) = :txId`.
 * [ ] Provide migration path for users with heavy envers query usage
 * [ ] Can live in a slimmed-down `hibernate-envers` module or a new `hibernate-envers-compat` module
 
-== Migration Guide (envers → core)
+== Migration Guide (envers -> core)
+
+=== Legacy Bridge
+
+A legacy `AuditReader` interface is provided in `org.hibernate.audit.legacy` that extends
+`AuditLog` with deprecated bridge methods matching the envers `AuditReader` API. Most
+envers code works with just an import change from `org.hibernate.envers` to
+`org.hibernate.audit.legacy`.
+
+`AuditReaderFactory.get(session)` returns the session's `AuditLog` (which implements
+`AuditReader`) directly. No adapter class is needed.
+
+Unsupported methods (`createQuery()`, `getCrossTypeRevisionChangesReader()`,
+`getCurrentRevision()`, `getEntityName()`) throw `UnsupportedOperationException`
+with migration hints.
+
+=== Breaking Changes
+
+* `getRevisions()` returns `List<Object>` instead of `List<Number>`.
+  Update variable declarations from `List<Number>` to `List<Object>`.
+* `findRevisions()` returns `Map<Object, T>` instead of `Map<Number, T>`.
+  Update variable declarations accordingly.
+* These changes reflect that core transaction identifiers are `Object`-typed
+  (not restricted to `Number`).
+
+=== Annotation Changes
 
 [cols="2,3"]
 |===
-| Envers Pattern | Core Replacement
-
-| `AuditReaderFactory.get(em)`
-| `sf.withOptions().atTransaction(txId)` or `session.getAuditLog()`
-
-| `reader.find(Foo.class, id, rev)`
-| `session.find(Foo.class, id)` (in `atTransaction` session)
-
-| `reader.getRevisions(Foo.class, id)`
-| `auditLog.getRevisions(Foo.class, id)`
-
-| `createQuery().forEntitiesAtRevision(Foo.class, rev).add(...).getResultList()`
-| HQL in `atTransaction` session: `from Foo where ...`
-
-| `createQuery().forRevisionsOfEntity(...)`
-| `auditLog.getRevisions()` + loop `atTransaction` sessions
-
-| `AuditEntity.property("name").eq("x")`
-| HQL: `where name = :name`
-
-| `AuditEntity.revisionNumber().between(1,5)`
-| `auditLog.getRevisions()` filtered
-
-| `AuditEntity.revisionType().eq(ADD)`
-| `auditLog.getModificationType()`
+| Envers | Core
 
 | `@org.hibernate.envers.Audited`
 | `@org.hibernate.annotations.Audited`
 
-| `@NotAudited`
-| `@Audited.Excluded`
+| `@org.hibernate.envers.NotAudited`
+| `@org.hibernate.annotations.Audited.Excluded`
 
-| `@RevisionEntity` + `@RevisionNumber` + `@RevisionTimestamp`
-| Regular `@Entity` with `@Id @GeneratedValue` — user defines structure freely
+| `@org.hibernate.envers.Audited(targetAuditMode = NOT_AUDITED)`
+| Remove -- works implicitly in core
 
-| `RevisionListener.newRevision(revisionEntity)`
-| `org.hibernate.audit.RevisionListener` callback via `RevisionEntitySupplier`
+| `@org.hibernate.envers.AuditTable(value="X")`
+| `@org.hibernate.annotations.Audited(tableName="X")`
 
-| `EntityTrackingRevisionListener.entityChanged(...)`
-| Separate callback SPI (future) or application-level event listener
+| `@org.hibernate.envers.RevisionEntity`
+| `@org.hibernate.audit.RevisionEntity`
+
+| `@org.hibernate.envers.RevisionNumber`
+| `@org.hibernate.audit.RevisionNumber`
+
+| `@org.hibernate.envers.RevisionTimestamp`
+| `@org.hibernate.audit.RevisionTimestamp`
+
+| `RevisionListener`
+| `org.hibernate.audit.RevisionListener`
+
+| `EntityTrackingRevisionListener`
+| `org.hibernate.audit.EntityTrackingRevisionListener`
+|===
+
+=== API Changes
+
+[cols="2,3"]
+|===
+| Envers Code | Core Replacement
+
+| `AuditReaderFactory.get(session)`
+| `session.getAuditLog()` (or `AuditReaderFactory.get(session)` via legacy bridge)
+
+| `reader.find(Foo.class, id, rev)`
+| `auditLog.find(Foo.class, id, rev)`
+
+| `reader.find(Foo.class, id, date)`
+| `auditLog.find(Foo.class, id, date.toInstant())`
+
+| `reader.getRevisions(Foo.class, id)`
+| `auditLog.getRevisions(Foo.class, id)` (returns `List<Object>`)
+
+| `reader.getRevisionDate(rev)`
+| `auditLog.getTransactionTimestamp(rev)` (returns `LocalDateTime`)
+
+| `reader.getRevisionNumberForDate(date)`
+| `auditLog.getTransactionId(date.toInstant())` (returns `Object`)
+
+| `reader.findRevision(RevInfo.class, rev)`
+| `auditLog.findRevision(rev)`
+
+| `reader.findRevisions(RevInfo.class, revs)`
+| `auditLog.findRevisions(revs)` (returns `Map<Object, T>`)
+
+| `reader.isEntityClassAudited(Foo.class)`
+| `auditLog.isAudited(Foo.class)`
+
+| `createQuery().forEntitiesAtRevision(...)`
+| HQL in `atTransaction` session: `session.find(...)` or `from Foo where ...`
+
+| `createQuery().forRevisionsOfEntity(...)`
+| `auditLog.getHistory(Foo.class, id)`
+
+| `AuditEntity.property("name").eq("x")`
+| HQL: `where name = :name` (in `atTransaction` session)
 
 | `traverseRelation("rel", INNER)`
 | HQL: `join fetch e.rel r where ...`
+|===
 
-| Existing `REVINFO` table
-| Map as regular `@Entity` + `TransactionIdentifierSupplier` — no schema changes
+=== Configuration Changes
+
+[cols="2,3"]
+|===
+| Envers Setting | Core Setting
+
+| `org.hibernate.envers.audit_strategy`
+| `hibernate.audit.strategy` ("default" or "validity")
+
+| `org.hibernate.envers.revision_field_name`
+| `@Audited(transactionId="...")`
+
+| `org.hibernate.envers.revision_type_field_name`
+| `@Audited(modificationType="...")`
+
+| `org.hibernate.envers.audit_table_suffix`
+| N/A (defaults to `_aud`, configurable via `@Audited(tableName="...")`)
+
+| `org.hibernate.envers.do_not_audit_optimistic_locking_field`
+| Use `@Audited.Excluded` on `@Version` fields
+
+| `org.hibernate.envers.store_data_at_delete`
+| N/A (core always stores full state on DEL)
+
+| `org.hibernate.envers.revision_listener`
+| `@RevisionEntity(listener = MyListener.class)`
+|===
+
+=== Features With No Direct Equivalent
+
+[cols="2,3"]
+|===
+| Envers Feature | Core Alternative
+
+| `AuditQuery` criteria DSL
+| HQL with `transactionId()`/`modificationType()` functions
+
+| `@AuditOverride`
+| `@Audited.Excluded` on individual properties
+
+| `@ModifiedEntityNames`
+| Use `EntityTrackingRevisionListener` to track manually
+
+| `@AuditMappedBy`
+| Not needed (core uses real entity mappings)
+
+| `withModifiedFlag` / `_MOD` columns
+| Not supported; query property values directly
+
+| `CrossTypeRevisionChangesReader`
+| Use `EntityTrackingRevisionListener` callbacks
+
+| `@Audited(targetAuditMode = NOT_AUDITED)`
+| Not needed (works implicitly, see <<not-audited-target-behavior>>)
+|===
+
+=== Schema Compatibility
+
+* **Column names**: `REV`, `REVTYPE`, `REVEND`, `REVEND_TSTMP` defaults match envers.
+* **Modification type encoding**: same (ADD=0, MOD=1, DEL=2).
+* **Primary key composition**: same (`(REV, entity_id_columns)`).
+* **REVINFO table**: `DefaultRevisionEntity` uses identical schema (`REVINFO.REV`, `REVINFO.REVTSTMP`).
+* **Table suffix**: core uses `_aud` (lowercase) vs envers `_AUD` (uppercase).
+  On case-insensitive databases (most), this is transparent. On case-sensitive databases,
+  use `@Audited(tableName="...")` to match existing table names.
 
 | Existing `*_AUD` tables with FK to REVINFO
 | Work as-is — core reads by column values, FK is transparent
@@ -1617,6 +1737,17 @@ The following capabilities were verified with dedicated smoke tests (`AuditSmoke
   Envers supports `default_schema`/`default_catalog` settings and per-annotation
   `schema`/`catalog` attributes. Common use case: separate audit schema for access control.
   Needs attributes on `@Audited` and/or a global configuration property.
+
+| G15
+| **Naming: "revision" vs "transaction-id"**
+| Low
+| Core uses "transaction-id" naming in the new API (`transactionId()`, `getTransactionId()`,
+  `@Audited.transactionId`), but several internal classes retain the "revision" naming from envers:
+  `RevisionEntitySupplier`, `RevisionListener`, `@RevisionEntity`, `@RevisionNumber`,
+  `@RevisionTimestamp`, `revisionNumberProperty`, etc. Need to decide whether to fully migrate
+  these to "transaction-id" naming or preserve "revision" for backward compatibility with
+  the envers conceptual model. The "revision" naming is arguably clearer for audit-specific
+  concepts (a "revision" is an audit-specific notion, while "transaction-id" is more general).
 
 | G6
 | **ValidityAuditStrategy** (REVEND / REVEND_TSTMP columns)

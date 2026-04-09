@@ -4,7 +4,10 @@
  */
 package org.hibernate.audit;
 
+import java.time.Instant;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import org.hibernate.Incubating;
 
@@ -95,6 +98,14 @@ public interface AuditLog {
 	boolean isAudited(Class<?> entityClass);
 
 	/**
+	 * Check if an entity is audited by entity name.
+	 *
+	 * @param entityName the entity name
+	 * @return {@code true} if the entity is audited
+	 */
+	boolean isAudited(String entityName);
+
+	/**
 	 * Find an entity snapshot at a specific transaction.
 	 *
 	 * @param entityClass the audited entity class
@@ -107,6 +118,67 @@ public interface AuditLog {
 	 * @param <T> the entity type
 	 */
 	<T> T find(Class<T> entityClass, Object id, Object transactionId);
+
+	/**
+	 * Find an entity snapshot by entity name at a specific
+	 * transaction.
+	 *
+	 * @param entityName the entity name
+	 * @param id the entity identifier
+	 * @param transactionId the transaction identifier
+	 * @return the entity state at that transaction, or
+	 *         {@code null} if the entity did not exist
+	 *
+	 * @see #find(Class, Object, Object)
+	 */
+	Object find(String entityName, Object id, Object transactionId);
+
+	/**
+	 * Find an entity snapshot at a specific transaction,
+	 * optionally including deleted entities.
+	 * <p>
+	 * When {@code includeDeletions} is {@code false}, this
+	 * behaves identically to {@link #find(Class, Object, Object)},
+	 * returning {@code null} for DEL revisions. When {@code true},
+	 * the entity state at deletion is returned instead of
+	 * {@code null}.
+	 *
+	 * @param entityClass the audited entity class
+	 * @param id the entity identifier
+	 * @param transactionId the transaction identifier
+	 * @param includeDeletions whether to include deleted entities
+	 * @return the entity state at that transaction
+	 *
+	 * @param <T> the entity type
+	 */
+	<T> T find(Class<T> entityClass, Object id, Object transactionId, boolean includeDeletions);
+
+	/**
+	 * Find an entity snapshot by entity name at a specific
+	 * transaction, optionally including deleted entities.
+	 *
+	 * @param entityName the entity name
+	 * @param id the entity identifier
+	 * @param transactionId the transaction identifier
+	 * @param includeDeletions whether to include deleted entities
+	 * @return the entity state at that transaction
+	 *
+	 * @see #find(Class, Object, Object, boolean)
+	 */
+	Object find(String entityName, Object id, Object transactionId, boolean includeDeletions);
+
+	/**
+	 * Find an entity snapshot as of the given instant. Returns
+	 * the state at the highest revision on or before the instant.
+	 *
+	 * @param entityClass the audited entity class
+	 * @param id the entity identifier
+	 * @param instant the point in time
+	 * @return the entity state, or {@code null}
+	 *
+	 * @param <T> the entity type
+	 */
+	<T> T find(Class<T> entityClass, Object id, Instant instant);
 
 	/**
 	 * Find all entity snapshots of the given type that
@@ -139,4 +211,55 @@ public interface AuditLog {
 	 * @param <T> the entity type
 	 */
 	<T> List<AuditEntry<T>> getHistory(Class<T> entityClass, Object id);
+
+	/**
+	 * Get the timestamp of a specific revision. Requires
+	 * a {@link RevisionEntity @RevisionEntity} with a
+	 * {@link RevisionTimestamp @RevisionTimestamp} field.
+	 *
+	 * @param transactionId the transaction identifier
+	 * @return the revision timestamp
+	 * @throws AuditException if no revision entity is configured
+	 *         or the transaction does not exist
+	 */
+	Instant getTransactionTimestamp(Object transactionId);
+
+	/**
+	 * Get the transaction identifier that was current at or
+	 * before the given instant. Requires a
+	 * {@link RevisionEntity @RevisionEntity} with a
+	 * {@link RevisionTimestamp @RevisionTimestamp} field.
+	 *
+	 * @param instant the point in time
+	 * @return the most recent transaction identifier at or
+	 *         before the given instant
+	 * @throws AuditException if no transaction exists at or
+	 *         before the given instant
+	 */
+	Object getTransactionId(Instant instant);
+
+	/**
+	 * Load the revision entity for the given transaction identifier.
+	 * Requires a {@link RevisionEntity @RevisionEntity}.
+	 *
+	 * @param transactionId the transaction identifier
+	 * @return the revision entity
+	 * @throws AuditException if no revision entity is configured
+	 *         or the revision does not exist
+	 *
+	 * @param <T> the revision entity type
+	 */
+	<T> T findRevision(Object transactionId);
+
+	/**
+	 * Load revision entities for multiple transaction identifiers.
+	 * Requires a {@link RevisionEntity @RevisionEntity}.
+	 *
+	 * @param transactionIds the transaction identifiers
+	 * @return a map from transaction identifier to revision entity
+	 *
+	 * @param <T> the revision entity type
+	 */
+	<T> Map<Object, T> findRevisions(Set<?> transactionIds);
+
 }
