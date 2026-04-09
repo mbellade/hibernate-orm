@@ -348,7 +348,9 @@ See <<Custom Revision Entity Support>> section below.
 
 | W10
 | Audit strategy: ValidityAuditStrategy (start/end revision intervals)
-| [red]#TODO# — core uses DefaultAuditStrategy-like approach (MAX subquery)
+| [green]#DONE# — `hibernate.audit.strategy=validity` adds REVEND (+optional REVEND_TSTMP) columns.
+  Write: UPDATE previous row's REVEND on new audit row. Read: range predicate
+  `REV <= ? AND (REVEND > ? OR REVEND IS NULL)`. All tests run with both strategies via `@AuditedTest`.
 | Medium
 
 | W11
@@ -1356,19 +1358,14 @@ For the migration to work seamlessly, these constraints must hold:
 
 === What About ValidityAuditStrategy Users?
 
-Users who configured `ValidityAuditStrategy` have extra columns (`REVEND`, `REVEND_TSTMP`) in their
-audit tables. Migration considerations:
+Core supports validity audit strategy via `hibernate.audit.strategy=validity`. Migration from envers:
 
-- **Core reads**: The extra columns are ignored — core uses the MAX-subquery approach, not validity intervals.
-  This works correctly but may be slower for large audit tables (the validity approach avoids subqueries).
-- **Existing data**: Fully readable by core — the `REV`/`REVTYPE` columns are the same.
-- **New writes**: Core won't populate `REVEND`/`REVEND_TSTMP` — new audit rows will have NULL in these columns.
-  This is acceptable: NULL `REVEND` means "current/latest", which is correct for newly written rows.
-- **Mixed reads**: If some rows have `REVEND` (written by envers) and some don't (written by core),
-  only the core MAX-subquery approach works correctly. The validity approach would break.
-- **Recommendation**: ValidityAuditStrategy users can migrate, but should accept that the validity
-  optimization is lost. The MAX-subquery approach works on all data. Future: consider adding validity
-  support to core if performance demands it.
+- **Existing data**: Fully compatible. Core reads REVEND columns with the same range predicate as envers.
+- **New writes**: Core populates REVEND on previous rows and writes new audit rows, same as envers.
+- **Configuration**: Set `hibernate.audit.strategy=validity`. Column names default to `REVEND` and
+  (optionally) `REVEND_TSTMP`, configurable via `@Audited.transactionEnd()` / `@Audited.transactionEndTimestamp()`.
+- **Default strategy users**: No changes needed. The MAX-subquery approach (default) works on all data,
+  including tables with REVEND columns (the extra columns are simply ignored).
 
 === Built-in REVINFO Support
 
