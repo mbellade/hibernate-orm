@@ -1,0 +1,621 @@
+= Migration Guide: Envers to Core @Audited
+:toc:
+:toclevels: 2
+
+== Overview
+
+Hibernate Core integrates audit trail persistence directly via `@org.hibernate.annotations.Audited`,
+replacing the separate `hibernate-envers` module. The core approach is fundamentally simpler:
+**"open a session at a point in time, use normal Hibernate."** Instead of a dedicated audit query
+DSL (`AuditQuery`, `AuditEntity`), you use standard HQL, Criteria, and `session.find()` within
+a temporal session. The `AuditLog` API provides convenience methods for common audit metadata queries.
+
+This guide covers the migration path from envers to core `@Audited`.
+
+See also: link:envers-read-rewrite.adoc[Envers Rewrite -- Design & Implementation] for the
+full design document.
+
+== Legacy Bridge
+
+A legacy `AuditReader` interface is provided in `org.hibernate.audit.legacy` that extends
+`AuditLog` with deprecated bridge methods matching the envers `AuditReader` API. Most
+envers code works with just an import change from `org.hibernate.envers` to
+`org.hibernate.audit.legacy`.
+
+`AuditReaderFactory.get(session)` returns the session's `AuditLog` (which implements
+`AuditReader`) directly. No adapter class is needed.
+
+Unsupported methods (`createQuery()`, `getCrossTypeRevisionChangesReader()`,
+`getCurrentRevision()`, `getEntityName()`) throw `UnsupportedOperationException`
+with migration hints.
+
+== Annotation Changes
+
+[cols="2,3"]
+|===
+| Envers | Core
+
+| `@org.hibernate.envers.Audited`
+| `@org.hibernate.annotations.Audited`
+
+| `@org.hibernate.envers.NotAudited`
+| `@org.hibernate.annotations.Audited.Excluded`
+
+| `@org.hibernate.envers.Audited(targetAuditMode = NOT_AUDITED)`
+| Remove -- works implicitly in core
+
+| `@org.hibernate.envers.AuditTable(value="X")`
+| `@org.hibernate.annotations.Audited(tableName="X")`
+
+| `@org.hibernate.envers.RevisionEntity`
+| `@org.hibernate.audit.RevisionEntity`
+
+| `@org.hibernate.envers.RevisionNumber`
+| `@org.hibernate.audit.RevisionNumber`
+
+| `@org.hibernate.envers.RevisionTimestamp`
+| `@org.hibernate.audit.RevisionTimestamp`
+
+| `RevisionListener`
+| `org.hibernate.audit.RevisionListener`
+
+| `EntityTrackingRevisionListener`
+| `org.hibernate.audit.EntityTrackingRevisionListener`
+|===
+
+== API Changes
+
+[cols="2,3"]
+|===
+| Envers Code | Core Replacement
+
+| `AuditReaderFactory.get(session)`
+| `session.getAuditLog()` (or `AuditReaderFactory.get(session)` via legacy bridge)
+
+| `reader.find(Foo.class, id, rev)`
+| `auditLog.find(Foo.class, id, rev)`
+
+| `reader.find(Foo.class, id, date)`
+| `auditLog.find(Foo.class, id, date.toInstant())`
+
+| `reader.getRevisions(Foo.class, id)`
+| `auditLog.getRevisions(Foo.class, id)` (returns `List<Object>`)
+
+| `reader.getRevisionDate(rev)`
+| `auditLog.getTransactionTimestamp(rev)` (returns `Instant`)
+
+| `reader.getRevisionNumberForDate(date)`
+| `auditLog.getTransactionId(date.toInstant())` (returns `Object`)
+
+| `reader.findRevision(RevInfo.class, rev)`
+| `auditLog.findRevision(rev)`
+
+| `reader.findRevisions(RevInfo.class, revs)`
+| `auditLog.findRevisions(revs)` (returns `Map<Object, T>`)
+
+| `reader.isEntityClassAudited(Foo.class)`
+| `auditLog.isAudited(Foo.class)`
+
+| `createQuery().forEntitiesAtRevision(...)`
+| HQL in `atTransaction` session: `session.find(...)` or `from Foo where ...`
+
+| `createQuery().forRevisionsOfEntity(...)`
+| `auditLog.getHistory(Foo.class, id)`
+
+| `AuditEntity.property("name").eq("x")`
+| HQL: `where name = :name` (in `atTransaction` session)
+
+| `traverseRelation("rel", INNER)`
+| HQL: `join fetch e.rel r where ...`
+|===
+
+== Configuration Changes
+
+[cols="2,3"]
+|===
+| Envers Setting | Core Setting
+
+| `org.hibernate.envers.audit_strategy`
+| `hibernate.audit.strategy` ("default" or "validity")
+
+| `org.hibernate.envers.revision_field_name`
+| `@Audited(transactionId="...")`
+
+| `org.hibernate.envers.revision_type_field_name`
+| `@Audited(modificationType="...")`
+
+| `org.hibernate.envers.audit_table_suffix`
+| N/A (defaults to `_aud`, configurable via `@Audited(tableName="...")`)
+
+| `org.hibernate.envers.do_not_audit_optimistic_locking_field`
+| Use `@Audited.Excluded` on `@Version` fields
+
+| `org.hibernate.envers.store_data_at_delete`
+| N/A (core always stores full state on DEL)
+
+| `org.hibernate.envers.revision_listener`
+| `@RevisionEntity(listener = MyListener.class)`
+|===
+
+== Breaking Changes
+
+* `getRevisions()` returns `List<Object>` instead of `List<Number>`.
+  Update variable declarations from `List<Number>` to `List<Object>`.
+* `findRevisions()` returns `Map<Object, T>` instead of `Map<Number, T>`.
+  Update variable declarations accordingly.
+* These changes reflect that core transaction identifiers are `Object`-typed
+  (not restricted to `Number`).
+
+== Schema Compatibility
+
+=== Schema Comparison
+
+[cols="1,2,2,1"]
+|===
+| Aspect | Envers Schema | Core `@Audited` Schema | Compatible?
+
+| Audit table name
+| `{prefix}{entity}{suffix}` (default `Foo_AUD`)
+| `{entity}_aud` (configurable via `@Audited.tableName()`)
+| Yes -- configure to match
+
+| Audit table columns
+| Entity columns + `REV` + `REVTYPE` + (optionally `REVEND`, `REVEND_TSTMP`)
+| Entity columns + `REV` + `REVTYPE`
+| Yes -- extra envers columns are harmless
+
+| `REV` column type
+| `INTEGER` (always)
+| Determined by `TransactionIdentifierService.getIdentifierType()`
+| Yes -- configure supplier to return `Integer`
+
+| `REVTYPE` column type
+| `TINYINT` (byte: 0/1/2)
+| `BYTE` (0/1/2)
+| Yes -- same encoding
+
+| Column names
+| `REV`, `REVTYPE` (configurable via `EnversSettings`)
+| `REV`, `REVTYPE` (configurable via `@Audited`)
+| Yes -- defaults match
+
+| Primary key
+| Composite PK: `(REV, entity_id)` for entities; `(REV, all_source_cols)` for collections
+| Matching composite PKs on all audit tables. REVTYPE kept NOT NULL
+  (stricter than envers, which leaves it nullable).
+| Yes
+
+| FK to REVINFO
+| `REV` -> `REVINFO.REV` (always present)
+| No FK
+| Yes -- existing FK is harmless if REVINFO rows exist
+
+| REVINFO table
+| Created automatically (`REV` INT PK, `REVTSTMP` TIMESTAMP)
+| Not created unless `@RevisionEntity` configured
+| Gap -- must ensure REVINFO rows continue to be created
+
+| `originalId` mapping
+| Entity ID wrapped in `originalId` composite-id component
+| Entity ID columns copied directly
+| Yes -- underlying columns are identical
+
+| ValidityAuditStrategy
+| `REVEND` + optional `REVEND_TSTMP` columns
+| Supported via `hibernate.audit.strategy=validity`
+| Yes -- same columns, same semantics
+|===
+
+=== Key Insight: Schema Is Already Compatible
+
+Core's audit table schema is a subset of envers' schema. The defaults already match
+(`REV`, `REVTYPE`, `_aud` suffix). The only real gap is the `REVINFO` table -- envers creates it
+automatically and FKs point to it, while core only creates it when `@RevisionEntity` is configured.
+
+This gap is bridged by mapping the existing REVINFO table as a `@RevisionEntity`:
+
+1. The supplier persists a `RevisionInfo` entity -> row written to `REVINFO` table
+2. The generated ID is returned as the transaction identifier
+3. Core writes this ID into the `REV` column of audit tables
+4. The existing FK constraint (`*_AUD.REV` -> `REVINFO.REV`) is satisfied
+5. Core's `AuditMappingImpl.applyPredicate()` reads audit rows by `REV` value -- works regardless of FK
+
+=== Migration Recipe
+
+==== Step 1: Map the existing REVINFO table
+
+[source,java]
+----
+// Map the EXISTING REVINFO table -- no schema changes needed
+@Entity
+@Table(name = "REVINFO")
+@RevisionEntity(listener = MyRevisionListener.class)
+public class RevisionInfo {
+    @Id
+    @GeneratedValue  // matches envers' generator strategy
+    @RevisionNumber
+    @Column(name = "REV")
+    private int id;
+
+    @RevisionTimestamp
+    @Column(name = "REVTSTMP")
+    private long timestamp;
+
+    // Add any custom fields that were in the user's @RevisionEntity
+    // private String username;
+
+    // getters/setters
+}
+----
+
+==== Step 2: Implement `RevisionListener` (optional)
+
+[source,java]
+----
+public class MyRevisionListener implements RevisionListener {
+    @Override
+    public void newRevision(Object revisionEntity) {
+        var rev = (RevisionInfo) revisionEntity;
+        // rev.setUsername(SecurityContext.getCurrentUser());
+    }
+}
+----
+
+==== Step 3: Replace envers annotations
+
+[source,java]
+----
+// Before (envers):
+@org.hibernate.envers.Audited
+@Entity
+public class Customer { ... }
+
+// After (core):
+@org.hibernate.annotations.Audited
+@Entity
+public class Customer { ... }
+----
+
+==== Step 4: Remove envers integration
+
+[source,properties]
+----
+# Remove envers integration
+# hibernate.integration.envers.enabled=true  <- remove
+
+# Audit strategy (if using ValidityAuditStrategy)
+# hibernate.audit.strategy=validity
+----
+
+==== Step 5: Read historical data
+
+[source,java]
+----
+// Before (envers):
+AuditReader reader = AuditReaderFactory.get(entityManager);
+Customer c = reader.find(Customer.class, customerId, revisionNumber);
+
+// After (core) -- same revision numbers work because same REVINFO table:
+try (var s = sf.withOptions().atTransaction(revisionNumber).open()) {
+    Customer c = s.find(Customer.class, customerId);
+}
+
+// Or using AuditLog:
+var auditLog = session.getAuditLog();
+Customer c = auditLog.find(Customer.class, customerId, revisionNumber);
+----
+
+=== Schema Compatibility Constraints
+
+For the migration to work seamlessly, these constraints must hold:
+
+1. **`REV` column type must match**: If envers used `INTEGER`, the supplier must return `Integer`.
+   The `TransactionIdentifierService` must be configured with matching type.
+
+2. **Column names must match**: Core defaults (`REV`, `REVTYPE`) already match envers defaults.
+   If envers was configured with custom names (via `EnversSettings`), use `@Audited(transactionId=..., modificationType=...)`.
+
+3. **Audit table names must match**: If envers used custom prefix/suffix, use `@Audited(tableName=...)`.
+
+4. **REVINFO table must continue to be populated**: The `@RevisionEntity` must map
+   to the same REVINFO table so FK constraints are satisfied and revision numbers continue the sequence.
+
+5. **Sequence/generator must continue**: The `@GeneratedValue` on the REVINFO entity must use the same
+   sequence/generator that envers used (e.g. `REVISION_GENERATOR` sequence).
+
+=== ValidityAuditStrategy Users
+
+Core supports validity audit strategy via `hibernate.audit.strategy=validity`. Migration from envers:
+
+- **Existing data**: Fully compatible. Core reads REVEND columns with the same range predicate as envers.
+- **New writes**: Core populates REVEND on previous rows and writes new audit rows, same as envers.
+- **Configuration**: Set `hibernate.audit.strategy=validity`. Column names default to `REVEND` and
+  (optionally) `REVEND_TSTMP`, configurable via `@Audited.transactionEnd()` / `@Audited.transactionEndTimestamp()`.
+- **Default strategy users**: No changes needed. The MAX-subquery approach (default) works on all data,
+  including tables with REVEND columns (the extra columns are simply ignored).
+
+=== Built-in REVINFO Support
+
+`RevisionEntitySupplier` is a built-in `TransactionIdentifierSupplier` that handles the REVINFO
+pattern out of the box. It persists a user-defined revision entity using a temporary child
+`StatelessSession` (via `statelessWithOptions().connection().open()`) that shares the parent
+session's JDBC connection and transaction, then returns the generated ID.
+
+Key design decisions:
+
+* **Child `StatelessSession` for persistence**: Avoids polluting the user's persistence context.
+  The child session shares the same JDBC connection/transaction, so the revision entity insert
+  participates in the user's transaction without interfering with the user's `Session`.
+  This mirrors envers' approach of using `sessionWithOptions().connection()` for revision persistence.
+* **On-demand initialization**: Transaction ID generation is lazy -- the supplier is only called
+  when `getCurrentTransactionIdentifier()` is first accessed (i.e. when an audited entity is
+  actually modified). This prevents empty revisions for transactions that don't touch audited entities.
+* **`RevisionListener` callback**: An optional callback for populating custom fields (user, timestamp, etc.)
+  on the revision entity, invoked before persistence.
+
+[source,java]
+----
+// Using @RevisionEntity annotation (auto-detected):
+@Entity
+@RevisionEntity(listener = MyRevisionListener.class)
+public class MyRevision {
+    @Id @GeneratedValue
+    @RevisionNumber
+    private int id;
+
+    @RevisionTimestamp
+    private Instant timestamp;
+
+    private String username;
+}
+
+public class MyRevisionListener implements RevisionListener {
+    @Override
+    public void newRevision(Object revisionEntity) {
+        var rev = (MyRevision) revisionEntity;
+        rev.setUsername(SecurityContext.getCurrentUser());
+    }
+}
+----
+
+== Behavioral Differences
+
+[[not-audited-target-behavior]]
+=== Associations to Non-Audited Targets
+
+Core auditing handles mixed audited/non-audited entity relationships implicitly -- no annotation
+needed (unlike envers' `@Audited(targetAuditMode = NOT_AUDITED)`). The FK is stored in the audit
+table and used to load the target from the current table. However, there are behavioral differences
+with envers when the non-audited target entity has been **deleted**:
+
+[cols="1,2,2"]
+|===
+| Scenario | Envers behavior | Core behavior
+
+| **Eager / `optional=true`**
+| `targetNotFoundAction` controls: ERROR (default) throws, IGNORE returns null
+| LEFT JOIN resolves to null silently (standard Hibernate semantics)
+
+| **Lazy + deleted target**
+| Proxy created; on access, `targetNotFoundAction` controls: ERROR throws `EntityNotFoundException`,
+  IGNORE eagerly loads and returns null (no proxy)
+| Proxy created; on access, throws `EntityNotFoundException` (standard Hibernate proxy behavior)
+
+| **`optional=false` + deleted target**
+| ERROR throws, IGNORE returns null
+| INNER JOIN fails to load the owning entity itself (returns null from `find()`)
+|===
+
+**Root cause**: envers had its own entity reconstruction pipeline (field-by-field mapping from audit
+row data, separate per-association loading via `ToOneEntityLoader`). Core reuses standard Hibernate
+entity loading with JOIN fetching, so association behavior follows standard Hibernate semantics.
+
+**Note**: audit tables have no FK constraints (same as envers), so dangling FKs are always possible.
+For audited-to-audited associations, envers' `AuditReaderImpl.find()` silently returned null for
+missing targets (`NoResultException` caught). Core's JOIN-based approach handles this via the
+temporal predicate + LEFT JOIN.
+
+**Migration options**:
+
+1. **Recommended**: migrating users should annotate audited-to-non-audited lazy associations with
+   `@NotFound(action = IGNORE)` or `@NotFound(action = EXCEPTION)` to explicitly declare the
+   expected behavior when the target is deleted.
+2. **Future**: core could implicitly default to `@NotFound(EXCEPTION)` or `@NotFound(IGNORE)` for
+   associations from audit tables to non-audited entities, matching envers' `targetNotFoundAction`
+   default. This would require changes to how audit table references handle association fetching.
+
+== Features With No Direct Equivalent
+
+[cols="2,3"]
+|===
+| Envers Feature | Core Alternative
+
+| `AuditQuery` criteria DSL
+| HQL with `transactionId()`/`modificationType()` functions
+
+| `@AuditOverride`
+| `@Audited.Excluded` on individual properties
+
+| `@ModifiedEntityNames`
+| Use `EntityTrackingRevisionListener` to track manually
+
+| `@AuditMappedBy`
+| Not needed (core uses real entity mappings)
+
+| `withModifiedFlag` / `_MOD` columns
+| Not supported; query property values directly
+
+| `CrossTypeRevisionChangesReader`
+| Use `EntityTrackingRevisionListener` callbacks
+
+| `@Audited(targetAuditMode = NOT_AUDITED)`
+| Not needed (works implicitly, see <<not-audited-target-behavior>>)
+|===
+
+== Envers Annotations -- Full Status
+
+[cols="2,1,3"]
+|===
+| Envers Annotation | Status | Core Status / Migration Path
+
+| `@Audited(targetAuditMode, targetNotFoundAction, withModifiedFlag, modifiedColumnName)`
+| [green]#DONE#
+| `@o.h.annotations.Audited`. Has `tableName`, `transactionId`, `modificationType`, `Excluded`.
+  Missing attributes: `withModifiedFlag` (deferred),
+  `targetNotFoundAction` (low priority).
+
+| `@NotAudited`
+| [green]#DONE#
+| `@Audited.Excluded` -- different mechanism (nested annotation), equivalent functionality.
+
+| `@AuditTable(value, schema, catalog)`
+| [yellow]#PARTIAL#
+| `@Audited(tableName=...)` covers the table name. Missing: `schema`, `catalog`.
+
+| `@RevisionEntity` / `@RevisionNumber` / `@RevisionTimestamp`
+| [green]#DONE#
+| Equivalent annotations in `o.h.audit`.
+
+| `@AuditOverride` / `@AuditOverrides`
+| [red]#TODO#
+| `@Audited.Excluded` covers the common case (un-audit inherited property).
+  The `forClass` pattern (override without re-declaring) has no equivalent.
+
+| `@AuditJoinTable` / `@CollectionAuditTable`
+| [yellow]#PARTIAL#
+| `@Audited(tableName=...)` covers table name. Schema/catalog not yet supported.
+  `inverseJoinColumns` customization not supported. Low priority.
+
+| `@SecondaryAuditTable` / `@SecondaryAuditTables`
+| [yellow]#PARTIAL#
+| Secondary audit tables are auto-created. Custom naming not yet supported.
+
+| `@AuditMappedBy(mappedBy, positionMappedBy)`
+| [green]#N/A#
+| Core uses the same entity mappings (not separate audit entities), so the FK column
+  and relationship are resolved by Hibernate's metamodel. No equivalent annotation needed.
+  (Experimental in envers.)
+
+| `@ModifiedEntityNames`
+| [yellow]#DEFERRED#
+| Depends on cross-type queries. Backed by `REVCHANGES` table. Opt-in in envers.
+|===
+
+== Envers API Types -- Full Status
+
+[cols="2,1,3"]
+|===
+| Envers Type | Status | Core Status / Migration Path
+
+| `AuditReader` / `AuditReaderFactory`
+| [green]#DONE#
+| `AuditLog` (session-scoped via `session.getAuditLog()`). `find()`, `getRevisions()`,
+  `getModificationType()`, `getEntitiesModifiedAt()`, `findEntitiesModifiedAt()`,
+  `getHistory()`, `isAudited()`.
+
+| `RevisionType` enum (ADD/MOD/DEL)
+| [green]#DONE#
+| `o.h.audit.ModificationType`.
+
+| `RevisionListener`
+| [green]#DONE#
+| `o.h.audit.RevisionListener`. Same contract.
+
+| `EntityTrackingRevisionListener`
+| [green]#DONE#
+| `o.h.audit.EntityTrackingRevisionListener`. Called once per merged entity change
+  from `AuditWorkQueue.doBeforeTransactionCompletion()`.
+
+| `CrossTypeRevisionChangesReader`
+| [red]#TODO#
+| Opt-in in envers (requires `track_entities_changed_in_revision=true`).
+
+| `DefaultRevisionEntity`
+| [green]#DONE#
+| `o.h.audit.DefaultRevisionEntity`.
+
+| `RelationTargetAuditMode` enum
+| [green]#Not needed#
+| Core handles mixed audited/non-audited implicitly -- no enum needed.
+
+| `AuditQuery` / `AuditQueryCreator` / `AuditEntity` DSL
+| [green]#N/A#
+| Replaced by standard HQL/Criteria in `atTransaction` / `ALL_REVISIONS` sessions.
+  All capabilities (filtering, projections, ordering, joins, pagination) available
+  through standard session APIs.
+|===
+
+== Envers Configuration -- Key Settings
+
+[cols="2,1,1,3"]
+|===
+| Setting | Default | Status | Notes
+
+| `store_data_at_delete`
+| `false`
+| [green]#DONE (better)#
+| Core always stores full state on DEL.
+
+| `do_not_audit_optimistic_locking_field`
+| `true`
+| [yellow]#DIFFERS#
+| Core includes `@Version` by default. Use `@Audited.Excluded` to exclude.
+
+| `revision_on_collection_change`
+| `true`
+| [yellow]#DEFERRED#
+| Core does not write inverse entity MOD rows.
+
+| `audit_table_suffix`
+| `_AUD`
+| [yellow]#DIFFERS#
+| Core uses `_aud` lowercase. On case-insensitive databases (most), transparent.
+  On case-sensitive databases, use `@Audited(tableName=...)`.
+
+| `default_schema` / `default_catalog`
+| (none)
+| [red]#TODO#
+| No way to put audit tables in a different schema/catalog yet.
+
+| `track_entities_changed_in_revision`
+| `false`
+| [yellow]#DEFERRED#
+| Opt-in. `EntityTrackingRevisionListener` provides per-entity callbacks.
+
+| `global_with_modified_flag` / `modified_flag_suffix`
+| `false` / `_MOD`
+| [yellow]#DEFERRED#
+| `_MOD` columns -- significant complexity.
+
+| `audit_strategy` (ValidityAuditStrategy)
+| `DefaultAuditStrategy`
+| [green]#DONE#
+| `hibernate.audit.strategy=validity`. Full read + write support.
+
+| `audit_table_prefix` / `revision_field_name` / `revision_type_field_name`
+| `""` / `REV` / `REVTYPE`
+| [green]#DONE#
+| `@Audited(tableName, transactionId, modificationType)`. Defaults match.
+
+| `cascade_delete_revision`
+| `false`
+| [green]#N/A#
+| Anti-pattern for audit data.
+|===
+
+NOTE: Settings not listed (`original_id_prop_name`, `use_revision_entity_with_native_id`,
+`find_by_revision_exact_match`, `revision_sequence_nocache`, `global_relation_not_found_legacy_flag`,
+`embeddable_set_ordinal_field_name`, `modified_column_naming_strategy`) are either N/A (core
+architecture differs) or very niche.
+
+== Implementation Tasks
+
+* [ ] Verify core reads work against envers-shaped schema (write integration test)
+* [ ] Test with existing envers audit data: create data with envers, read with core `atTransaction`
+* [ ] Test FK constraint satisfaction when using `RevisionEntitySupplier` with REVINFO entity
+* [ ] Test sequence continuity: new revision numbers continue from where envers left off
+* [ ] Other built-in hibernate-envers revision entity types
+* [ ] Auto-contribute revision entity class to domain model when `@RevisionEntity` is configured
+  (currently users must add the revision entity to their annotated classes manually)
+* [ ] Consider: configuration property to specify audit table suffix for envers compatibility
+  (case sensitivity: envers default `_AUD` vs core default `_aud`)
