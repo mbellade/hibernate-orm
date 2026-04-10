@@ -15,7 +15,6 @@ import org.hibernate.audit.spi.RevisionEntitySupplier;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.hibernate.engine.spi.SharedSessionContractImplementor;
 import org.hibernate.persister.entity.EntityPersister;
-import org.hibernate.temporal.spi.TransactionIdentifierService;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -79,8 +78,8 @@ public class AuditLogImpl implements AuditReader {
 				.requireService( InternalCacheFactory.class );
 		final int cacheSize = Math.max( auditedCount.get(), 16 );
 		this.findPlanCache = cacheFactory.createInternalCache( cacheSize );
-		final var service = sessionFactory.getServiceRegistry().getService( TransactionIdentifierService.class );
-		if ( service != null && service.getIdentifierSupplier() instanceof RevisionEntitySupplier<?> supplier ) {
+		final var supplier = RevisionEntitySupplier.resolve( sessionFactory.getServiceRegistry() );
+		if ( supplier != null ) {
 			this.revisionEntitySupplier = supplier;
 			this.revisionEntityName = sessionFactory.getMappingMetamodel()
 					.getEntityDescriptor( supplier.getRevisionEntityClass() )

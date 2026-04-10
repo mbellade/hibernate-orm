@@ -187,8 +187,8 @@ with migration hints.
 
 | FK to REVINFO
 | `REV` -> `REVINFO.REV` (always present)
-| No FK
-| Yes -- existing FK is harmless if REVINFO rows exist
+| `REV` -> REVINFO (when `@RevisionEntity` configured)
+| Yes -- matching FK created automatically
 
 | REVINFO table
 | Created automatically (`REV` INT PK, `REVTSTMP` TIMESTAMP)
@@ -410,7 +410,8 @@ with envers when the non-audited target entity has been **deleted**:
 row data, separate per-association loading via `ToOneEntityLoader`). Core reuses standard Hibernate
 entity loading with JOIN fetching, so association behavior follows standard Hibernate semantics.
 
-**Note**: audit tables have no FK constraints (same as envers), so dangling FKs are always possible.
+**Note**: audit tables for audited-to-non-audited associations have no FK constraints to the
+non-audited target table (same as envers), so dangling FKs are always possible.
 For audited-to-audited associations, envers' `AuditReaderImpl.find()` silently returned null for
 missing targets (`NoResultException` caught). Core's JOIN-based approach handles this via the
 temporal predicate + LEFT JOIN.

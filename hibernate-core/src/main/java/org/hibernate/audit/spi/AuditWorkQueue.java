@@ -244,10 +244,8 @@ public class AuditWorkQueue implements TransactionCompletionCallbacks.BeforeComp
 
 	private static EntityTrackingRevisionListener resolveTrackingListener(
 			SharedSessionContractImplementor session) {
-		final var supplier = session.getFactory()
-				.getTransactionIdentifierService().getIdentifierSupplier();
-		if ( supplier instanceof RevisionEntitySupplier<?> res
-				&& res.getListener() instanceof EntityTrackingRevisionListener etrl ) {
+		final var supplier = RevisionEntitySupplier.resolve( session.getFactory().getServiceRegistry() );
+		if ( supplier != null && supplier.getListener() instanceof EntityTrackingRevisionListener etrl ) {
 			return etrl;
 		}
 		return null;

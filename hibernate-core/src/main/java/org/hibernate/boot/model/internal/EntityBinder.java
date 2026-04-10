@@ -59,19 +59,13 @@ import org.hibernate.annotations.SQLUpdate;
 import org.hibernate.annotations.SecondaryRow;
 import org.hibernate.annotations.SecondaryRows;
 import org.hibernate.annotations.Audited;
-import org.hibernate.audit.RevisionEntity;
-import org.hibernate.audit.RevisionListener;
-import org.hibernate.audit.spi.RevisionEntitySupplier;
-import org.hibernate.resource.beans.spi.ManagedBeanRegistry;
-import org.hibernate.temporal.spi.TransactionIdentifierService;
-import org.hibernate.audit.RevisionNumber;
-import org.hibernate.audit.RevisionTimestamp;
 import org.hibernate.annotations.SoftDelete;
 import org.hibernate.annotations.Temporal;
 import org.hibernate.annotations.Subselect;
 import org.hibernate.annotations.Synchronize;
 import org.hibernate.annotations.TypeBinderType;
 import org.hibernate.annotations.View;
+import org.hibernate.audit.RevisionEntity;
 import org.hibernate.boot.model.NamedEntityGraphDefinition;
 import org.hibernate.boot.model.internal.InheritanceState.ElementsToProcess;
 import org.hibernate.boot.model.naming.EntityNaming;
@@ -268,7 +262,6 @@ public class EntityBinder {
 			collector.addSecondPass( new CreateKeySecondPass( rootClass ) );
 			bindSoftDelete( clazzToProcess, rootClass, context );
 			bindTemporal( clazzToProcess, rootClass, context );
-			detectRevisionEntity( clazzToProcess, context );
 			bindAudited( clazzToProcess, rootClass, context );
 		}
 		if ( persistentClass instanceof Subclass subclass ) {
@@ -362,72 +355,6 @@ public class EntityBinder {
 		}
 	}
 
-	private static void detectRevisionEntity(
-			ClassDetails classDetails,
-			MetadataBuildingContext context) {
-		final var revisionEntity = classDetails.getDirectAnnotationUsage( RevisionEntity.class );
-		if ( revisionEntity == null ) {
-			return;
-		}
-
-		final var modelsContext = context.getBootstrapContext().getModelsContext();
-
-		// todo (envers-rewrite) : @RevisionEntity currently requires @Entity;
-		//  could we automatically imply @Entity for @RevisionEntity classes
-		//  so users don't need both annotations?
-
-		// The entity must not be audited
-		if ( classDetails.hasAnnotationUsage( Audited.class, modelsContext ) ) {
-			throw new MappingException( "The @RevisionEntity entity cannot be audited" );
-		}
-
-		// Find @RevisionNumber and @RevisionTimestamp fields
-		MemberDetails revisionNumberMember = null;
-		MemberDetails revisionTimestampMember = null;
-		for ( var member : classDetails.getFields() ) {
-			if ( member.hasDirectAnnotationUsage( RevisionNumber.class ) ) {
-				revisionNumberMember = member;
-			}
-			if ( member.hasDirectAnnotationUsage( RevisionTimestamp.class ) ) {
-				revisionTimestampMember = member;
-			}
-		}
-		if ( revisionNumberMember == null ) {
-			throw new MappingException(
-					"@RevisionEntity '" + classDetails.getName()
-					+ "' must have a field annotated with @RevisionNumber"
-			);
-		}
-		if ( revisionTimestampMember == null ) {
-			throw new MappingException(
-					"@RevisionEntity '" + classDetails.getName()
-					+ "' must have a field annotated with @RevisionTimestamp"
-			);
-		}
-
-		// Configure the transaction identifier service with a RevisionEntitySupplier
-		final var revNumberType = revisionNumberMember.getType().determineRawClass().toJavaClass();
-		final var serviceRegistry = context.getBootstrapContext().getServiceRegistry();
-		final Class<? extends RevisionListener> listenerClass = revisionEntity.listener();
-		final RevisionListener listener;
-		if ( listenerClass == RevisionListener.class ) {
-			listener = null;
-		}
-		else {
-			listener = serviceRegistry.requireService( ManagedBeanRegistry.class )
-					.getBean( listenerClass )
-					.getBeanInstance();
-		}
-		final var supplier = new RevisionEntitySupplier<>(
-				classDetails.toJavaClass(),
-				revisionNumberMember.getName(),
-				revisionTimestampMember.getName(),
-				listener
-		);
-		serviceRegistry.requireService( TransactionIdentifierService.class )
-				.contributeIdentifierSupplier( supplier, revNumberType );
-	}
-
 	private static void bindAudited(
 			ClassDetails classDetails,
 			RootClass rootClass,
@@ -435,6 +362,12 @@ public class EntityBinder {
 		final var audited = extract( Audited.class, classDetails, context );
 		if ( audited != null ) {
 			AuditHelper.bindAuditTable( audited, rootClass, context );
+		}
+		else {
+			final var revisionEntity = extract( RevisionEntity.class, classDetails, context );
+			if ( revisionEntity != null ) {
+				AuditHelper.bindRevisionEntity( revisionEntity, rootClass, classDetails, context );
+			}
 		}
 	}
 

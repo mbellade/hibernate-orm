@@ -4,23 +4,36 @@
  */
 package org.hibernate.boot.model.internal;
 
+import java.lang.annotation.Annotation;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
+import org.checkerframework.checker.nullness.qual.Nullable;
+import org.hibernate.MappingException;
 import org.hibernate.annotations.Audited;
+import org.hibernate.audit.RevisionEntity;
+import org.hibernate.audit.RevisionListener;
+import org.hibernate.audit.RevisionNumber;
+import org.hibernate.audit.RevisionTimestamp;
+import org.hibernate.audit.spi.RevisionEntitySupplier;
 import org.hibernate.boot.model.naming.Identifier;
 import org.hibernate.boot.model.naming.PhysicalNamingStrategy;
 import org.hibernate.boot.model.relational.Database;
 import org.hibernate.boot.spi.MetadataBuildingContext;
 import org.hibernate.cfg.StateManagementSettings;
+import org.hibernate.models.spi.ClassDetails;
+import org.hibernate.models.spi.MemberDetails;
+import org.hibernate.resource.beans.spi.ManagedBeanRegistry;
 import org.hibernate.mapping.AuxiliaryTableHolder;
 import org.hibernate.mapping.Backref;
 import org.hibernate.mapping.BasicValue;
 import org.hibernate.mapping.Collection;
 import org.hibernate.mapping.Column;
 import org.hibernate.mapping.PersistentClass;
+import org.hibernate.mapping.Property;
 import org.hibernate.mapping.PrimaryKey;
 import org.hibernate.mapping.RootClass;
 import org.hibernate.mapping.Stateful;
@@ -116,6 +129,7 @@ public final class AuditHelper {
 				createAuditPrimaryKey( auditTable, transactionIdColumn, table.getPrimaryKey().getColumns() );
 			}
 			enableAudit( auditable, auditTable, transactionIdColumn, modificationTypeColumn );
+			createRevisionForeignKey( auditTable, transactionIdColumn, context );
 			addTransactionEndColumns( audited, auditable, auditTable, context );
 		} );
 	}
@@ -124,30 +138,19 @@ public final class AuditHelper {
 			Audited audited,
 			RootClass rootClass,
 			MetadataBuildingContext context) {
-		final var collector = context.getMetadataCollector();
 		final String txIdColumnName = audited.transactionId();
-		collector.addSecondPass( (OptionalDeterminationSecondPass) ignored -> {
+		context.getMetadataCollector().addSecondPass( (OptionalDeterminationSecondPass) ignored -> {
 			for ( var join : rootClass.getJoins() ) {
-				final var joinTable = join.getTable();
-				final var auditTable = collector.addTable(
-						joinTable.getSchema(),
-						joinTable.getCatalog(),
-						collector.getLogicalTableName( joinTable )
-								+ DEFAULT_TABLE_SUFFIX,
-						joinTable.getSubselect(),
-						joinTable.isAbstract(),
-						context,
-						joinTable.getNameIdentifier().isExplicit()
+				final var auditTable = createAuditTable(
+						join.getTable(),
+						txIdColumnName,
+						resolveExcludedColumns( join.getProperties() ),
+						context
 				);
-				copyTableColumns( joinTable, auditTable, Set.of() );
-				final var transactionIdColumn =
-						createAuditColumn( txIdColumnName,
-								getTransactionIdType( context ), auditTable, context );
-				auditTable.addColumn( transactionIdColumn );
-				createAuditPrimaryKey( auditTable, transactionIdColumn, joinTable.getPrimaryKey().getColumns() );
+				createAuditTableForeignKey( auditTable, rootClass.getEntityName(), rootClass.getAuxiliaryTable() );
 				// Secondary tables only get tx-id (no mod type, no REVEND)
 				join.setAuxiliaryTable( auditTable );
-				join.addAuxiliaryColumn( TRANSACTION_ID, transactionIdColumn );
+				join.addAuxiliaryColumn( TRANSACTION_ID, auditTable.getPrimaryKey().getColumn( 0 ) );
 			}
 		} );
 	}
@@ -156,49 +159,61 @@ public final class AuditHelper {
 			Audited audited,
 			RootClass rootClass,
 			MetadataBuildingContext context) {
-		final var collector = context.getMetadataCollector();
 		final String txIdColumnName = audited.transactionId();
 		final String modTypeColumnName = audited.modificationType();
 		// Defer to second pass — subclasses haven't been added to rootClass yet
-		collector.addSecondPass( (OptionalDeterminationSecondPass) ignored -> {
-			for ( var subclass : rootClass.getSubclasses() ) {
-				if ( subclass instanceof TableOwner ) {
-					final var subTable = subclass.getTable();
-					final var subAuditTable = collector.addTable(
-							subTable.getSchema(),
-							subTable.getCatalog(),
-							collector.getLogicalTableName( subTable )
-									+ DEFAULT_TABLE_SUFFIX,
-							subTable.getSubselect(),
-							subTable.isAbstract(),
-							context,
-							subTable.getNameIdentifier().isExplicit()
-					);
-					copyTableColumns( subTable, subAuditTable, Set.of() );
-					final var transactionIdColumn =
-							createAuditColumn( txIdColumnName,
-									getTransactionIdType( context ), subAuditTable, context );
-					subAuditTable.addColumn( transactionIdColumn );
-					createAuditPrimaryKey( subAuditTable, transactionIdColumn, subTable.getPrimaryKey().getColumns() );
-					subclass.addAuxiliaryColumn( TRANSACTION_ID, transactionIdColumn );
-					// TABLE_PER_CLASS: each table is self-contained, needs REVTYPE
-					// JOINED: REVTYPE only on root table (matches envers behavior)
-					if ( subclass instanceof UnionSubclass ) {
-						final var modificationTypeColumn =
-								createAuditColumn( modTypeColumnName,
-										Byte.class, subAuditTable, context );
-						subAuditTable.addColumn( modificationTypeColumn );
-						subclass.addAuxiliaryColumn( MODIFICATION_TYPE, modificationTypeColumn );
-					}
-					subclass.setAuxiliaryTable( subAuditTable );
-					// TABLE_PER_CLASS: each table is self-contained, needs REVEND
-					// JOINED: REVEND only on root table (matches envers behavior)
-					if ( subclass instanceof UnionSubclass ) {
-						addTransactionEndColumns( audited, subclass, subAuditTable, context );
-					}
+		context.getMetadataCollector().addSecondPass( (OptionalDeterminationSecondPass) ignored ->
+				bindSubclassAuditTables(
+						rootClass,
+						audited,
+						txIdColumnName,
+						modTypeColumnName,
+						context
+				)
+		);
+	}
+
+	/**
+	 * Create audit tables for direct subclasses of {@code parent},
+	 * then recurse into their children.
+	 */
+	private static void bindSubclassAuditTables(
+			PersistentClass parent,
+			Audited audited,
+			String txIdColumnName,
+			String modTypeColumnName,
+			MetadataBuildingContext context) {
+		for ( var subclass : parent.getDirectSubclasses() ) {
+			if ( subclass instanceof TableOwner ) {
+				final var auditTable = createAuditTable(
+						subclass.getTable(),
+						txIdColumnName,
+						resolveExcludedColumns( subclass.getProperties() ),
+						context
+				);
+				subclass.addAuxiliaryColumn( TRANSACTION_ID, auditTable.getPrimaryKey().getColumn( 0 ) );
+				if ( subclass instanceof UnionSubclass ) {
+					// TABLE_PER_CLASS: each table is self-contained, needs its own REVTYPE and REVEND
+					final var modificationTypeColumn =
+							createAuditColumn( modTypeColumnName,
+									Byte.class, auditTable, context );
+					auditTable.addColumn( modificationTypeColumn );
+					subclass.addAuxiliaryColumn( MODIFICATION_TYPE, modificationTypeColumn );
+					addTransactionEndColumns( audited, subclass, auditTable, context );
 				}
+				else {
+					// JOINED: REVTYPE/REVEND only on root table; FK to parent audit table
+					createAuditTableForeignKey(
+							auditTable,
+							parent.getEntityName(),
+							parent.getAuxiliaryTable()
+					);
+				}
+				subclass.setAuxiliaryTable( auditTable );
+				// Recurse into this subclass's children
+				bindSubclassAuditTables( subclass, audited, txIdColumnName, modTypeColumnName, context );
 			}
-		} );
+		}
 	}
 
 	static void enableAudit(
@@ -213,7 +228,6 @@ public final class AuditHelper {
 	/**
 	 * Create a middle audit table for unidirectional @OneToMany @JoinColumn.
 	 * The table tracks collection membership with (parent_key, child_key, REV, REVTYPE)
-	 * — mirroring the envers {@code @AuditJoinTable} approach.
 	 * <p>
 	 * The child entity's FK column is on the child table, but from an entity model
 	 * perspective the collection is part of the parent entity's state.
@@ -278,9 +292,183 @@ public final class AuditHelper {
 			auditTable.addColumn( transactionIdColumn );
 			auditTable.addColumn( modificationTypeColumn );
 			createAuditPrimaryKey( auditTable, transactionIdColumn, keyColumns );
+			createRevisionForeignKey( auditTable, transactionIdColumn, context );
 			enableAudit( collection, auditTable, transactionIdColumn, modificationTypeColumn );
 			addTransactionEndColumns( audited, collection, auditTable, context );
 		} );
+	}
+
+	static void bindRevisionEntity(
+			RevisionEntity revisionEntity,
+			RootClass rootClass,
+			ClassDetails classDetails,
+			MetadataBuildingContext context) {
+		final var modelsContext = context.getBootstrapContext().getModelsContext();
+
+		// todo (envers-rewrite) : @RevisionEntity currently requires @Entity;
+		//  could we automatically imply @Entity for @RevisionEntity classes
+		//  so users don't need both annotations?
+
+		// The entity must not be audited
+		if ( classDetails.hasAnnotationUsage( Audited.class, modelsContext ) ) {
+			throw new MappingException( "The @RevisionEntity entity cannot be audited" );
+		}
+
+		// Scan class members (including supertypes) for @RevisionNumber
+		// and @RevisionTimestamp. We need the names and type eagerly to
+		// configure the supplier before audit table second passes create
+		// the REV column.
+		MemberDetails revNumberMember = null;
+		MemberDetails revTimestampMember = null;
+		for ( var current = classDetails; current != null; current = current.getSuperClass() ) {
+			for ( var member : current.getFields() ) {
+				revNumberMember = checkAnnotation( member, revNumberMember, RevisionNumber.class, classDetails );
+				revTimestampMember = checkAnnotation( member, revTimestampMember, RevisionTimestamp.class, classDetails );
+			}
+			for ( var member : current.getMethods() ) {
+				revNumberMember = checkAnnotation( member, revNumberMember, RevisionNumber.class, classDetails );
+				revTimestampMember = checkAnnotation( member, revTimestampMember, RevisionTimestamp.class, classDetails );
+			}
+		}
+
+		if ( revNumberMember == null ) {
+			throw new MappingException(
+					"@RevisionEntity '" + classDetails.getName()
+					+ "' must have a property annotated with @RevisionNumber"
+			);
+		}
+		if ( revTimestampMember == null ) {
+			throw new MappingException(
+					"@RevisionEntity '" + classDetails.getName()
+					+ "' must have a property annotated with @RevisionTimestamp"
+			);
+		}
+
+		// Configure the supplier eagerly
+		final var serviceRegistry = context.getBootstrapContext().getServiceRegistry();
+		final Class<? extends RevisionListener> listenerClass = revisionEntity.listener();
+		final RevisionListener listener = listenerClass != RevisionListener.class
+				? serviceRegistry.requireService( ManagedBeanRegistry.class ).getBean( listenerClass ).getBeanInstance()
+				: null;
+		final var supplier = new RevisionEntitySupplier<>(
+				classDetails.toJavaClass(),
+				revNumberMember.resolveAttributeName(),
+				revTimestampMember.resolveAttributeName(),
+				listener
+		);
+		final var revNumberType = revNumberMember.getType().determineRawClass().toJavaClass();
+		serviceRegistry.requireService( TransactionIdentifierService.class )
+				.contributeIdentifierSupplier( supplier, revNumberType );
+
+		// Defer validation (basic type, mapped as Hibernate property) and
+		// unique constraint to second pass when entity properties are fully bound
+		final String entityName = rootClass.getEntityName();
+		final String revNumberName = revNumberMember.resolveAttributeName();
+		final String revTimestampName = revTimestampMember.resolveAttributeName();
+		context.getMetadataCollector().addSecondPass( (OptionalDeterminationSecondPass) ignored ->
+				validateRevisionEntity( entityName, revNumberName, revTimestampName, context )
+		);
+	}
+
+	/**
+	 * Check if a member has the given annotation. If found, validate no
+	 * duplicate and return the member; otherwise return the existing value.
+	 */
+	private static MemberDetails checkAnnotation(
+			MemberDetails member,
+			@Nullable MemberDetails existing,
+			Class<? extends Annotation> annotationType,
+			ClassDetails classDetails) {
+		if ( member.hasDirectAnnotationUsage( annotationType ) ) {
+			if ( existing != null ) {
+				throw new MappingException(
+						"@RevisionEntity '" + classDetails.getName()
+						+ "' has multiple members annotated with @"
+						+ annotationType.getSimpleName()
+				);
+			}
+			return member;
+		}
+		return existing;
+	}
+
+	/**
+	 * Second-pass validation: verify {@code @RevisionNumber} and
+	 * {@code @RevisionTimestamp} are mapped as basic properties, and
+	 * add a unique constraint on non-ID {@code @RevisionNumber}.
+	 */
+	private static void validateRevisionEntity(
+			String entityName,
+			String revNumberName,
+			String revTimestampName,
+			MetadataBuildingContext context) {
+		final var entityBinding = context.getMetadataCollector().getEntityBinding( entityName );
+		if ( entityBinding == null ) {
+			return;
+		}
+		final var revNumberProperty = requireBasicProperty( entityBinding, revNumberName, "@RevisionNumber" );
+		requireBasicProperty( entityBinding, revTimestampName, "@RevisionTimestamp" );
+		// Add unique constraint on non-ID @RevisionNumber
+		if ( revNumberProperty != entityBinding.getIdentifierProperty() ) {
+			for ( var column : revNumberProperty.getColumns() ) {
+				column.setUnique( true );
+			}
+		}
+	}
+
+	/**
+	 * Validate that a named property exists and is mapped as a {@link BasicValue}.
+	 */
+	private static Property requireBasicProperty(
+			PersistentClass entityBinding,
+			String propertyName,
+			String annotationName) {
+		final Property property;
+		try {
+			property = entityBinding.getProperty( propertyName );
+		}
+		catch (MappingException e) {
+			throw new MappingException(
+					annotationName + " member '" + propertyName
+					+ "' is not mapped as a property on @RevisionEntity '"
+					+ entityBinding.getEntityName() + "'"
+			);
+		}
+		if ( !(property.getValue() instanceof BasicValue) ) {
+			throw new MappingException(
+					annotationName + " property '" + entityBinding.getEntityName()
+					+ "." + propertyName + "' must be a basic attribute"
+			);
+		}
+		return property;
+	}
+
+	/**
+	 * Create an audit table for the given source table: copy columns,
+	 * add the REV column, create the composite PK, and add the
+	 * REV -> REVINFO FK (if a revision entity is configured).
+	 */
+	private static Table createAuditTable(
+			Table sourceTable,
+			String txIdColumnName,
+			Set<String> excludedColumns,
+			MetadataBuildingContext context) {
+		final var collector = context.getMetadataCollector();
+		final var auditTable = collector.addTable(
+				sourceTable.getSchema(),
+				sourceTable.getCatalog(),
+				collector.getLogicalTableName( sourceTable ) + DEFAULT_TABLE_SUFFIX,
+				sourceTable.getSubselect(),
+				sourceTable.isAbstract(),
+				context,
+				sourceTable.getNameIdentifier().isExplicit()
+		);
+		copyTableColumns( sourceTable, auditTable, excludedColumns );
+		final var revColumn = createAuditColumn( txIdColumnName, getTransactionIdType( context ), auditTable, context );
+		auditTable.addColumn( revColumn );
+		createAuditPrimaryKey( auditTable, revColumn, sourceTable.getPrimaryKey().getColumns() );
+		createRevisionForeignKey( auditTable, revColumn, context );
+		return auditTable;
 	}
 
 	private static void createAuditPrimaryKey(
@@ -357,7 +545,7 @@ public final class AuditHelper {
 		column.setName( physicalColumnName.render( database.getDialect() ) );
 	}
 
-	static boolean isValidityStrategy(MetadataBuildingContext context) {
+	private static boolean isValidityStrategy(MetadataBuildingContext context) {
 		final var value = context.getBootstrapContext().getServiceRegistry()
 				.requireService( org.hibernate.engine.config.spi.ConfigurationService.class )
 				.getSetting( StateManagementSettings.AUDIT_STRATEGY, String.class, "default" );
@@ -378,16 +566,72 @@ public final class AuditHelper {
 		revEndColumn.setNullable( true );
 		auditTable.addColumn( revEndColumn );
 		holder.addAuxiliaryColumn( TRANSACTION_END, revEndColumn );
+		createRevisionForeignKey( auditTable, revEndColumn, context );
 
 		final String revEndTsName = audited.transactionEndTimestamp();
 		if ( !isBlank( revEndTsName ) ) {
-			final var revEndTsColumn =
-					createAuditColumn( revEndTsName,
-							Instant.class, auditTable, context );
+			final var revEndTsColumn = createAuditColumn( revEndTsName, Instant.class, auditTable, context );
 			revEndTsColumn.setNullable( true );
 			auditTable.addColumn( revEndTsColumn );
 			holder.addAuxiliaryColumn( TRANSACTION_END_TIMESTAMP, revEndTsColumn );
 		}
+	}
+
+	/**
+	 * Create a FK from the audit table's REV (or REVEND) column to the
+	 * revision entity's PK. Only applies when {@code @RevisionEntity}
+	 * is configured.
+	 */
+	private static void createRevisionForeignKey(
+			Table auditTable,
+			Column revColumn,
+			MetadataBuildingContext context) {
+		final String revisionEntityName = getRevisionEntityName( context );
+		if ( revisionEntityName != null ) {
+			auditTable.createForeignKey(
+					null,
+					List.of( revColumn ),
+					revisionEntityName,
+					null,
+					null
+			);
+		}
+	}
+
+	/**
+	 * Create a FK from one audit table's PK to another audit table's PK.
+	 * Used for JOINED inheritance (child_aud -> parent_aud) and
+	 * {@code @SecondaryTable} (secondary_aud -> primary_aud).
+	 */
+	private static void createAuditTableForeignKey(
+			Table sourceAuditTable,
+			String rootEntityName,
+			Table referencedAuditTable) {
+		final var fk = sourceAuditTable.createForeignKey(
+				null,
+				new ArrayList<>( sourceAuditTable.getPrimaryKey().getColumns() ),
+				rootEntityName,
+				null,
+				null
+		);
+		fk.setReferencedTable( referencedAuditTable );
+	}
+
+	private static @Nullable String getRevisionEntityName(MetadataBuildingContext context) {
+		final var supplier = RevisionEntitySupplier.resolve( context.getBootstrapContext().getServiceRegistry() );
+		return supplier != null ? supplier.getRevisionEntityClass().getName() : null;
+	}
+
+	private static Set<String> resolveExcludedColumns(Iterable<Property> properties) {
+		final Set<String> excluded = new HashSet<>();
+		for ( var property : properties ) {
+			if ( property.isAuditedExcluded() || property instanceof Backref ) {
+				for ( var column : property.getColumns() ) {
+					excluded.add( column.getCanonicalName() );
+				}
+			}
+		}
+		return excluded;
 	}
 
 	private static Set<String> resolveExcludedColumns(RootClass rootClass) {

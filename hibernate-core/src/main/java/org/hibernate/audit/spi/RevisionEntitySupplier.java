@@ -14,6 +14,8 @@ import org.hibernate.audit.RevisionNumber;
 import org.hibernate.audit.RevisionTimestamp;
 import org.hibernate.engine.spi.SharedSessionContractImplementor;
 import org.hibernate.persister.entity.EntityPersister;
+import org.hibernate.service.ServiceRegistry;
+import org.hibernate.temporal.spi.TransactionIdentifierService;
 import org.hibernate.temporal.spi.TransactionIdentifierSupplier;
 
 import java.time.Instant;
@@ -190,5 +192,17 @@ public class RevisionEntitySupplier<T> implements TransactionIdentifierSupplier<
 		try (StatelessSession childSession = session.statelessWithOptions().connection().open()) {
 			childSession.insert( revisionEntity );
 		}
+	}
+
+	/**
+	 * Resolve the {@link RevisionEntitySupplier} from the given
+	 * service registry, or return {@code null} if no
+	 * {@code @RevisionEntity} is configured.
+	 */
+	public static @Nullable RevisionEntitySupplier<?> resolve(ServiceRegistry registry) {
+		final var service = registry.getService( TransactionIdentifierService.class );
+		return service != null
+			&& service.getIdentifierSupplier() instanceof RevisionEntitySupplier<?> supplier
+				? supplier : null;
 	}
 }

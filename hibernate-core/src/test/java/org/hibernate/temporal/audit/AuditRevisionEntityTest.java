@@ -334,4 +334,27 @@ class AuditRevisionEntityTest {
 			assertFalse( auditLog.isAudited( "non.existent.Entity" ) );
 		} );
 	}
+
+	@Test
+	void testAuditTableForeignKeys(SessionFactoryScope scope) {
+		// Verify REV -> REVINFO FK exists on the audit table
+		final var metadata = scope.getMetadataImplementor();
+		boolean foundRevFk = false;
+		for ( var namespace : metadata.getDatabase().getNamespaces() ) {
+			for ( var table : namespace.getTables() ) {
+				if ( table.getName().toLowerCase().contains( "myentity_aud" ) ) {
+					for ( var fk : table.getForeignKeyCollection() ) {
+						final var referencedTable = fk.getReferencedTable();
+						if ( referencedTable != null
+								&& referencedTable.getName().equalsIgnoreCase( "REVINFO" ) ) {
+							foundRevFk = true;
+							assertEquals( 1, fk.getColumnSpan(),
+									"REV FK should have exactly 1 column" );
+						}
+					}
+				}
+			}
+		}
+		assertTrue( foundRevFk, "Expected FK from MyEntity_aud.REV -> REVINFO" );
+	}
 }

@@ -499,15 +499,13 @@ provides a clean boundary.
 
 | G16
 | **Foreign key constraints on audit tables**
-| High
-| Core audit tables currently have NO FK constraints. Envers created:
-  (1) `_AUD.REV -> REVINFO.REV` on every audit table;
-  (2) `_AUD.REVEND -> REVINFO.REV` for validity strategy;
+| [green]#DONE#
+| Core audit tables now create FK constraints matching envers:
+  (1) `_AUD.REV -> REVINFO` on every audit table (when `@RevisionEntity` configured);
+  (2) `_AUD.REVEND -> REVINFO` for validity strategy;
   (3) `ChildEntity_AUD.(REV, id) -> ParentEntity_AUD.(REV, id)` for JOINED inheritance;
   (4) `secondary_AUD.(REV, id) -> PrimaryEntity_AUD.(REV, id)` for `@SecondaryTable`.
-  No FK from `_AUD` back to the main entity table. No unique constraints (composite PKs
-  handle uniqueness). These FKs are important for data integrity and schema compatibility
-  with existing envers databases.
+  Additionally, a unique constraint is added on `@RevisionNumber` when it is not the sole `@Id`.
 
 | G17
 | **`AuditLog` API: builder pattern for entity-scoped queries**
@@ -1157,9 +1155,6 @@ link:envers-migration-guide.adoc#not-audited-target-behavior[migration guide].
 
 === High Priority
 
-* **G16: FK constraints on audit tables** -- core has NONE; envers created `_AUD.REV -> REVINFO`,
-  `REVEND -> REVINFO`, JOINED composite FK, `@SecondaryTable` composite FK. Important for data
-  integrity and schema compatibility with existing envers databases.
 * **W25: Collection type support** -- sorted collections (`@SortNatural`, `@SortComparator`) and
   identifier bags (`@CollectionId`) not yet verified.
 
