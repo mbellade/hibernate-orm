@@ -149,14 +149,6 @@ class LegacyAuditReaderTest {
 	}
 
 	@Test
-	void testIsEntityNameAudited(SessionFactoryScope scope) {
-		scope.inSession( session -> {
-			final AuditReader reader = AuditReaderFactory.get( session );
-			assertTrue( reader.isEntityNameAudited( LegacyEntity.class.getName() ) );
-		} );
-	}
-
-	@Test
 	void testGetEntityNameThrows(SessionFactoryScope scope) {
 		scope.inSession( session -> {
 			final AuditReader reader = AuditReaderFactory.get( session );

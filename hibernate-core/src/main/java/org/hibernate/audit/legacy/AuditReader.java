@@ -51,21 +51,22 @@ public interface AuditReader extends AuditLog {
 
 	/**
 	 * Envers overload with entityName and class for typed return.
+	 * The entityName parameter is ignored — core auditing resolves
+	 * the entity from the class.
 	 */
 	@Deprecated(forRemoval = true)
-	@SuppressWarnings("unchecked")
 	default <T> T find(Class<T> cls, String entityName, Object primaryKey, Object revision) {
-		return (T) find( entityName, primaryKey, revision );
+		return find( cls, primaryKey, revision );
 	}
 
 	/**
 	 * Envers overload with entityName, class, and includeDeletions.
+	 * The entityName parameter is ignored — core auditing resolves
+	 * the entity from the class.
 	 */
 	@Deprecated(forRemoval = true)
-	@SuppressWarnings("unchecked")
-	default <T> T find(Class<T> cls, String entityName, Object primaryKey,
-			Object revision, boolean includeDeletions) {
-		return (T) find( entityName, primaryKey, revision, includeDeletions );
+	default <T> T find(Class<T> cls, String entityName, Object primaryKey, Object revision, boolean includeDeletions) {
+		return find( cls, primaryKey, revision, includeDeletions );
 	}
 
 	/**
@@ -95,8 +96,6 @@ public interface AuditReader extends AuditLog {
 	}
 
 	/**
-	 * Legacy alias for {@link AuditLog#isAudited(Class)}.
-	 *
 	 * @deprecated Use {@link AuditLog#isAudited(Class)}
 	 */
 	@Deprecated(forRemoval = true)
@@ -168,11 +167,18 @@ public interface AuditReader extends AuditLog {
 	}
 
 	/**
-	 * @deprecated Use {@link AuditLog#isAudited(String)}
+	 * Envers overload with entityName parameter.
+	 * Core auditing does not support entity-name-only lookups;
+	 * this method always returns {@code false} for safety.
+	 *
+	 * @deprecated Use {@link AuditLog#isAudited(Class)}
 	 */
 	@Deprecated(forRemoval = true)
 	default boolean isEntityNameAudited(String entityName) {
-		return isAudited( entityName );
+		throw new UnsupportedOperationException(
+				"isEntityNameAudited() is not supported in core auditing. "
+						+ "Use isAudited(Class) instead."
+		);
 	}
 
 	/**

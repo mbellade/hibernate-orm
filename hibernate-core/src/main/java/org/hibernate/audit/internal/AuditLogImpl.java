@@ -14,8 +14,6 @@ import org.hibernate.audit.legacy.AuditReader;
 import org.hibernate.audit.spi.RevisionEntitySupplier;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.hibernate.engine.spi.SharedSessionContractImplementor;
-import org.hibernate.persister.entity.EntityPersister;
-
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -147,14 +145,9 @@ public class AuditLogImpl implements AuditReader {
 	@Override
 	public boolean isAudited(Class<?> entityClass) {
 		requireNonNull( entityClass, "Entity class" );
-		return getEntityPersister( entityClass ).getAuditMapping() != null;
-	}
-
-	@Override
-	public boolean isAudited(String entityName) {
-		requireNonNull( entityName, "Entity name" );
-		final var persister = sessionFactory.getMappingMetamodel().findEntityDescriptor( entityName );
-		return persister != null && persister.getAuditMapping() != null;
+		return sessionFactory.getMappingMetamodel()
+				.getEntityDescriptor( entityClass )
+				.getAuditMapping() != null;
 	}
 
 	@Override
@@ -163,21 +156,9 @@ public class AuditLogImpl implements AuditReader {
 	}
 
 	@Override
-	public Object find(String entityName, Object id, Object transactionId) {
-		return find( entityName, id, transactionId, false );
-	}
-
-	@Override
 	public <T> T find(Class<T> entityClass, Object id, Object transactionId, boolean includeDeletions) {
 		requireNonNull( entityClass, "Entity class" );
 		return doFind( requireAuditedEntityName( entityClass ), id, transactionId, includeDeletions );
-	}
-
-	@Override
-	public Object find(String entityName, Object id, Object transactionId, boolean includeDeletions) {
-		requireNonNull( entityName, "Entity name" );
-		requireAuditedEntityName( entityName );
-		return doFind( entityName, id, transactionId, includeDeletions );
 	}
 
 	private <T> T doFind(String entityName, Object id,
@@ -201,11 +182,6 @@ public class AuditLogImpl implements AuditReader {
 	}
 
 	@Override
-	public Object find(String entityName, Object id, Instant instant) {
-		return find( entityName, id, getTransactionId( instant ) );
-	}
-
-	@Override
 	public <T> List<T> findEntitiesModifiedAt(Class<T> entityClass, Object transactionId) {
 		requireNonNull( entityClass, "Entity class" );
 		requireNonNull( transactionId, "Transaction identifier" );
@@ -221,13 +197,6 @@ public class AuditLogImpl implements AuditReader {
 	public <T> List<AuditEntry<T>> getHistory(Class<T> entityClass, Object id) {
 		requireNonNull( entityClass, "Entity class" );
 		return doGetHistory( requireAuditedEntityName( entityClass ), id );
-	}
-
-	@Override
-	public List<AuditEntry<Object>> getHistory(String entityName, Object id) {
-		requireNonNull( entityName, "Entity name" );
-		requireAuditedEntityName( entityName );
-		return doGetHistory( entityName, id );
 	}
 
 	private <T> List<AuditEntry<T>> doGetHistory(String entityName, Object id) {
@@ -380,19 +349,8 @@ public class AuditLogImpl implements AuditReader {
 		return allRevisionsSession;
 	}
 
-	private EntityPersister getEntityPersister(Class<?> entityClass) {
-		return sessionFactory.getMappingMetamodel().getEntityDescriptor( entityClass );
-	}
-
 	private String requireAuditedEntityName(Class<?> entityClass) {
-		return requireAuditedEntityName( getEntityPersister( entityClass ) );
-	}
-
-	private void requireAuditedEntityName(String entityName) {
-		requireAuditedEntityName( sessionFactory.getMappingMetamodel().getEntityDescriptor( entityName ) );
-	}
-
-	private String requireAuditedEntityName(EntityPersister persister) {
+		final var persister = sessionFactory.getMappingMetamodel().getEntityDescriptor( entityClass );
 		if ( persister.getAuditMapping() == null ) {
 			throw new IllegalArgumentException(
 					"Entity '" + persister.getEntityName() + "' is not audited"

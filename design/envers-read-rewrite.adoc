@@ -508,13 +508,14 @@ provides a clean boundary.
   Additionally, a unique constraint is added on `@RevisionNumber` when it is not the sole `@Id`.
 
 | G17
-| **`AuditLog` API: builder pattern for entity-scoped queries**
+| **`AuditLog` API: remove `String entityName` overloads** ✅
 | Medium
-| Currently every method on `AuditLog` is duplicated for `Class<T>` and `String entityName`
-  parameters. Should refactor to a fluent builder pattern:
-  `auditLog.forEntity(MyEntity.class).find(id, txId)` / `auditLog.forEntity("MyEntity").find(...)`,
-  similar to `session.byId(Class)` returning `IdentifierLoadAccess`. Eliminates the
-  duplication and provides a clear path for future methods.
+| Core auditing uses annotations only (no `hbm.xml` dynamic entity mappings), so
+  there is a 1:1 mapping between `Class` and entity name. Removed all `String entityName`
+  overloads and `isAudited(String)` from `AuditLog`. The legacy `AuditReader` bridge
+  keeps the envers-compatible `entityName` signatures but delegates to the `Class`
+  variants (ignoring the entity name parameter). A builder pattern (`forEntity(Class)`)
+  was evaluated but deemed unnecessary without the `String` duplication to eliminate.
 
 | G18
 | **Pre-built SQL AST for `getHistory()`**
@@ -1168,7 +1169,6 @@ link:envers-migration-guide.adoc#not-audited-target-behavior[migration guide].
 * **G12: Audit table suffix case** -- make configurable, or match envers default `_AUD`.
 * **W9 / G14: Audit table schema/catalog override** -- needs `@Audited` attributes and/or
   global configuration property.
-* **G17: Builder pattern API** -- `auditLog.forEntity(Foo.class).find(id, txId)`.
 * **G18: Pre-built SQL AST for `getHistory()`** -- investigate DomainResult position mapping bug.
 * **W12 / G10: `@AuditOverride`** -- `forClass` pattern has no equivalent.
 
