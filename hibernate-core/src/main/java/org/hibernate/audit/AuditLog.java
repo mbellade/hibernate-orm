@@ -80,16 +80,6 @@ public interface AuditLog {
 	ModificationType getModificationType(Class<?> entityClass, Object id, Object transactionId);
 
 	/**
-	 * Get all entity identifiers of the given type that were
-	 * modified in a given transaction.
-	 *
-	 * @param entityClass the audited entity class
-	 * @param transactionId the transaction identifier
-	 * @return the list of entity identifiers
-	 */
-	List<Object> getEntitiesModifiedAt(Class<?> entityClass, Object transactionId);
-
-	/**
 	 * Check if an entity type is audited.
 	 *
 	 * @param entityClass the entity class
@@ -157,6 +147,33 @@ public interface AuditLog {
 	<T> List<T> findEntitiesModifiedAt(Class<T> entityClass, Object transactionId);
 
 	/**
+	 * Find all entity snapshots of the given type that
+	 * were modified at a specific transaction with the
+	 * specified modification type.
+	 *
+	 * @param entityClass the audited entity class
+	 * @param transactionId the transaction identifier
+	 * @param modificationType the modification type filter
+	 * @return the matching entity snapshots
+	 *
+	 * @param <T> the entity type
+	 */
+	<T> List<T> findEntitiesModifiedAt(Class<T> entityClass, Object transactionId, ModificationType modificationType);
+
+	/**
+	 * Find all entity snapshots of the given type that
+	 * were modified at a specific transaction, grouped
+	 * by modification type (ADD, MOD, DEL).
+	 *
+	 * @param entityClass the audited entity class
+	 * @param transactionId the transaction identifier
+	 * @return entity snapshots grouped by modification type
+	 *
+	 * @param <T> the entity type
+	 */
+	<T> Map<ModificationType, List<T>> findEntitiesGroupedByModificationType(Class<T> entityClass, Object transactionId);
+
+	/**
 	 * Get the full audit history for an entity, ordered
 	 * chronologically by transaction identifier.
 	 * <p>
@@ -175,6 +192,66 @@ public interface AuditLog {
 	 * @param <T> the entity type
 	 */
 	<T> List<AuditEntry<T>> getHistory(Class<T> entityClass, Object id);
+
+	// --- Cross-type revision queries ---
+
+	/**
+	 * Get the set of entity types that were modified at the
+	 * given transaction.
+	 * <p>
+	 * Requires a {@link RevisionEntity @RevisionEntity} with a
+	 * {@link ModifiedEntityNames @ModifiedEntityNames} property
+	 * (e.g. {@link DefaultTrackingModifiedEntitiesRevisionEntity}).
+	 *
+	 * @param transactionId the transaction identifier
+	 * @return the set of entity classes modified at that transaction
+	 * @throws AuditException if entity change tracking is not enabled
+	 */
+	Set<Class<?>> getEntityTypesModifiedAt(Object transactionId);
+
+	/**
+	 * Find all entity snapshots across all audited types that
+	 * were modified at the given transaction.
+	 * <p>
+	 * Requires a {@link RevisionEntity @RevisionEntity} with a
+	 * {@link ModifiedEntityNames @ModifiedEntityNames} property
+	 * (e.g. {@link DefaultTrackingModifiedEntitiesRevisionEntity}).
+	 *
+	 * @param transactionId the transaction identifier
+	 * @return all entity snapshots modified at that transaction
+	 * @throws AuditException if entity change tracking is not enabled
+	 */
+	List<Object> findAllEntitiesModifiedAt(Object transactionId);
+
+	/**
+	 * Find all entity snapshots across all audited types that
+	 * were modified at the given transaction with the specified
+	 * modification type.
+	 * <p>
+	 * Requires a {@link RevisionEntity @RevisionEntity} with a
+	 * {@link ModifiedEntityNames @ModifiedEntityNames} property
+	 * (e.g. {@link DefaultTrackingModifiedEntitiesRevisionEntity}).
+	 *
+	 * @param transactionId the transaction identifier
+	 * @param modificationType the modification type filter
+	 * @return the matching entity snapshots
+	 * @throws AuditException if entity change tracking is not enabled
+	 */
+	List<Object> findAllEntitiesModifiedAt(Object transactionId, ModificationType modificationType);
+
+	/**
+	 * Find all entity snapshots modified at the given transaction,
+	 * grouped by modification type (ADD, MOD, DEL).
+	 * <p>
+	 * Requires a {@link RevisionEntity @RevisionEntity} with a
+	 * {@link ModifiedEntityNames @ModifiedEntityNames} property
+	 * (e.g. {@link DefaultTrackingModifiedEntitiesRevisionEntity}).
+	 *
+	 * @param transactionId the transaction identifier
+	 * @return entity snapshots grouped by modification type
+	 * @throws AuditException if entity change tracking is not enabled
+	 */
+	Map<ModificationType, List<Object>> findAllEntitiesGroupedByModificationType(Object transactionId);
 
 	/**
 	 * Get the timestamp of a specific revision. Requires

@@ -147,22 +147,26 @@ public interface AuditReader extends AuditLog {
 	default Object createQuery() {
 		throw new UnsupportedOperationException(
 				"AuditQuery is not supported in core auditing. "
-						+ "Use HQL with transactionId()/modificationType() functions, "
-						+ "or session.withOptions().atTransaction(txId).open() for point-in-time queries."
+						+ "Use session.withOptions().atTransaction(txId).open() for point-in-time queries, "
+						+ "or AuditLog.ALL_REVISIONS for querying across revision combined with the transactionId()/modificationType() HQL functions"
 		);
 	}
 
 	/**
 	 * Not supported in core auditing. Use
-	 * {@link org.hibernate.audit.EntityTrackingRevisionListener}
-	 * to track entity changes per revision.
+	 * {@link AuditLog#getEntityTypesModifiedAt},
+	 * {@link AuditLog#findAllEntitiesModifiedAt}, or
+	 * {@link AuditLog#findAllEntitiesGroupedByModificationType}
+	 * instead.
 	 *
 	 * @throws UnsupportedOperationException always
 	 */
 	default Object getCrossTypeRevisionChangesReader() {
 		throw new UnsupportedOperationException(
 				"CrossTypeRevisionChangesReader is not supported in core auditing. "
-						+ "Use EntityTrackingRevisionListener to track entity changes per revision."
+						+ "Use AuditLog.getEntityTypesModifiedAt(), "
+						+ "findAllEntitiesModifiedAt(), or "
+						+ "findAllEntitiesGroupedByModificationType() instead."
 		);
 	}
 

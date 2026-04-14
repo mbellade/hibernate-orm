@@ -245,38 +245,49 @@ class AuditLogTest {
 		} );
 	}
 
-	// --- getEntitiesModifiedAt ---
+	// --- findEntitiesModifiedAt with ModificationType ---
 
 	@Test
 	@Order(11)
-	void testGetEntitiesModifiedAtSingleEntity(SessionFactoryScope scope) {
+	void testFindEntitiesModifiedAtWithModificationType(SessionFactoryScope scope) {
 		scope.inSession( session -> {
-			// Rev 1: only entity 1 was created
-			final var modified = session.getAuditLog().getEntitiesModifiedAt( AuditedEntity.class, revCreate1 );
-			assertEquals( 1, modified.size() );
-			assertEquals( 1L, ((Number) modified.get( 0 )).longValue() );
+			final var auditLog = session.getAuditLog();
+
+			// Rev 1: entity 1 was ADD
+			final var adds = auditLog.findEntitiesModifiedAt( AuditedEntity.class, revCreate1, ModificationType.ADD );
+			assertEquals( 1, adds.size() );
+			assertEquals( "first", adds.get( 0 ).name );
+
+			// No MODs or DELs in rev 1
+			assertTrue( auditLog.findEntitiesModifiedAt( AuditedEntity.class, revCreate1, ModificationType.MOD ).isEmpty() );
+			assertTrue( auditLog.findEntitiesModifiedAt( AuditedEntity.class, revCreate1, ModificationType.DEL ).isEmpty() );
 		} );
 	}
 
 	@Test
 	@Order(12)
-	void testGetEntitiesModifiedAtMultipleEntities(SessionFactoryScope scope) {
+	void testFindEntitiesModifiedAtWithDelType(SessionFactoryScope scope) {
 		scope.inSession( session -> {
-			// Rev 2: entity 2 created + entity 1 updated = 2 entities modified
-			final var modified = session.getAuditLog().getEntitiesModifiedAt( AuditedEntity.class, revCreate2 );
-			assertEquals( 2, modified.size() );
-			final var ids = modified.stream().map( o -> ((Number) o).longValue() ).sorted().toList();
-			assertEquals( List.of( 1L, 2L ), ids );
+			final var dels = session.getAuditLog()
+					.findEntitiesModifiedAt( AuditedEntity.class, revDelete, ModificationType.DEL );
+			assertEquals( 1, dels.size() );
 		} );
 	}
 
+	// --- findEntitiesGroupedByModificationType ---
+
 	@Test
 	@Order(13)
-	void testGetEntitiesModifiedAtNoResults(SessionFactoryScope scope) {
+	void testFindEntitiesGroupedByModificationType(SessionFactoryScope scope) {
 		scope.inSession( session -> {
-			// No entities modified at a non-existent revision
-			final var modified = session.getAuditLog().getEntitiesModifiedAt( AuditedEntity.class, 999 );
-			assertTrue( modified.isEmpty() );
+			// Rev 2: entity 1 was MOD, entity 2 was ADD
+			final var grouped = session.getAuditLog()
+					.findEntitiesGroupedByModificationType( AuditedEntity.class, revCreate2 );
+			assertEquals( 1, grouped.get( ModificationType.ADD ).size() );
+			assertEquals( "second", grouped.get( ModificationType.ADD ).get( 0 ).name );
+			assertEquals( 1, grouped.get( ModificationType.MOD ).size() );
+			assertEquals( "first-updated", grouped.get( ModificationType.MOD ).get( 0 ).name );
+			assertTrue( grouped.get( ModificationType.DEL ).isEmpty() );
 		} );
 	}
 

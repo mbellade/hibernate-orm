@@ -262,15 +262,18 @@ provides a clean boundary.
 
 | 13
 | Cross-type revision queries (`CrossTypeRevisionChangesReader`)
-| Query multiple audit tables for given TX ID. Methods on `AuditLog`:
-  `getEntityTypesModifiedAt(txId)`, `findAllEntitiesModifiedAt(txId)`.
-  Envers requires opt-in (`track_entities_changed_in_revision=true`) which populates a
-  `REVCHANGES` index table via `EntityTrackingRevisionListener`; without it,
-  `getCrossTypeRevisionChangesReader()` throws. The envers implementation queries REVCHANGES
-  first (1 query), then fetches per-type snapshots (n queries).
-  Core can implement naively by scanning all audited persisters (N queries, no index table),
-  but for efficiency at scale an opt-in write-side index (via `EntityTrackingRevisionListener`) should be supported later.
-| [red]#TODO#
+| Implemented via `@ModifiedEntityNames` on a `@RevisionEntity` property (typically an
+  `@ElementCollection Set<String>` creating the `REVCHANGES` table). Detection is
+  annotation-driven, no configuration setting needed. Use `DefaultTrackingModifiedEntitiesRevisionEntity`
+  or extend `TrackingModifiedEntitiesRevisionMapping` for custom revision entities.
+  Write-side: `AuditWorkQueue` populates the set after audit rows, flushes the child session.
+  Read-side: `AuditLog` methods query REVCHANGES via HQL join on the revision entity collection,
+  then fan out per-entity HQL queries. `findAllEntitiesGroupedByModificationType` uses 1+N
+  queries (optimized vs envers' 1+3N).
+  Also added per-entity variants: `findEntitiesModifiedAt(Class, txId, ModificationType)` and
+  `findEntitiesGroupedByModificationType(Class, txId)`. Removed `getEntitiesModifiedAt`
+  (IDs-only) and all `String entityName` overloads (no `hbm.xml` support).
+| [green]#DONE#
 
 | 14
 | Relation traversal in audit queries (`traverseRelation()`)
@@ -1161,9 +1164,6 @@ link:envers-migration-guide.adoc#not-audited-target-behavior[migration guide].
 
 === Medium Priority
 
-* **G5 / Read-Side #13: Cross-type revision queries** -- `getEntityTypesModifiedAt(txId)`,
-  `findAllEntitiesModifiedAt(txId)`. Naive scan iterates all audited persisters (N queries).
-  For efficiency at scale, opt-in write-side tracking (like envers' `REVCHANGES`) needed.
 * **W13 / G8: `@Version` auto-exclusion** -- coordinating boot-time column exclusion, write-side
   mask, AND read-side SQL generation.
 * **G12: Audit table suffix case** -- make configurable, or match envers default `_AUD`.
@@ -1213,7 +1213,8 @@ link:envers-migration-guide.adoc#not-audited-target-behavior[migration guide].
 | Can add specific exception types later if needed.
 
 | `@ModifiedEntityNames` / `REVCHANGES` table
-| Depends on G5. Opt-in feature, implementable later.
+| Supported. Use `DefaultTrackingModifiedEntitiesRevisionEntity` or add `@ModifiedEntityNames`
+  to a custom `@RevisionEntity`. Same `@ElementCollection Set<String>` pattern as envers.
 |===
 
 
@@ -1307,9 +1308,8 @@ link:envers-migration-guide.adoc#not-audited-target-behavior[migration guide].
 * **Associations to polymorphic entities**: Verify that to-one and to-many associations pointing
   to entities with SINGLE_TABLE, JOINED, and TABLE_PER_CLASS inheritance work correctly in
   point-in-time reads.
-* **Cross-type revision queries**: Naive scan iterates all audited persisters (N queries).
-  For efficient cross-type queries at scale, opt-in write-side tracking (like envers' `REVCHANGES`)
-  is needed. Both approaches should be available.
+* **Cross-type revision queries**: Implemented via `@ModifiedEntityNames` / `REVCHANGES` table.
+  Uses 1+N query strategy (1 REVCHANGES query + N per-entity HQL queries).
 * **Audit table schema/catalog**: Separate schema for audit tables. Needs `@Audited` attributes
   and/or a global configuration property.
 * **Audit table suffix case**: envers `_AUD` vs core `_aud`. Make configurable or match envers

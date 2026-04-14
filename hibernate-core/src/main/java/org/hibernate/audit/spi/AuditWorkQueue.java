@@ -4,10 +4,14 @@
  */
 package org.hibernate.audit.spi;
 
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.hibernate.Incubating;
+import org.hibernate.Session;
 import org.hibernate.audit.EntityTrackingRevisionListener;
 import org.hibernate.audit.ModificationType;
 import org.hibernate.collection.spi.PersistentCollection;
@@ -16,6 +20,8 @@ import org.hibernate.engine.spi.EntityKey;
 import org.hibernate.engine.spi.SharedSessionContractImplementor;
 import org.hibernate.engine.spi.TransactionCompletionCallbacks;
 import org.hibernate.persister.collection.CollectionPersister;
+
+import static org.hibernate.internal.util.NullnessUtil.castNonNull;
 
 /**
  * Transaction-scoped queue for deferred audit row writes.
@@ -75,6 +81,7 @@ public class AuditWorkQueue implements TransactionCompletionCallbacks.BeforeComp
 	private final Map<CollectionKey, QueuedCollectionEntry> collectionEntries = new LinkedHashMap<>();
 	private EntityTrackingRevisionListener trackingListener;
 	private Object revisionEntity;
+	private @Nullable Session revisionSession;
 	private boolean registered;
 
 	/**
@@ -191,12 +198,15 @@ public class AuditWorkQueue implements TransactionCompletionCallbacks.BeforeComp
 	}
 
 	/**
-	 * Store the revision entity instance for use by
-	 * {@link EntityTrackingRevisionListener} callbacks.
+	 * Store the revision entity and the child session used to
+	 * persist it. The child session is kept open for deferred
+	 * flush of {@code @ElementCollection} changes (e.g.
+	 * {@link org.hibernate.audit.ModifiedEntityNames @ModifiedEntityNames}).
 	 * Called from {@link RevisionEntitySupplier#generateTransactionIdentifier}.
 	 */
-	public void setRevisionEntity(Object revisionEntity) {
+	public void setRevisionContext(Object revisionEntity, Session revisionSession) {
 		this.revisionEntity = revisionEntity;
+		this.revisionSession = revisionSession;
 	}
 
 	@Override
@@ -232,13 +242,34 @@ public class AuditWorkQueue implements TransactionCompletionCallbacks.BeforeComp
 						session
 				);
 			}
+			// Populate @ModifiedEntityNames on the revision entity
+			populateModifiedEntityNames( session );
 		}
 		finally {
 			entries.clear();
 			collectionEntries.clear();
 			trackingListener = null;
 			revisionEntity = null;
+			revisionSession = null;
 			registered = false;
+		}
+	}
+
+	private void populateModifiedEntityNames(SharedSessionContractImplementor session) {
+		final var supplier = RevisionEntitySupplier.resolve( session.getFactory().getServiceRegistry() );
+		if ( supplier != null && supplier.getModifiedEntityNamesProperty() != null ) {
+			final var persister = session.getEntityPersister( supplier.getRevisionEntityClass().getName(), revisionEntity );
+			final var attr = persister.findAttributeMapping( supplier.getModifiedEntityNamesProperty() );
+			//noinspection unchecked
+			var entityNames = (Set<String>) persister.getValue( revisionEntity, attr.getStateArrayPosition() );
+			if ( entityNames == null ) {
+				entityNames = new HashSet<>();
+				persister.setValue( revisionEntity, attr.getStateArrayPosition(), entityNames );
+			}
+			for ( var entityKey : entries.keySet() ) {
+				entityNames.add( entityKey.getEntityName() );
+			}
+			castNonNull( revisionSession ).flush();
 		}
 	}
 

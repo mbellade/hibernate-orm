@@ -14,6 +14,7 @@ import java.util.Set;
 import org.checkerframework.checker.nullness.qual.Nullable;
 import org.hibernate.MappingException;
 import org.hibernate.annotations.Audited;
+import org.hibernate.audit.ModifiedEntityNames;
 import org.hibernate.audit.RevisionEntity;
 import org.hibernate.audit.RevisionListener;
 import org.hibernate.audit.RevisionNumber;
@@ -24,6 +25,7 @@ import org.hibernate.boot.model.naming.PhysicalNamingStrategy;
 import org.hibernate.boot.model.relational.Database;
 import org.hibernate.boot.spi.MetadataBuildingContext;
 import org.hibernate.cfg.StateManagementSettings;
+import org.hibernate.engine.config.spi.ConfigurationService;
 import org.hibernate.models.spi.ClassDetails;
 import org.hibernate.models.spi.MemberDetails;
 import org.hibernate.resource.beans.spi.ManagedBeanRegistry;
@@ -314,20 +316,23 @@ public final class AuditHelper {
 			throw new MappingException( "The @RevisionEntity entity cannot be audited" );
 		}
 
-		// Scan class members (including supertypes) for @RevisionNumber
-		// and @RevisionTimestamp. We need the names and type eagerly to
-		// configure the supplier before audit table second passes create
-		// the REV column.
+		// Scan class members (including supertypes) for @RevisionNumber,
+		// @RevisionTimestamp, and @ModifiedEntityNames. We need the names
+		// and type eagerly to configure the supplier before audit table
+		// second passes create the REV column.
 		MemberDetails revNumberMember = null;
 		MemberDetails revTimestampMember = null;
+		MemberDetails modifiedEntityNamesMember = null;
 		for ( var current = classDetails; current != null; current = current.getSuperClass() ) {
 			for ( var member : current.getFields() ) {
 				revNumberMember = checkAnnotation( member, revNumberMember, RevisionNumber.class, classDetails );
 				revTimestampMember = checkAnnotation( member, revTimestampMember, RevisionTimestamp.class, classDetails );
+				modifiedEntityNamesMember = checkAnnotation( member, modifiedEntityNamesMember, ModifiedEntityNames.class, classDetails );
 			}
 			for ( var member : current.getMethods() ) {
 				revNumberMember = checkAnnotation( member, revNumberMember, RevisionNumber.class, classDetails );
 				revTimestampMember = checkAnnotation( member, revTimestampMember, RevisionTimestamp.class, classDetails );
+				modifiedEntityNamesMember = checkAnnotation( member, modifiedEntityNamesMember, ModifiedEntityNames.class, classDetails );
 			}
 		}
 
@@ -354,7 +359,10 @@ public final class AuditHelper {
 				classDetails.toJavaClass(),
 				revNumberMember.resolveAttributeName(),
 				revTimestampMember.resolveAttributeName(),
-				listener
+				listener,
+				modifiedEntityNamesMember != null
+						? modifiedEntityNamesMember.resolveAttributeName()
+						: null
 		);
 		final var revNumberType = revNumberMember.getType().determineRawClass().toJavaClass();
 		serviceRegistry.requireService( TransactionIdentifierService.class )
@@ -547,7 +555,7 @@ public final class AuditHelper {
 
 	private static boolean isValidityStrategy(MetadataBuildingContext context) {
 		final var value = context.getBootstrapContext().getServiceRegistry()
-				.requireService( org.hibernate.engine.config.spi.ConfigurationService.class )
+				.requireService( ConfigurationService.class )
 				.getSetting( StateManagementSettings.AUDIT_STRATEGY, String.class, "default" );
 		return "validity".equalsIgnoreCase( value );
 	}
