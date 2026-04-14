@@ -7,13 +7,17 @@ package org.hibernate.boot.model.internal;
 import java.lang.annotation.Annotation;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import org.checkerframework.checker.nullness.qual.Nullable;
 import org.hibernate.MappingException;
 import org.hibernate.annotations.Audited;
+import org.hibernate.annotations.CollectionAuditTable;
+import org.hibernate.annotations.SecondaryAuditTable;
 import org.hibernate.audit.ModifiedEntityNames;
 import org.hibernate.audit.RevisionEntity;
 import org.hibernate.audit.RevisionListener;
@@ -46,6 +50,7 @@ import org.hibernate.persister.state.internal.AuditStateManagement;
 import org.hibernate.temporal.spi.TransactionIdentifierService;
 
 import static org.hibernate.internal.util.StringHelper.isBlank;
+import static org.hibernate.internal.util.StringHelper.nullIfBlank;
 
 /**
  * Helper for building audit log tables in the boot model.
@@ -58,7 +63,7 @@ public final class AuditHelper {
 
 	// defaults for backward compatibility with envers
 
-	private static final String DEFAULT_TABLE_SUFFIX = "_aud";
+	private static final String DEFAULT_TABLE_SUFFIX = "_AUD";
 
 	private AuditHelper() {
 	}
@@ -66,9 +71,10 @@ public final class AuditHelper {
 	static void bindAuditTable(
 			Audited audited,
 			RootClass rootClass,
+			ClassDetails classDetails,
 			MetadataBuildingContext context) {
 		bindAuditTable( audited, (Stateful) rootClass, context );
-		bindSecondaryAuditTables( audited, rootClass, context );
+		bindSecondaryAuditTables( audited, rootClass, classDetails, context );
 		bindSubclassAuditTables( audited, rootClass, context );
 	}
 
@@ -88,8 +94,8 @@ public final class AuditHelper {
 		final String explicitAuditTableName = audited.tableName();
 		final boolean hasExplicitAuditTableName = !isBlank( explicitAuditTableName );
 		final var auditTable = collector.addTable(
-				table.getSchema(),
-				table.getCatalog(),
+				isBlank( audited.schema() ) ? table.getSchema() : audited.schema(),
+				isBlank( audited.catalog() ) ? table.getCatalog() : audited.catalog(),
 				hasExplicitAuditTableName
 						? explicitAuditTableName
 						: collector.getLogicalTableName( table )
@@ -139,14 +145,23 @@ public final class AuditHelper {
 	private static void bindSecondaryAuditTables(
 			Audited audited,
 			RootClass rootClass,
+			ClassDetails classDetails,
 			MetadataBuildingContext context) {
 		final String txIdColumnName = audited.transactionId();
+		final Map<String, String> secondaryAuditTableNames = new HashMap<>();
+		classDetails.forEachAnnotationUsage( SecondaryAuditTable.class, context.getBootstrapContext().getModelsContext(),
+				sat -> secondaryAuditTableNames.put( sat.secondaryTableName(), sat.secondaryAuditTableName() ) );
 		context.getMetadataCollector().addSecondPass( (OptionalDeterminationSecondPass) ignored -> {
 			for ( var join : rootClass.getJoins() ) {
+				final var sourceTable = join.getTable();
+				final String customName = secondaryAuditTableNames.get( sourceTable.getName() );
 				final var auditTable = createAuditTable(
-						join.getTable(),
+						sourceTable,
 						txIdColumnName,
 						resolveExcludedColumns( join.getProperties() ),
+						nullIfBlank( audited.schema() ),
+						nullIfBlank( audited.catalog() ),
+						customName,
 						context
 				);
 				createAuditTableForeignKey( auditTable, rootClass.getEntityName(), rootClass.getAuxiliaryTable() );
@@ -185,12 +200,21 @@ public final class AuditHelper {
 			String txIdColumnName,
 			String modTypeColumnName,
 			MetadataBuildingContext context) {
+		final var modelsContext = context.getBootstrapContext().getModelsContext();
 		for ( var subclass : parent.getDirectSubclasses() ) {
 			if ( subclass instanceof TableOwner ) {
+				// Check if the subclass has its own @Audited for table name/schema/catalog override
+				final var subclassDetails = modelsContext.getClassDetailsRegistry()
+						.getClassDetails( subclass.getClassName() );
+				final var subclassAudited = subclassDetails.getDirectAnnotationUsage( Audited.class );
+				final var effective = subclassAudited != null ? subclassAudited : audited;
 				final var auditTable = createAuditTable(
 						subclass.getTable(),
 						txIdColumnName,
 						resolveExcludedColumns( subclass.getProperties() ),
+						nullIfBlank( effective.schema() ),
+						nullIfBlank( effective.catalog() ),
+						nullIfBlank( effective.tableName() ),
 						context
 				);
 				subclass.addAuxiliaryColumn( TRANSACTION_ID, auditTable.getPrimaryKey().getColumn( 0 ) );
@@ -238,19 +262,32 @@ public final class AuditHelper {
 			Audited audited,
 			Collection collection,
 			String referencedEntityName,
+			@Nullable CollectionAuditTable collectionAuditTable,
 			MetadataBuildingContext context) {
 		final var collector = context.getMetadataCollector();
 		final var ownerTable = collection.getOwner().getTable();
 
-		// Table name: {OwnerJpaEntityName}_{ChildJpaEntityName}_aud (envers convention)
-		final String ownerSimpleName = collection.getOwner().getJpaEntityName();
+		// Table name: @CollectionAuditTable name, or {OwnerJpaEntityName}_{ChildJpaEntityName}_AUD
 		final var referencedEntity = collector.getEntityBinding( referencedEntityName );
-		final String childSimpleName = referencedEntity.getJpaEntityName();
-		final String auditTableName = ownerSimpleName + "_" + childSimpleName + DEFAULT_TABLE_SUFFIX;
+		final String auditTableName;
+		if ( collectionAuditTable != null && !isBlank( collectionAuditTable.name() ) ) {
+			auditTableName = collectionAuditTable.name();
+		}
+		else {
+			final String ownerSimpleName = collection.getOwner().getJpaEntityName();
+			final String childSimpleName = referencedEntity.getJpaEntityName();
+			auditTableName = ownerSimpleName + "_" + childSimpleName + DEFAULT_TABLE_SUFFIX;
+		}
 
+		final String schema = collectionAuditTable != null && !isBlank( collectionAuditTable.schema() )
+				? collectionAuditTable.schema()
+				: !isBlank( audited.schema() ) ? audited.schema() : ownerTable.getSchema();
+		final String catalog = collectionAuditTable != null && !isBlank( collectionAuditTable.catalog() )
+				? collectionAuditTable.catalog()
+				: !isBlank( audited.catalog() ) ? audited.catalog() : ownerTable.getCatalog();
 		final var auditTable = collector.addTable(
-				ownerTable.getSchema(),
-				ownerTable.getCatalog(),
+				schema,
+				catalog,
 				auditTableName,
 				null,
 				false,
@@ -460,12 +497,18 @@ public final class AuditHelper {
 			Table sourceTable,
 			String txIdColumnName,
 			Set<String> excludedColumns,
+			@Nullable String schemaOverride,
+			@Nullable String catalogOverride,
+			@Nullable String customAuditTableName,
 			MetadataBuildingContext context) {
 		final var collector = context.getMetadataCollector();
+		final String auditTableName = customAuditTableName != null
+				? customAuditTableName
+				: collector.getLogicalTableName( sourceTable ) + DEFAULT_TABLE_SUFFIX;
 		final var auditTable = collector.addTable(
-				sourceTable.getSchema(),
-				sourceTable.getCatalog(),
-				collector.getLogicalTableName( sourceTable ) + DEFAULT_TABLE_SUFFIX,
+				schemaOverride != null ? schemaOverride : sourceTable.getSchema(),
+				catalogOverride != null ? catalogOverride : sourceTable.getCatalog(),
+				auditTableName,
 				sourceTable.getSubselect(),
 				sourceTable.isAbstract(),
 				context,

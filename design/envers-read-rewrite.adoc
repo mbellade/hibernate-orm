@@ -372,9 +372,10 @@ provides a clean boundary.
 
 | W9
 | `@AuditTable` schema/catalog override
-| [red]#TODO# -- `@Audited` has no schema/catalog attributes. No way to put audit tables
-  in a different schema/catalog. Common use case: separate audit schema for access control.
-  Needs attributes on `@Audited` and/or a global configuration property.
+| [green]#DONE# -- `@Audited(schema=..., catalog=...)` on entity or subclass. Applies to all
+  audit tables (main, secondary, subclass). `@SecondaryAuditTable` for secondary table name
+  override. `@CollectionAuditTable(name=..., schema=..., catalog=...)` for collection audit
+  tables. Global default schema/catalog setting not yet implemented.
 | Medium
 
 | W10
@@ -397,7 +398,9 @@ provides a clean boundary.
 
 | W13
 | `DO_NOT_AUDIT_OPTIMISTIC_LOCKING_FIELD` (skip `@Version`)
-| [yellow]#DIFFERS# -- core includes `@Version` in audit table (use `@Audited.Excluded` to exclude).
+| [yellow]#DIFFERS# -- core includes `@Version` in audit table. Excluding columns from audit
+  tables (`@Audited.Excluded`, `@Version` auto-exclusion) has a read-side gap: the SQL AST
+  still references the excluded columns. See G8 in remaining work.
   Auto-exclusion requires coordinating boot-time column exclusion, write-side mask, AND read-side SQL generation.
 | Low
 
@@ -483,11 +486,9 @@ provides a clean boundary.
 | # | Gap | Priority | Details
 
 | G12
-| **Audit table suffix case**: envers `_AUD` vs core `_aud`
+| **Audit table suffix case** ✅
 | Medium
-| On case-insensitive databases (most), transparent. On case-sensitive databases
-  (e.g. PostgreSQL with quoted identifiers), migration from envers requires matching.
-  Options: make suffix configurable, or match envers default `_AUD`.
+| Changed default suffix from `_aud` to `_AUD` to match envers convention.
 
 | G15
 | **Naming: "revision" vs "transaction-id"**
@@ -1164,11 +1165,16 @@ link:envers-migration-guide.adoc#not-audited-target-behavior[migration guide].
 
 === Medium Priority
 
-* **W13 / G8: `@Version` auto-exclusion** -- coordinating boot-time column exclusion, write-side
-  mask, AND read-side SQL generation.
-* **G12: Audit table suffix case** -- make configurable, or match envers default `_AUD`.
-* **W9 / G14: Audit table schema/catalog override** -- needs `@Audited` attributes and/or
-  global configuration property.
+* **W13 / G8: `@Version` auto-exclusion and `@Audited.Excluded` read-side gap** --
+  Boot-time column exclusion and write-side mask work, but the read-side has a gap:
+  `LoaderSelectBuilder` builds SQL AST from the entity's full attribute set, including
+  excluded columns that don't exist in the audit table. For regular attributes, adding
+  exclusion support in `LoaderSelectBuilder` would work because `EntityInitializerImpl`
+  uses `NullValueAssembler` when a fetch is missing (line 322). For `@Version` specifically,
+  `EntityInitializerImpl` has a hard assert that the version fetch exists (line 274),
+  requiring special handling. Envers avoided this entirely by using separate dynamically
+  generated entity descriptors for audit data; our rewrite reuses the same persister
+  with table name substitution.
 * **G18: Pre-built SQL AST for `getHistory()`** -- investigate DomainResult position mapping bug.
 * **W12 / G10: `@AuditOverride`** -- `forClass` pattern has no equivalent.
 
@@ -1310,10 +1316,9 @@ link:envers-migration-guide.adoc#not-audited-target-behavior[migration guide].
   point-in-time reads.
 * **Cross-type revision queries**: Implemented via `@ModifiedEntityNames` / `REVCHANGES` table.
   Uses 1+N query strategy (1 REVCHANGES query + N per-entity HQL queries).
-* **Audit table schema/catalog**: Separate schema for audit tables. Needs `@Audited` attributes
-  and/or a global configuration property.
-* **Audit table suffix case**: envers `_AUD` vs core `_aud`. Make configurable or match envers
-  default for migration compatibility.
+* **Audit table schema/catalog**: Implemented via `@Audited(schema=..., catalog=...)`,
+  `@SecondaryAuditTable`, `@CollectionAuditTable`, and subclass `@Audited` overrides.
+  Global default setting not yet available.
 * **Performance**: `getRevisions()` pagination for entities with many revisions.
 * **Envers `originalId` mapping**: Verify this doesn't affect core's column-level reads.
 * **Sequence continuity**: Document that `@GeneratedValue` must use the same sequence as envers

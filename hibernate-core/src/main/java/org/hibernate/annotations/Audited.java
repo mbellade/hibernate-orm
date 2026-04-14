@@ -54,9 +54,14 @@ import static java.lang.annotation.RetentionPolicy.RUNTIME;
  * the {@linkplain java.time.Instant#now() current JVM instant} is
  * used as the transaction identifier, but relying on this default
  * behavior is not recommended.
+ * <p>
+ *   This annotation may also be placed on a subclass entity in a
+ *   JOINED or TABLE_PER_CLASS hierarchy to override the audit table
+ *   name, schema, or catalog for that subclass. The subclass
+ *   inherits auditing from the root entity; the annotation on the
+ *   subclass only customizes table mapping.
  *
  * @author Gavin King
- *
  * @since 7.4
  */
 @Documented
@@ -66,13 +71,25 @@ import static java.lang.annotation.RetentionPolicy.RUNTIME;
 public @interface Audited {
 	/**
 	 * The name of the audit log table. Defaults to the
-	 * name of the main table holding currently effective
-	 * data, with the suffix {@code _aud}.
+	 * name of the main table with the suffix {@code _AUD}.
 	 */
 	String tableName() default "";
 
 	/**
+	 * The schema of the audit log table. Defaults to the
+	 * schema of the main table.
+	 */
+	String schema() default "";
+
+	/**
+	 * The catalog of the audit log table. Defaults to the
+	 * catalog of the main table.
+	 */
+	String catalog() default "";
+
+	/**
 	 * The name of the column holding the transaction identifier.
+	 *
 	 * @see org.hibernate.engine.spi.SharedSessionContractImplementor#getCurrentTransactionIdentifier()
 	 */
 	String transactionId() default "REV";

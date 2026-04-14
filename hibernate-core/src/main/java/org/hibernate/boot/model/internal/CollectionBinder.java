@@ -1578,6 +1578,7 @@ public abstract class CollectionBinder {
 						audited,
 						collection,
 						oneToMany.getReferencedEntityName(),
+						extract( CollectionAuditTable.class, property, buildingContext ),
 						buildingContext
 				);
 			}
