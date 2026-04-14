@@ -270,9 +270,11 @@ public class EntityInitializerImpl
 		final var versionMapping = entityDescriptor.getVersionMapping();
 		if ( versionMapping != null ) {
 			final var versionFetch = resultDescriptor.findFetch( versionMapping );
-			// If there is a version mapping, there must be a fetch for it
-			assert versionFetch != null;
-			versionAssembler = versionFetch.createAssembler( this, creationState );
+			// versionFetch may be null when the version property is excluded
+			// from auditing (e.g. @Audited.Excluded or @Version auto-exclusion)
+			versionAssembler = versionFetch != null
+					? versionFetch.createAssembler( this, creationState )
+					: null;
 		}
 		else {
 			versionAssembler = null;

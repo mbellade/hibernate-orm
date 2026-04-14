@@ -30,6 +30,9 @@ import org.hibernate.boot.model.relational.Database;
 import org.hibernate.boot.spi.MetadataBuildingContext;
 import org.hibernate.cfg.StateManagementSettings;
 import org.hibernate.engine.config.spi.ConfigurationService;
+import org.hibernate.engine.spi.LoadQueryInfluencers;
+import org.hibernate.metamodel.mapping.EntityMappingType;
+import org.hibernate.sql.results.graph.Fetchable;
 import org.hibernate.models.spi.ClassDetails;
 import org.hibernate.models.spi.MemberDetails;
 import org.hibernate.resource.beans.spi.ManagedBeanRegistry;
@@ -114,6 +117,10 @@ public final class AuditHelper {
 		final String txIdColumnName = audited.transactionId();
 		final String modTypeColumnName = audited.modificationType();
 		collector.addSecondPass( (OptionalDeterminationSecondPass) ignored -> {
+			// Auto-exclude @Version property from audit tables (matching envers behavior)
+			if ( auditable instanceof RootClass rootClass && rootClass.isVersioned() ) {
+				rootClass.getVersion().setAuditedExcluded( true );
+			}
 			// Resolve exclusions at second-pass time so collection-managed FK columns
 			// (added during collection binding) are detected
 			final var excludedColumns = auditable instanceof RootClass rootClass
@@ -728,5 +735,28 @@ public final class AuditHelper {
 				}
 			}
 		}
+	}
+
+	// --- Runtime helpers ---
+
+	/**
+	 * Whether the given fetchable is excluded from auditing and the
+	 * current context is loading from an audit table. Returns
+	 * {@code false} immediately when there is no temporal identifier
+	 * (the common case for non-audit queries).
+	 */
+	public static boolean isFetchableAuditExcluded(Fetchable fetchable, LoadQueryInfluencers influencers) {
+		if ( influencers.getTemporalIdentifier() == null ) {
+			return false;
+		}
+		final var attr = fetchable.asAttributeMapping();
+		if ( attr != null
+				&& attr.getStateArrayPosition() >= 0
+				&& attr.getDeclaringType() instanceof EntityMappingType entityMappingType ) {
+			final var persister = entityMappingType.getEntityPersister();
+			return persister.getAuditMapping() != null
+					&& persister.isPropertyAuditedExcluded( attr.getStateArrayPosition() );
+		}
+		return false;
 	}
 }
