@@ -8,6 +8,7 @@ import org.hibernate.Incubating;
 import org.hibernate.cfg.StateManagementSettings;
 
 import java.lang.annotation.Documented;
+import java.lang.annotation.Repeatable;
 import java.lang.annotation.Retention;
 import java.lang.annotation.Target;
 
@@ -54,9 +55,14 @@ import static java.lang.annotation.RetentionPolicy.RUNTIME;
  * the {@linkplain java.time.Instant#now() current JVM instant} is
  * used as the transaction identifier, but relying on this default
  * behavior is not recommended.
+ * <p>
+ *   This annotation may also be placed on a subclass entity in a
+ *   JOINED or TABLE_PER_CLASS hierarchy to override the audit table
+ *   name, schema, or catalog for that subclass. The subclass
+ *   inherits auditing from the root entity; the annotation on the
+ *   subclass only customizes table mapping.
  *
  * @author Gavin King
- *
  * @since 7.4
  */
 @Documented
@@ -66,13 +72,25 @@ import static java.lang.annotation.RetentionPolicy.RUNTIME;
 public @interface Audited {
 	/**
 	 * The name of the audit log table. Defaults to the
-	 * name of the main table holding currently effective
-	 * data, with the suffix {@code _aud}.
+	 * name of the main table with the suffix {@code _AUD}.
 	 */
 	String tableName() default "";
 
 	/**
+	 * The schema of the audit log table. Defaults to the
+	 * schema of the main table.
+	 */
+	String schema() default "";
+
+	/**
+	 * The catalog of the audit log table. Defaults to the
+	 * catalog of the main table.
+	 */
+	String catalog() default "";
+
+	/**
 	 * The name of the column holding the transaction identifier.
+	 *
 	 * @see org.hibernate.engine.spi.SharedSessionContractImplementor#getCurrentTransactionIdentifier()
 	 */
 	String transactionId() default "REV";
@@ -85,6 +103,29 @@ public @interface Audited {
 	String modificationType() default "REVTYPE";
 
 	/**
+	 * The name of the column holding the end transaction
+	 * identifier, used only when the
+	 * {@linkplain StateManagementSettings#AUDIT_STRATEGY
+	 * audit strategy} is set to {@code "validity"}. When a
+	 * new audit row is written, the previous row's end
+	 * transaction id column is updated with the current
+	 * transaction identifier, marking it as superseded.
+	 * A {@code null} value indicates the row is current
+	 * (not yet superseded).
+	 */
+	String transactionEnd() default "REVEND";
+
+	/**
+	 * The name of the column holding the timestamp of the
+	 * end transaction. Only used when the
+	 * {@linkplain StateManagementSettings#AUDIT_STRATEGY
+	 * audit strategy} is set to {@code "validity"} and this
+	 * attribute is set to a non-empty value. Stores the
+	 * timestamp of when the audit row was superseded.
+	 */
+	String transactionEndTimestamp() default "";
+
+	/**
 	 * Excludes the annotated attribute from auditing.
 	 * Updates to an excluded attribute modify the current
 	 * row directly without creating a new revision of the
@@ -95,5 +136,78 @@ public @interface Audited {
 	@Target({FIELD, METHOD})
 	@Retention(RUNTIME)
 	@interface Excluded {
+	}
+
+	/**
+	 * Specifies a custom audit table name for a
+	 * {@link jakarta.persistence.SecondaryTable @SecondaryTable}.
+	 * Placed on the entity class alongside
+	 * {@link Audited @Audited}.
+	 *
+	 * @see Audited
+	 *
+	 * @since envers-rewrite
+	 */
+	@Documented
+	@Target(TYPE)
+	@Retention(RUNTIME)
+	@Repeatable(SecondaryTables.class)
+	@interface SecondaryTable {
+		/**
+		 * The name of the secondary table being overridden.
+		 */
+		String secondaryTableName();
+
+		/**
+		 * The custom audit table name for this secondary table.
+		 */
+		String secondaryAuditTableName();
+	}
+
+	/**
+	 * Container for repeatable {@link SecondaryTable} annotations.
+	 *
+	 * @see SecondaryTable
+	 *
+	 * @since envers-rewrite
+	 */
+	@Documented
+	@Target(TYPE)
+	@Retention(RUNTIME)
+	@interface SecondaryTables {
+		SecondaryTable[] value();
+	}
+
+	/**
+	 * Specifies a custom audit table name (and optionally schema
+	 * and catalog) for an audited collection.
+	 * Placed on the collection field or property.
+	 *
+	 * @see Audited
+	 *
+	 * @since envers-rewrite
+	 */
+	@Documented
+	@Retention(RUNTIME)
+	@Target({FIELD, METHOD})
+	@interface CollectionTable {
+		/**
+		 * The name of the collection audit table.
+		 */
+		String name();
+
+		/**
+		 * The schema of the collection audit table.
+		 * Defaults to the schema of the owning entity's
+		 * audit table.
+		 */
+		String schema() default "";
+
+		/**
+		 * The catalog of the collection audit table.
+		 * Defaults to the catalog of the owning entity's
+		 * audit table.
+		 */
+		String catalog() default "";
 	}
 }

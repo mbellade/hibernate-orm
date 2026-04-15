@@ -8,6 +8,7 @@ import org.hibernate.AssertionFailure;
 import org.hibernate.action.spi.AfterTransactionCompletionProcess;
 import org.hibernate.action.spi.BeforeTransactionCompletionProcess;
 import org.hibernate.engine.spi.ComparableExecutable;
+import org.hibernate.engine.spi.EntityKey;
 import org.hibernate.event.spi.EventSource;
 import org.hibernate.event.service.spi.EventListenerGroups;
 import org.hibernate.persister.entity.EntityPersister;
@@ -186,7 +187,7 @@ public abstract class EntityAction
 							.getEntityDescriptor( entityName );
 			this.instance =
 					session.getPersistenceContext()
-							.getEntity( session.generateEntityKey( id, persister ) );
+							.getEntity( new EntityKey( id, persister ) );
 		}
 	}
 
