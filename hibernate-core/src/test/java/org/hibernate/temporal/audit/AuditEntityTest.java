@@ -124,6 +124,56 @@ class AuditEntityTest {
 			assertNull( result );
 		}
 	}
+	/**
+	 * Test that {@code atTransaction().find()} returns the most recent
+	 * snapshot at or before the given revision, even when the entity
+	 * was not modified at that exact revision.
+	 */
+	@Test
+	void testFindAtNonModifiedRevision(SessionFactoryScope scope) {
+		currentTxId = 700;
+		final var sf = scope.getSessionFactory();
+
+		// Rev 701: create entity A
+		sf.inTransaction( session -> {
+			var e = new AuditEntity();
+			e.id = 701L;
+			e.text = "A-created";
+			session.persist( e );
+		} );
+
+		// Rev 702: create entity B (entity A is NOT modified)
+		sf.inTransaction( session -> {
+			var e = new AuditEntity();
+			e.id = 702L;
+			e.text = "B-created";
+			session.persist( e );
+		} );
+
+		// Rev 703: update entity B (entity A is still NOT modified)
+		sf.inTransaction( session -> {
+			var e = session.find( AuditEntity.class, 702L );
+			e.text = "B-updated";
+		} );
+
+		// Entity A was only modified at rev 701, but should be visible
+		// at rev 702 and 703 with its original state
+		try ( var s = sf.withOptions().atTransaction( 702 ).open() ) {
+			var a = s.find( AuditEntity.class, 701L );
+			assertEquals( "A-created", a.text );
+		}
+		try ( var s = sf.withOptions().atTransaction( 703 ).open() ) {
+			var a = s.find( AuditEntity.class, 701L );
+			assertEquals( "A-created", a.text );
+		}
+
+		// Entity B should not be visible at rev 701 (created later)
+		try ( var s = sf.withOptions().atTransaction( 701 ).open() ) {
+			var b = s.find( AuditEntity.class, 702L );
+			assertNull( b );
+		}
+	}
+
 	@Test
 	void testEmbeddedAuditing(SessionFactoryScope scope) {
 		currentTxId = 100;

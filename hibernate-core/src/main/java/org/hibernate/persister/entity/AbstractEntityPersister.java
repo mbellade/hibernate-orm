@@ -3304,6 +3304,11 @@ public abstract class AbstractEntityPersister
 
 		lazyLoadPlanByFetchGroup = getLazyLoadPlanByFetchGroup();
 
+		final var auditMapping = getAuditMapping();
+		if ( auditMapping != null ) {
+			auditMapping.getEntityLoader();
+		}
+
 		logStaticSQL();
 	}
 

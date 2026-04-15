@@ -4,35 +4,21 @@
  */
 package org.hibernate.persister.state.internal;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
 import org.checkerframework.checker.nullness.qual.Nullable;
-
-import org.hibernate.mapping.Column;
-import java.util.function.Function;
-
 import org.hibernate.audit.ModificationType;
-import org.hibernate.mapping.Collection;
 import org.hibernate.mapping.AuxiliaryTableHolder;
+import org.hibernate.mapping.Collection;
+import org.hibernate.mapping.Column;
 import org.hibernate.mapping.PersistentClass;
 import org.hibernate.mapping.RootClass;
 import org.hibernate.mapping.Table;
-import org.hibernate.metamodel.mapping.JdbcMapping;
-import org.hibernate.metamodel.mapping.SelectableMapping;
-import org.hibernate.metamodel.mapping.internal.SelectableMappingImpl;
-import org.hibernate.type.spi.TypeConfiguration;
-
-import static org.hibernate.boot.model.internal.AuditHelper.MODIFICATION_TYPE;
-import static org.hibernate.boot.model.internal.AuditHelper.TRANSACTION_END;
-import static org.hibernate.boot.model.internal.AuditHelper.TRANSACTION_END_TIMESTAMP;
-import static org.hibernate.boot.model.internal.AuditHelper.TRANSACTION_ID;
 import org.hibernate.metamodel.mapping.AuditMapping;
+import org.hibernate.metamodel.mapping.JdbcMapping;
 import org.hibernate.metamodel.mapping.PluralAttributeMapping;
+import org.hibernate.metamodel.mapping.SelectableMapping;
 import org.hibernate.metamodel.mapping.internal.AuditMappingImpl;
 import org.hibernate.metamodel.mapping.internal.MappingModelCreationProcess;
+import org.hibernate.metamodel.mapping.internal.SelectableMappingImpl;
 import org.hibernate.persister.collection.CollectionPersister;
 import org.hibernate.persister.collection.mutation.DeleteRowsCoordinator;
 import org.hibernate.persister.collection.mutation.InsertRowsCoordinator;
@@ -53,7 +39,18 @@ import org.hibernate.persister.entity.mutation.MergeCoordinatorAudit;
 import org.hibernate.persister.entity.mutation.UpdateCoordinator;
 import org.hibernate.persister.entity.mutation.UpdateCoordinatorAudit;
 import org.hibernate.persister.state.spi.StateManagement;
+import org.hibernate.type.spi.TypeConfiguration;
 
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+
+import static org.hibernate.boot.model.internal.AuditHelper.MODIFICATION_TYPE;
+import static org.hibernate.boot.model.internal.AuditHelper.TRANSACTION_END;
+import static org.hibernate.boot.model.internal.AuditHelper.TRANSACTION_END_TIMESTAMP;
+import static org.hibernate.boot.model.internal.AuditHelper.TRANSACTION_ID;
 import static org.hibernate.metamodel.mapping.internal.MappingModelCreationHelper.getTableIdentifierExpression;
 import static org.hibernate.persister.state.internal.AbstractStateManagement.resolveMutationTarget;
 
@@ -62,7 +59,6 @@ import static org.hibernate.persister.state.internal.AbstractStateManagement.res
  * entities and collections.
  *
  * @author Gavin King
- *
  * @since 7.4
  */
 public class AuditStateManagement implements StateManagement {
@@ -155,7 +151,7 @@ public class AuditStateManagement implements StateManagement {
 		}
 		final var aep = (AbstractEntityPersister) persister;
 		final var tableAuditInfoMap = buildTableAuditInfoMap( rootClass, aep, creationProcess );
-		return new AuditMappingImpl( tableAuditInfoMap, creationProcess );
+		return new AuditMappingImpl( tableAuditInfoMap, persister, creationProcess );
 	}
 
 	private static Map<String, AuditMappingImpl.TableAuditInfo> buildTableAuditInfoMap(
@@ -335,11 +331,9 @@ public class AuditStateManagement implements StateManagement {
 		final var txIdJdbcMapping = resolveJdbcMapping( typeConfiguration,
 				sessionFactory.getTransactionIdentifierService().getIdentifierType() );
 		final var modTypeJdbcMapping = resolveJdbcMapping( typeConfiguration, ModificationType.class );
-		return new AuditMappingImpl(
-				Map.of( originalTableName, createTableAuditInfo(
-						auditTableName, bootDescriptor,
-						txIdJdbcMapping, modTypeJdbcMapping, creationProcess ) ),
-				creationProcess );
+		return new AuditMappingImpl( Map.of( originalTableName,
+				createTableAuditInfo( auditTableName, bootDescriptor, txIdJdbcMapping, modTypeJdbcMapping,
+						creationProcess ) ), null, creationProcess );
 	}
 
 }

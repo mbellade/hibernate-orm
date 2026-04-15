@@ -126,13 +126,14 @@ projections, joins, and aggregations.
   `@RevisionEntity`, `@RevisionNumber`, `@RevisionTimestamp`
 
 | `org.hibernate.audit.internal`
-| Internal: `AuditLogImpl`, `AuditFindPlan`, `AuditColumnFunction`
+| Internal: `AuditLogImpl`, `AuditEntityLoaderImpl`, `AuditColumnFunction`
 
 | `org.hibernate.audit.legacy`
 | Legacy bridge: `AuditReader` (deprecated interface extending `AuditLog`), `AuditReaderFactory`
 
 | `org.hibernate.audit.spi`
-| SPI: `RevisionEntitySupplier` (revision entity persistence + ID return),
+| SPI: `AuditEntityLoader` (pluggable audit entity loading),
+  `RevisionEntitySupplier` (revision entity persistence + ID return),
   `RevisionEntityDescriptor` (detected `@RevisionEntity` metadata),
   `AuditWorkQueue` (transaction-scoped deferred audit writes)
 
@@ -162,8 +163,11 @@ provides a clean boundary.
 | `org.hibernate.audit.internal.AuditLogImpl`
 | Session-scoped implementation (HQL + pre-built SQL AST)
 
-| `org.hibernate.audit.internal.AuditFindPlan`
-| Pre-built SQL AST load plan for `AuditLog.find()`
+| `org.hibernate.audit.spi.AuditEntityLoader`
+| SPI for pluggable audit entity loading
+
+| `org.hibernate.audit.internal.AuditEntityLoaderImpl`
+| Standard implementation: pre-built SQL AST load plan with MAX subquery
 
 | `org.hibernate.audit.internal.AuditColumnFunction`
 | `transactionId()` and `modificationType()` HQL functions
@@ -525,7 +529,7 @@ provides a clean boundary.
 | G18
 | **Pre-built SQL AST for `getHistory()`**
 | Medium
-| `AuditLog.find()` uses pre-built SQL AST via `AuditFindPlan` (zero HQL parsing).
+| `AuditLog.find()` uses pre-built SQL AST via `AuditEntityLoaderImpl` (zero HQL parsing).
   `getHistory()` still uses HQL because building a multi-entity `DomainResult`
   (audit entity + revision entity join) within a single `LoaderSqlAstCreationState`
   causes SQL selection position mismatches when the revision entity's `DomainResult`
@@ -625,9 +629,9 @@ Users can also use the metadata methods directly with `atTransaction` sessions f
 
 Current API surface:
 
-* `find(Class/String, Object id, Object txId)` -- entity snapshot at transaction (pre-built SQL AST via `AuditFindPlan`)
-* `find(Class/String, Object id, Object txId, boolean includeDeletions)` -- optionally include DEL snapshots
-* `find(Class/String, Object id, Instant)` -- find by timestamp (requires `@RevisionEntity`)
+* `find(Class, Object id, Object txId)` -- entity snapshot at or before transaction (MAX subquery, pre-built SQL AST via `AuditEntityLoaderImpl`)
+* `find(Class, Object id, Object txId, boolean includeDeletions)` -- optionally include DEL snapshots
+* `find(Class, Object id, Instant)` -- find by timestamp (requires `@RevisionEntity`)
 * `getRevisions(Class, Object id)` -- list all transaction IDs where entity was modified
 * `getModificationType(Class, Object id, Object txId)` -- ADD/MOD/DEL for entity at transaction
 * `getEntitiesModifiedAt(Class, Object txId)` -- entity IDs modified at transaction
@@ -731,14 +735,20 @@ automatically when the parent session closes (via `ParentSessionObserver`).
 `AuditLog.ALL_REVISIONS` is the canonical sentinel (public API in `org.hibernate.audit.AuditLog`);
 `LoadQueryInfluencers` references it -- no longer defines its own constant.
 
-==== Pre-built SQL AST (AuditFindPlan)
+==== Pre-built SQL AST (AuditEntityLoaderImpl)
 
-`AuditLog.find()` uses pre-built SQL AST via `AuditFindPlan` -- zero HQL parsing at runtime.
-The plan is built once per entity (lazily on first access, cached in `InternalCache<String, AuditFindPlan>`):
+`AuditLog.find()` uses pre-built SQL AST via `AuditEntityLoaderImpl` -- zero HQL parsing at runtime.
+The plan is built once per entity at boot time (eagerly during `EntityPersister.prepareLoaders()`,
+stored on `AuditMappingImpl`):
 
 1. `LoaderSelectBuilder.createSelect()` builds the base `SelectStatement` with `ALL_REVISIONS` temporal influencer
-2. Audit predicates are added: `REV = ?` (exact match) and optional `REVTYPE <> DEL`
-3. The statement is translated to `JdbcSelect` twice (with/without REVTYPE filter)
+2. `AuditMapping.createRestriction()` adds the MAX subquery predicate:
+   `REV = (SELECT MAX(REV) ... WHERE REV <= ?)` (most recent revision at or before the given transaction)
+3. The statement is translated to `JdbcSelect` twice: once without REVTYPE filter (for `includeDeletions`),
+   once with `REVTYPE <> DEL` added (for the default case)
+
+This matches envers' behavior: `find(cls, id, rev)` returns the entity as it was at revision `rev`,
+even if the entity was not modified at exactly that revision.
 
 JOINED inheritance table resolution follows the same pattern as `AuditColumnFunction.convertToSqlAst()`:
 `getMappedTableDetails().getTableName()` for REV (entity's own table),
@@ -757,7 +767,7 @@ JOINED inheritance table resolution follows the same pattern as `AuditColumnFunc
 * [x] Audited associations in point-in-time + all-revisions modes
 * [x] Correlated temporal predicate for join-fetched associations in all-revisions mode
 * [x] Lazy to-one proxy with captured revision (`AbstractLazyInitializer.temporalIdentifier`)
-* [x] Pre-built SQL AST for `find()` via `AuditFindPlan` (zero HQL parsing)
+* [x] Pre-built SQL AST for `find()` via `AuditEntityLoader` SPI + `AuditEntityLoaderImpl` (MAX subquery, zero HQL parsing)
 * [x] `AuditColumnFunction` return type: `modificationType()` returns `ModificationType` enum directly
 * [x] `AuditMappingImpl` modification type mapping uses proper enum JDBC type
 * [x] Session-scoped `AuditLog` -- moved from `SessionFactory` to `SharedSessionContract`
@@ -1236,7 +1246,7 @@ link:envers-migration-guide.adoc#not-audited-target-behavior[migration guide].
    `AuditLog.getHistory()` includes all modification types.
 
 5. **`AuditLog` query implementation -- hybrid approach**: `find()` uses pre-built SQL AST via
-   `AuditFindPlan` (zero HQL parsing, per-entity cached). Other queries use HQL
+   `AuditEntityLoaderImpl` (zero HQL parsing, per-entity cached). Other queries use HQL
    (the `QueryInterpretationCache` handles caching per unique HQL string). Revision entity queries
    are always HQL (singleton entity, one cached plan per method, negligible overhead).
 

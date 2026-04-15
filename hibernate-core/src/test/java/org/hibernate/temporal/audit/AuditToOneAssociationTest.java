@@ -258,6 +258,87 @@ class AuditToOneAssociationTest {
 	}
 
 	@Test
+	void testManyToOneJoinFetchPointInTime(SessionFactoryScope scope) {
+		currentTxId = 1500;
+
+		scope.getSessionFactory().inTransaction( session -> {
+			var author = new Author( 150L, "PIT-JF Author V1" );
+			session.persist( author );
+			session.persist( new Book( 150L, "PIT-JF Book", author ) );
+		} );
+
+		scope.getSessionFactory().inTransaction( session -> {
+			session.find( Author.class, 150L ).setName( "PIT-JF Author V2" );
+			session.find( Book.class, 150L ).setTitle( "PIT-JF Book v2" );
+		} );
+
+		// Point-in-time join fetch: should get the author's state at that revision
+		try ( var session = scope.getSessionFactory().withOptions()
+				.atTransaction( 1501 ).openSession() ) {
+			final var book = session.createSelectionQuery(
+					"from Book e join fetch e.author where e.id = :id",
+					Book.class
+			).setParameter( "id", 150L ).getSingleResult();
+
+			assertEquals( "PIT-JF Book", book.getTitle() );
+			assertEquals( "PIT-JF Author V1", book.getAuthor().getName() );
+		}
+
+		try ( var session = scope.getSessionFactory().withOptions()
+				.atTransaction( 1502 ).openSession() ) {
+			final var book = session.createSelectionQuery(
+					"from Book e join fetch e.author where e.id = :id",
+					Book.class
+			).setParameter( "id", 150L ).getSingleResult();
+
+			assertEquals( "PIT-JF Book v2", book.getTitle() );
+			assertEquals( "PIT-JF Author V2", book.getAuthor().getName() );
+		}
+	}
+
+	@Test
+	void testExplicitEntityJoinPointInTime(SessionFactoryScope scope) {
+		currentTxId = 1600;
+
+		scope.getSessionFactory().inTransaction( session -> {
+			var author = new Author( 160L, "EJ Author V1" );
+			session.persist( author );
+			session.persist( new Book( 160L, "EJ Book", author ) );
+		} );
+
+		scope.getSessionFactory().inTransaction( session ->
+			session.find( Author.class, 160L ).setName( "EJ Author V2" )
+		);
+
+		// Explicit entity join (not fetch join) — hits consumeEntityJoin path
+		try ( var session = scope.getSessionFactory().withOptions()
+				.atTransaction( 1601 ).openSession() ) {
+			final var rows = session.createSelectionQuery(
+					"select b, a from Book b join Author a on a.id = b.author.id"
+					+ " where b.id = :id",
+					Object[].class
+			).setParameter( "id", 160L ).getResultList();
+
+			assertEquals( 1, rows.size() );
+			assertEquals( "EJ Book", ((Book) rows.get( 0 )[0]).getTitle() );
+			assertEquals( "EJ Author V1", ((Author) rows.get( 0 )[1]).getName() );
+		}
+
+		try ( var session = scope.getSessionFactory().withOptions()
+				.atTransaction( 1602 ).openSession() ) {
+			final var rows = session.createSelectionQuery(
+					"select b, a from Book b join Author a on a.id = b.author.id"
+					+ " where b.id = :id",
+					Object[].class
+			).setParameter( "id", 160L ).getResultList();
+
+			assertEquals( 1, rows.size() );
+			assertEquals( "EJ Book", ((Book) rows.get( 0 )[0]).getTitle() );
+			assertEquals( "EJ Author V2", ((Author) rows.get( 0 )[1]).getName() );
+		}
+	}
+
+	@Test
 	void testNestedJoinFetchAllRevisions(SessionFactoryScope scope) {
 		currentTxId = 600;
 

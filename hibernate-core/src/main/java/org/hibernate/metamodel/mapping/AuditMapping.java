@@ -6,14 +6,20 @@ package org.hibernate.metamodel.mapping;
 
 import org.checkerframework.checker.nullness.qual.Nullable;
 import org.hibernate.Incubating;
+import org.hibernate.audit.spi.AuditEntityLoader;
+import org.hibernate.sql.ast.spi.SqlAliasBaseGenerator;
+import org.hibernate.sql.ast.tree.expression.Expression;
+import org.hibernate.sql.ast.tree.from.TableGroupProducer;
+import org.hibernate.sql.ast.tree.from.TableReference;
+import org.hibernate.sql.ast.tree.predicate.Predicate;
+
+import java.util.List;
 
 /**
  * Metadata about audit log tables for entities and collections enabled for audit logging.
  *
- * @see org.hibernate.annotations.Audited
- *
  * @author Gavin King
- *
+ * @see org.hibernate.annotations.Audited
  * @since 7.4
  */
 @Incubating
@@ -28,7 +34,8 @@ public interface AuditMapping extends AuxiliaryMapping {
 	 * Get the modification type selectable mapping for the given original table,
 	 * or {@code null} if the table does not carry a modification type column.
 	 */
-	@Nullable SelectableMapping getModificationTypeMapping(String originalTableName);
+	@Nullable
+	SelectableMapping getModificationTypeMapping(String originalTableName);
 
 	/**
 	 * Get the transaction end selectable mapping for the given original table,
@@ -36,7 +43,8 @@ public interface AuditMapping extends AuxiliaryMapping {
 	 *
 	 * @since envers-rewrite
 	 */
-	@Nullable SelectableMapping getTransactionEndMapping(String originalTableName);
+	@Nullable
+	SelectableMapping getTransactionEndMapping(String originalTableName);
 
 	/**
 	 * Get the transaction end timestamp selectable mapping for the given original table,
@@ -44,15 +52,29 @@ public interface AuditMapping extends AuxiliaryMapping {
 	 *
 	 * @since envers-rewrite
 	 */
-	@Nullable SelectableMapping getTransactionEndTimestampMapping(String originalTableName);
+	@Nullable
+	SelectableMapping getTransactionEndTimestampMapping(String originalTableName);
 
 	/**
 	 * Get the entity loader for single-entity audit queries.
-	 * The loader is lazily built on first access and cached
-	 * for reuse across {@link org.hibernate.audit.AuditLog} instances.
 	 */
-	org.hibernate.audit.spi.AuditEntityLoader getEntityLoader(
-			EntityMappingType entityMappingType,
-			org.hibernate.engine.spi.SessionFactoryImplementor sessionFactory);
+	AuditEntityLoader getEntityLoader();
 
+	/**
+	 * Build the temporal restriction predicate for the given table
+	 * with an explicit upper bound expression.
+	 * <p>
+	 * Used by {@link org.hibernate.audit.spi.AuditEntityLoader}
+	 * implementations to build audit-specific load plans.
+	 *
+	 * @param includeDeletions if {@code true}, omit the {@code REVTYPE <> DEL} filter
+	 */
+	Predicate createRestriction(
+			TableGroupProducer tableGroupProducer,
+			TableReference tableReference,
+			List<SelectableMapping> keySelectables,
+			SqlAliasBaseGenerator sqlAliasBaseGenerator,
+			String originalTableName,
+			Expression upperBound,
+			boolean includeDeletions);
 }

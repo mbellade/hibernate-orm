@@ -375,6 +375,29 @@ class AuditLogTest {
 	}
 
 	@Test
+	@Order(16)
+	void testFindAtRevisionWhereEntityNotModified(SessionFactoryScope scope) {
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			// Entity 2 was NOT modified at revDelete (only entity 1 was deleted),
+			// but it was last modified at revUpdate. find() should return the
+			// most recent snapshot at or before the given revision.
+			final var entity2 = auditLog.find( AuditedEntity.class, 2L, revDelete );
+			assertNotNull( entity2 );
+			assertEquals( "second-updated", entity2.name );
+
+			// Entity 1 was NOT modified at revUpdate (only entity 2 was updated),
+			// but it was last modified at revCreate2.
+			final var entity1 = auditLog.find( AuditedEntity.class, 1L, revUpdate );
+			assertNotNull( entity1 );
+			assertEquals( "first-updated", entity1.name );
+
+			// Entity 2 did not exist at revCreate1 — should return null
+			final var notYet = auditLog.find( AuditedEntity.class, 2L, revCreate1 );
+			assertNull( notYet );
+		}
+	}
+
+	@Test
 	@Order(17)
 	void testFindEntitiesModifiedAtSingleEntity(SessionFactoryScope scope) {
 		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {

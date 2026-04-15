@@ -15,10 +15,8 @@ import org.hibernate.engine.spi.SharedSessionContractImplementor;
  * <p>
  * The default implementation uses a pre-built SQL AST load plan.
  *
- * @see org.hibernate.metamodel.mapping.AuditMapping#getEntityLoader()
- *
  * @author Marco Belladelli
- *
+ * @see org.hibernate.metamodel.mapping.AuditMapping#getEntityLoader
  * @since envers-rewrite
  */
 @Incubating
@@ -33,6 +31,5 @@ public interface AuditEntityLoader {
 	 * @param session the session to use for loading
 	 * @return the entity instance, or {@code null}
 	 */
-	<T> T find(Object id, Object transactionId, boolean includeDeletions,
-			SharedSessionContractImplementor session);
+	<T> T find(Object id, Object transactionId, boolean includeDeletions, SharedSessionContractImplementor session);
 }

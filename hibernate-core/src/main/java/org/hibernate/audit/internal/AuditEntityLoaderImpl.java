@@ -31,9 +31,9 @@ import org.hibernate.sql.exec.spi.JdbcSelect;
 import org.hibernate.sql.results.internal.RowTransformerStandardImpl;
 import org.hibernate.sql.results.spi.ListResultsConsumer;
 
+import java.util.ArrayList;
 import java.util.List;
 
-import static org.hibernate.query.sqm.ComparisonOperator.EQUAL;
 import static org.hibernate.query.sqm.ComparisonOperator.NOT_EQUAL;
 
 /**
@@ -42,14 +42,14 @@ import static org.hibernate.query.sqm.ComparisonOperator.NOT_EQUAL;
  * Two {@link JdbcSelect} variants are built at construction time:
  * one excluding deletions ({@code REVTYPE <> DEL}), one including all.
  */
-public class AuditFindPlan implements AuditEntityLoader {
+public class AuditEntityLoaderImpl implements AuditEntityLoader {
 	private final EntityMappingType entityMappingType;
 	private final SelectableMapping revMapping;
 	private final JdbcParametersList jdbcParams;
 	private final JdbcSelect excludingDeletions;
 	private final JdbcSelect includingDeletions;
 
-	public AuditFindPlan(EntityMappingType entityMappingType, SessionFactoryImplementor sessionFactory) {
+	public AuditEntityLoaderImpl(EntityMappingType entityMappingType, SessionFactoryImplementor sessionFactory) {
 		this.entityMappingType = entityMappingType;
 
 		final var auditMapping = entityMappingType.getAuditMapping();
@@ -58,14 +58,13 @@ public class AuditFindPlan implements AuditEntityLoader {
 		this.revMapping = auditMapping.getTransactionIdMapping( revTableName );
 		final var revTypeMapping = auditMapping.getModificationTypeMapping( revTypeTableName );
 
-		// todo (envers-rewrite) : uses exact REV = ? match, but envers used
-		//  MAX(REV) WHERE REV <= ? (most recent revision at or before txId).
-		//  Need to build the same MAX subquery restriction but with an explicit
-		//  parameter instead of TemporalJdbcParameter (which reads from session).
-		// Build SQL AST once: SELECT ... WHERE id = ? AND REV = ?
+		// Build SQL AST: SELECT ... WHERE id = ? AND REV = (SELECT MAX(REV) ... WHERE REV <= ?)
+		// Uses ALL_REVISIONS so LoaderSelectBuilder doesn't add its own temporal restriction,
+		// then applies the audit mapping's restriction with our own JDBC parameter.
 		final var influencers = new LoadQueryInfluencers( sessionFactory );
 		influencers.setTemporalIdentifier( AuditLog.ALL_REVISIONS );
 		final var paramsBuilder = JdbcParametersList.newBuilder();
+		final var sqlAliasBaseManager = new SqlAliasBaseManager();
 		final var sqlAst = LoaderSelectBuilder.createSelect(
 				entityMappingType,
 				null,
@@ -75,19 +74,28 @@ public class AuditFindPlan implements AuditEntityLoader {
 				influencers,
 				LockOptions.NONE,
 				paramsBuilder::add,
-				new SqlAliasBaseManager(),
+				sqlAliasBaseManager,
 				sessionFactory
 		);
 		final var querySpec = sqlAst.getQueryPart().getFirstQuerySpec();
 		final var rootTableGroup = querySpec.getFromClause().getRoots().get( 0 );
 		final var navPath = rootTableGroup.getNavigablePath();
 		final var revTableRef = rootTableGroup.resolveTableReference( navPath, revTableName );
+
+		// Build MAX(REV) WHERE REV <= ? restriction without REVTYPE filter
 		final var revParam = new SqlTypedMappingJdbcParameter( revMapping );
 		paramsBuilder.add( revParam );
-		querySpec.applyPredicate( new ComparisonPredicate(
-				new ColumnReference( revTableRef, revMapping ),
-				EQUAL,
-				revParam
+		final var keySelectables = new ArrayList<SelectableMapping>();
+		entityMappingType.getIdentifierMapping()
+				.forEachSelectable( (index, mapping) -> keySelectables.add( mapping ) );
+		querySpec.applyPredicate( auditMapping.createRestriction(
+				entityMappingType,
+				revTableRef,
+				keySelectables,
+				sqlAliasBaseManager,
+				revTableName,
+				revParam,
+				true // includeDeletions: no REVTYPE filter
 		) );
 
 		// Translate once: including deletions (no REVTYPE filter)
@@ -108,7 +116,10 @@ public class AuditFindPlan implements AuditEntityLoader {
 	}
 
 	@Override
-	public <T> T find(Object id, Object transactionId, boolean includeDeletions,
+	public <T> T find(
+			Object id,
+			Object transactionId,
+			boolean includeDeletions,
 			SharedSessionContractImplementor session) {
 		final var select = includeDeletions ? includingDeletions : excludingDeletions;
 		return execute( select, id, transactionId, session );
@@ -123,7 +134,10 @@ public class AuditFindPlan implements AuditEntityLoader {
 
 	// --- execution ---
 
-	private <T> T execute(JdbcSelect select, Object id, Object transactionId,
+	private <T> T execute(
+			JdbcSelect select,
+			Object id,
+			Object transactionId,
 			SharedSessionContractImplementor session) {
 		final var bindings = new JdbcParameterBindingsImpl( jdbcParams.size() );
 		int offset = bindings.registerParametersForEachJdbcValue(

@@ -130,7 +130,7 @@ class AuditExcludedPropertyTest {
 	@Test
 	@Order(1)
 	void testAuditTableHasNoExcludedColumns(SessionFactoryScope scope) {
-		// Read audit data via AuditLog.find (uses AuditFindPlan / LoaderSelectBuilder)
+		// Read audit data via AuditLog.find (uses AuditEntityLoader / LoaderSelectBuilder)
 		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			final var entity = auditLog.find( MyEntity.class, 1L, revCreate );
 			assertNotNull( entity );

@@ -5,7 +5,6 @@
 package org.hibernate.audit.internal;
 
 import org.checkerframework.checker.nullness.qual.Nullable;
-import org.hibernate.Session;
 import org.hibernate.audit.AuditEntry;
 import org.hibernate.audit.AuditException;
 import org.hibernate.audit.AuditLog;
@@ -43,7 +42,7 @@ import static java.util.Objects.requireNonNull;
  */
 public class AuditLogImpl implements AuditReader {
 	private final SessionFactoryImplementor sessionFactory;
-	private final Session auditSession;
+	private final SharedSessionContractImplementor auditSession;
 	private final @Nullable RevisionEntitySupplier<?> revisionEntitySupplier;
 	private final @Nullable String revisionEntityName;
 	private final @Nullable String revisionNumberProperty;
@@ -56,7 +55,7 @@ public class AuditLogImpl implements AuditReader {
 	 *        temporal context for reading audit tables
 	 */
 	public AuditLogImpl(SharedSessionContractImplementor auditSession) {
-		this.auditSession = (Session) auditSession;
+		this.auditSession = auditSession;
 		this.sessionFactory = auditSession.getSessionFactory();
 		final var supplier = RevisionEntitySupplier.resolve( sessionFactory.getServiceRegistry() );
 		if ( supplier != null ) {
@@ -130,15 +129,13 @@ public class AuditLogImpl implements AuditReader {
 		return doFind( requireAuditedEntityName( entityClass ), id, transactionId, includeDeletions );
 	}
 
-	private <T> T doFind(String entityName, Object id,
-						Object transactionId, boolean includeDeletions) {
+	private <T> T doFind(String entityName, Object id, Object transactionId, boolean includeDeletions) {
 		requireNonNull( id, "Primary key" );
 		requireNonNull( transactionId, "Transaction identifier" );
 		final var persister = sessionFactory.getMappingMetamodel().getEntityDescriptor( entityName );
 		return persister.getAuditMapping()
-				.getEntityLoader( persister, sessionFactory )
-				.find( id, transactionId, includeDeletions,
-						(SharedSessionContractImplementor) auditSession );
+				.getEntityLoader()
+				.find( id, transactionId, includeDeletions, auditSession );
 	}
 
 	@Override
@@ -238,7 +235,7 @@ public class AuditLogImpl implements AuditReader {
 			hql = "select e, r, modificationType(e)"
 				+ " from " + entityName + " e"
 				+ " join " + revisionEntityName + " r"
-				+ " on r.id = transactionId(e)"
+				+ " on r." + revisionNumberProperty + " = transactionId(e)"
 				+ " where e.id = :id"
 				+ " order by transactionId(e)";
 		}
@@ -321,7 +318,7 @@ public class AuditLogImpl implements AuditReader {
 		return auditSession.createSelectionQuery(
 				"select element(r." + modifiedEntityNamesProperty + ")"
 				+ " from " + revisionEntityName + " r"
-				+ " where r.id = :txId",
+				+ " where r." + revisionNumberProperty + " = :txId",
 				String.class
 		).setParameter( "txId", transactionId ).getResultList();
 	}
@@ -366,7 +363,7 @@ public class AuditLogImpl implements AuditReader {
 	public <T> T findRevision(Object transactionId) {
 		requireRevisionEntity();
 		final var result = auditSession.createSelectionQuery(
-				"from " + revisionEntityName + " where id = :rev",
+				"from " + revisionEntityName + " where " + revisionNumberProperty + " = :rev",
 				Object.class
 		).setParameter( "rev", transactionId ).getSingleResultOrNull();
 		if ( result == null ) {
@@ -380,13 +377,16 @@ public class AuditLogImpl implements AuditReader {
 	public <T> Map<Object, T> findRevisions(Set<?> transactionIds) {
 		requireRevisionEntity();
 		final var results = auditSession.createSelectionQuery(
-				"from " + revisionEntityName + " where id in :revs order by id",
-				Object.class
+				"select r." + revisionNumberProperty + ", r"
+				+ " from " + revisionEntityName + " r"
+				+ " where r." + revisionNumberProperty + " in :revs"
+				+ " order by r." + revisionNumberProperty,
+				Object[].class
 		).setParameter( "revs", transactionIds ).getResultList();
 		final Map<Object, T> map = new LinkedHashMap<>();
-		for ( var rev : results ) {
-			final var id = auditSession.getIdentifier( rev );
-			map.put( id, (T) rev );
+		for ( var row : results ) {
+			//noinspection unchecked
+			map.put( row[0], (T) row[1] );
 		}
 		return map;
 	}
