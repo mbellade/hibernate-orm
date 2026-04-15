@@ -10,6 +10,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.Audited;
+import org.hibernate.audit.AuditLogFactory;
 import org.hibernate.audit.RevisionEntity;
 import org.hibernate.audit.RevisionNumber;
 import org.hibernate.audit.RevisionTimestamp;
@@ -82,8 +83,7 @@ class RevisionEntityAnnotationTest {
 		} );
 
 		// Verify revision entity was auto-configured
-		scope.getSessionFactory().inTransaction( session -> {
-			final var auditLog = session.getAuditLog();
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			final var revisions = auditLog.getRevisions( Book.class, 1L );
 			assertEquals( 3, revisions.size() );
 
@@ -111,7 +111,7 @@ class RevisionEntityAnnotationTest {
 				final var book = s.find( Book.class, 1L );
 				assertNull( book );
 			}
-		} );
+		}
 	}
 
 	@Test
@@ -123,8 +123,8 @@ class RevisionEntityAnnotationTest {
 			session.persist( book );
 		} );
 
-		scope.inSession( session -> {
-			final var history = session.getAuditLog().getHistory( Book.class, 2L );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			final var history = auditLog.getHistory( Book.class, 2L );
 			assertEquals( 1, history.size() );
 
 			// The revision should be a MyRevisionInfo instance (joined in HQL)
@@ -132,6 +132,6 @@ class RevisionEntityAnnotationTest {
 			assertNotNull( entry.entity() );
 			assertEquals( "History Book", entry.entity().title );
 			assertNotNull( entry.revision() );
-		} );
+		}
 	}
 }

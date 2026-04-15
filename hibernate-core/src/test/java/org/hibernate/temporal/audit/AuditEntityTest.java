@@ -11,6 +11,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Version;
 import org.hibernate.annotations.Audited;
+import org.hibernate.audit.AuditLogFactory;
 import org.hibernate.cfg.StateManagementSettings;
 import org.hibernate.testing.orm.junit.AuditedTest;
 import org.hibernate.testing.orm.junit.DomainModel;
@@ -191,10 +192,10 @@ class AuditEntityTest {
 		}
 
 		// Verify via AuditLog: exactly 2 revisions for this entity
-		scope.getSessionFactory().inSession( session -> {
-			final var revisions = session.getAuditLog().getRevisions( AuditEntity.class, 99L );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			final var revisions = auditLog.getRevisions( AuditEntity.class, 99L );
 			assertEquals( 2, revisions.size() );
-		} );
+		}
 	}
 
 	/**
@@ -215,10 +216,10 @@ class AuditEntityTest {
 		} );
 
 		// Verify: no audit rows exist for this entity
-		scope.getSessionFactory().inSession( session -> {
-			final var revisions = session.getAuditLog().getRevisions( AuditEntity.class, 88L );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			final var revisions = auditLog.getRevisions( AuditEntity.class, 88L );
 			assertEquals( 0, revisions.size() );
-		} );
+		}
 	}
 
 	/**
@@ -239,12 +240,12 @@ class AuditEntityTest {
 		} );
 
 		// Verify: single revision, modification type = ADD, final state
-		scope.getSessionFactory().inSession( session -> {
-			final var history = session.getAuditLog().getHistory( AuditEntity.class, 77L );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			final var history = auditLog.getHistory( AuditEntity.class, 77L );
 			assertEquals( 1, history.size() );
 			assertEquals( org.hibernate.audit.ModificationType.ADD, history.get( 0 ).modificationType() );
 			assertEquals( "after", ( (AuditEntity) history.get( 0 ).entity() ).text );
-		} );
+		}
 	}
 
 	/**
@@ -298,10 +299,10 @@ class AuditEntityTest {
 		} );
 
 		// Verify: no entity audit rows
-		scope.getSessionFactory().inSession( session -> {
-			final var revisions = session.getAuditLog().getRevisions( AuditEntity.class, 55L );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			final var revisions = auditLog.getRevisions( AuditEntity.class, 55L );
 			assertEquals( 0, revisions.size() );
-		} );
+		}
 
 		// Note: orphaned collection audit rows may remain (matching envers behavior).
 		// They are unreachable by any query since the entity has no audit row.

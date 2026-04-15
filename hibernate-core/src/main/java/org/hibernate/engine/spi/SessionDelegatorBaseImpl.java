@@ -115,11 +115,6 @@ public class SessionDelegatorBaseImpl implements SessionImplementor {
 	}
 
 	@Override
-	public org.hibernate.audit.AuditLog getAuditLog() {
-		return delegate.getAuditLog();
-	}
-
-	@Override
 	public AuditWorkQueue getAuditWorkQueue() {
 		return delegate.getAuditWorkQueue();
 	}

@@ -20,19 +20,25 @@ import org.hibernate.Incubating;
  * {@link org.hibernate.SessionBuilder#atTransaction(Object)
  * atTransaction()} sessions.
  * <p>
- * Obtain an instance via
- * {@link org.hibernate.SharedSessionContract#getAuditLog()}.
- * The returned instance is session-scoped: all queries reuse
- * the underlying session, so loaded entities remain managed
- * and support lazy association loading (when using a stateful
- * {@link org.hibernate.Session}).
+ * Obtain an instance via {@link AuditLogFactory#create}.
+ * The instance manages an internal session for audit queries;
+ * close it when done to release the session and its JDBC
+ * connection.
+ *
+ * @see AuditLogFactory
  *
  * @author Marco Belladelli
  *
  * @since envers-rewrite
  */
 @Incubating
-public interface AuditLog {
+public interface AuditLog extends AutoCloseable {
+
+	/**
+	 * Close this audit log and release its internal session.
+	 */
+	@Override
+	void close();
 	/**
 	 * A special transaction identifier that selects all
 	 * revisions from the audit table without filtering.

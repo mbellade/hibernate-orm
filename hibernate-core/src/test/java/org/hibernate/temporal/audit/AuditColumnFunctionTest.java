@@ -9,6 +9,7 @@ import jakarta.persistence.Id;
 import org.hibernate.annotations.Audited;
 import org.hibernate.audit.AuditEntry;
 import org.hibernate.audit.AuditLog;
+import org.hibernate.audit.AuditLogFactory;
 import org.hibernate.audit.ModificationType;
 import org.hibernate.cfg.StateManagementSettings;
 import org.hibernate.SharedSessionContract;
@@ -153,8 +154,8 @@ class AuditColumnFunctionTest {
 			session.remove( book );
 		} );
 
-		scope.inSession( session -> {
-			var history = session.getAuditLog().getHistory( Book.class, 2L );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			var history = auditLog.getHistory( Book.class, 2L );
 
 			assertEquals( 3, history.size() );
 
@@ -175,7 +176,7 @@ class AuditColumnFunctionTest {
 			// Each entity should be a distinct instance
 			assertTrue( add.entity() != mod.entity() );
 			assertTrue( mod.entity() != del.entity() );
-		} );
+		}
 	}
 
 	@Audited

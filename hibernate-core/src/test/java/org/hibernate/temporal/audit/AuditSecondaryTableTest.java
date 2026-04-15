@@ -12,6 +12,7 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.SecondaryTable;
 import org.hibernate.SharedSessionContract;
 import org.hibernate.annotations.Audited;
+import org.hibernate.audit.AuditLogFactory;
 import org.hibernate.audit.ModificationType;
 import org.hibernate.cfg.StateManagementSettings;
 import org.hibernate.temporal.spi.TransactionIdentifierSupplier;
@@ -118,8 +119,8 @@ class AuditSecondaryTableTest {
 			session.remove( session.find( Employee.class, 10L ) )
 		);
 
-		scope.inSession( session -> {
-			var history = session.getAuditLog().getHistory( Employee.class, 10L );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			var history = auditLog.getHistory( Employee.class, 10L );
 			assertEquals( 3, history.size() );
 
 			assertEquals( ModificationType.ADD, history.get( 0 ).modificationType() );
@@ -130,7 +131,7 @@ class AuditSecondaryTableTest {
 			assertEquals( "200 Second Ave", history.get( 1 ).entity().address );
 
 			assertEquals( ModificationType.DEL, history.get( 2 ).modificationType() );
-		} );
+		}
 	}
 
 	@Test
@@ -172,8 +173,8 @@ class AuditSecondaryTableTest {
 			assertNull( s.get( Employee.class, 20L ).department );
 		}
 
-		scope.inSession( session -> {
-			var history = session.getAuditLog().getHistory( Employee.class, 20L );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			var history = auditLog.getHistory( Employee.class, 20L );
 			assertEquals( 3, history.size() );
 
 			assertEquals( "Engineering",
@@ -181,7 +182,7 @@ class AuditSecondaryTableTest {
 			assertEquals( "Marketing",
 					history.get( 1 ).entity().department.name );
 			assertNull( history.get( 2 ).entity().department );
-		} );
+		}
 	}
 
 	@Test
@@ -203,13 +204,13 @@ class AuditSecondaryTableTest {
 			session.find( Employee.class, 30L ).phone = "555-0100"
 		);
 
-		scope.inSession( session -> {
-			var revisions = session.getAuditLog().getRevisions( Employee.class, 30L );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			var revisions = auditLog.getRevisions( Employee.class, 30L );
 			assertEquals( 3, revisions.size() );
 			assertEquals( 301, revisions.get( 0 ) );
 			assertEquals( 302, revisions.get( 1 ) );
 			assertEquals( 303, revisions.get( 2 ) );
-		} );
+		}
 	}
 
 	@Entity(name = "Employee")

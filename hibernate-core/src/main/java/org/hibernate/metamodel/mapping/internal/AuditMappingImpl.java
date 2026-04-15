@@ -19,6 +19,8 @@ import org.hibernate.metamodel.mapping.JdbcMapping;
 import org.hibernate.metamodel.mapping.PluralAttributeMapping;
 import org.hibernate.metamodel.mapping.SelectableMapping;
 import org.hibernate.audit.ModificationType;
+import org.hibernate.audit.internal.AuditFindPlan;
+import org.hibernate.audit.spi.AuditEntityLoader;
 import org.hibernate.query.sqm.function.AbstractSqmSelfRenderingFunctionDescriptor;
 import org.hibernate.query.sqm.function.FunctionRenderer;
 import org.hibernate.query.sqm.function.SelfRenderingAggregateFunctionSqlAstExpression;
@@ -92,6 +94,8 @@ public class AuditMappingImpl implements AuditMapping {
 	private final String currentTimestampFunctionName;
 	private final FunctionRenderer maxFunctionDescriptor;
 
+	private volatile AuditEntityLoader entityLoader;
+
 	public AuditMappingImpl(
 			Map<String, TableAuditInfo> tableAuditInfoMap,
 			MappingModelCreationProcess creationProcess) {
@@ -122,6 +126,16 @@ public class AuditMappingImpl implements AuditMapping {
 							+ "' (known tables: " + tableAuditInfoMap.keySet() + ")" );
 		}
 		return info;
+	}
+
+	@Override
+	public AuditEntityLoader getEntityLoader(
+			EntityMappingType entityMappingType,
+			SessionFactoryImplementor sessionFactory) {
+		if ( entityLoader == null ) {
+			entityLoader = new AuditFindPlan( entityMappingType, sessionFactory );
+		}
+		return entityLoader;
 	}
 
 	@Override

@@ -7,6 +7,7 @@ package org.hibernate.temporal.audit;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import org.hibernate.annotations.Audited;
+import org.hibernate.audit.AuditLogFactory;
 import org.hibernate.audit.DefaultRevisionEntity;
 import org.hibernate.testing.orm.junit.DomainModel;
 import org.hibernate.testing.orm.junit.AuditedTest;
@@ -67,7 +68,7 @@ class DefaultRevisionEntityTest {
 
 		// Verify REVINFO rows for this test (book id=1)
 		scope.getSessionFactory().inTransaction( session -> {
-			final var auditLog = session.getAuditLog();
+			final var auditLog = AuditLogFactory.create( session );
 			final var revisionIds = auditLog.getRevisions( Book.class, 1L );
 			assertEquals( 3, revisionIds.size() );
 
@@ -131,8 +132,8 @@ class DefaultRevisionEntityTest {
 		} );
 
 		// getHistory() should return DefaultRevisionEntity instances as the revision member
-		scope.inSession( session -> {
-			var history = session.getAuditLog().getHistory( Book.class, 2L );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			var history = auditLog.getHistory( Book.class, 2L );
 
 			assertEquals( 2, history.size() );
 
@@ -148,7 +149,7 @@ class DefaultRevisionEntityTest {
 			var rev2 = (DefaultRevisionEntity) entry2.revision();
 			assertTrue( rev2.getId() > rev1.getId(),
 					"Revisions should be sequential: rev1=" + rev1.getId() + ", rev2=" + rev2.getId() );
-		} );
+		}
 	}
 
 }

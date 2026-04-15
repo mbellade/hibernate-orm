@@ -11,6 +11,7 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToOne;
 import org.hibernate.annotations.Audited;
 import org.hibernate.audit.AuditLog;
+import org.hibernate.audit.AuditLogFactory;
 import org.hibernate.audit.ModificationType;
 import org.hibernate.cfg.StateManagementSettings;
 import org.hibernate.SharedSessionContract;
@@ -72,10 +73,9 @@ class AuditToOneAssociationTest {
 			session.find( Book.class, 1L ).setAuthor( null )
 		);
 
-		scope.inSession( session ->
-			assertEquals( 3, session.getAuditLog()
-					.getRevisions( Book.class, 1L ).size() )
-		);
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			assertEquals( 3, auditLog.getRevisions( Book.class, 1L ).size() );
+		}
 	}
 
 	@Test
@@ -180,8 +180,8 @@ class AuditToOneAssociationTest {
 			session.find( Book.class, 20L ).setTitle( "History Book v2" );
 		} );
 
-		scope.inSession( session -> {
-			var history = session.getAuditLog().getHistory( Book.class, 20L );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			var history = auditLog.getHistory( Book.class, 20L );
 			assertEquals( 2, history.size() );
 
 			assertEquals( ModificationType.ADD, history.get( 0 ).modificationType() );
@@ -191,7 +191,7 @@ class AuditToOneAssociationTest {
 			assertEquals( ModificationType.MOD, history.get( 1 ).modificationType() );
 			assertEquals( "History Book v2", history.get( 1 ).entity().getTitle() );
 			assertEquals( "Author V2", history.get( 1 ).entity().getAuthor().getName() );
-		} );
+		}
 	}
 
 	@Test
@@ -212,8 +212,8 @@ class AuditToOneAssociationTest {
 			session.find( Book.class, 80L ).setTitle( "Hist Book v2" );
 		} );
 
-		scope.inSession( session -> {
-			var history = session.getAuditLog().getHistory( Book.class, 80L );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			var history = auditLog.getHistory( Book.class, 80L );
 			assertEquals( 2, history.size() );
 
 			assertEquals( "Hist Book", history.get( 0 ).entity().getTitle() );
@@ -223,7 +223,7 @@ class AuditToOneAssociationTest {
 			assertEquals( "Hist Book v2", history.get( 1 ).entity().getTitle() );
 			assertEquals( "Hist Author V2", history.get( 1 ).entity().getAuthor().getName() );
 			assertEquals( "Hist Pub V2", history.get( 1 ).entity().getAuthor().getPublisher().getName() );
-		} );
+		}
 	}
 
 	@Test
@@ -380,8 +380,8 @@ class AuditToOneAssociationTest {
 			session.find( Book.class, 100L ).setAuthor( null )
 		);
 
-		scope.inSession( session -> {
-			var history = session.getAuditLog().getHistory( Book.class, 100L );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			var history = auditLog.getHistory( Book.class, 100L );
 			assertEquals( 3, history.size(), "All 3 revisions should be present" );
 
 			// REV 1: no author
@@ -396,7 +396,7 @@ class AuditToOneAssociationTest {
 			// REV 3: author cleared
 			assertEquals( ModificationType.MOD, history.get( 2 ).modificationType() );
 			assertNull( history.get( 2 ).entity().getAuthor(), "Author should be null at REV 3" );
-		} );
+		}
 	}
 
 	@Test
@@ -457,8 +457,9 @@ class AuditToOneAssociationTest {
 
 		scope.inTransaction( session -> session.find( Person.class, 120L ).passport = null );
 
-		scope.inSession( session ->
-				assertEquals( 3, session.getAuditLog().getRevisions( Person.class, 120L ).size() ) );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			assertEquals( 3, auditLog.getRevisions( Person.class, 120L ).size() );
+		}
 	}
 
 	@Test
@@ -515,12 +516,12 @@ class AuditToOneAssociationTest {
 			session.find( Person.class, 140L ).passport = passport2;
 		} );
 
-		scope.inSession( session -> {
-			var history = session.getAuditLog().getHistory( Person.class, 140L );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			var history = auditLog.getHistory( Person.class, 140L );
 			assertEquals( 2, history.size() );
 			assertEquals( "AB123", history.get( 0 ).entity().passport.number );
 			assertEquals( "CD456", history.get( 1 ).entity().passport.number );
-		} );
+		}
 	}
 
 	// ---- Entity classes ----

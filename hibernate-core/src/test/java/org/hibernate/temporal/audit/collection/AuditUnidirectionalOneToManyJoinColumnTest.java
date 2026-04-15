@@ -9,6 +9,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.OneToMany;
 import org.hibernate.annotations.Audited;
+import org.hibernate.audit.AuditLogFactory;
 import org.hibernate.cfg.StateManagementSettings;
 import org.hibernate.SharedSessionContract;
 import org.hibernate.temporal.spi.TransactionIdentifierSupplier;
@@ -81,8 +82,7 @@ class AuditUnidirectionalOneToManyJoinColumnTest {
 			session.remove( dept );
 		} );
 
-		scope.inSession( session -> {
-			var auditLog = session.getAuditLog();
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			// Department: REV 1 (ADD) + REV 2 (collection change) + REV 3 (collection change) + REV 4 (DEL)
 			var deptRevs = auditLog.getRevisions( Department.class, 1L );
 			assertEquals( 4, deptRevs.size(),
@@ -93,7 +93,7 @@ class AuditUnidirectionalOneToManyJoinColumnTest {
 					"Employee 1 should have 1 revision (ADD only)" );
 			assertEquals( 1, auditLog.getRevisions( Employee.class, 2L ).size(),
 					"Employee 2 should have 1 revision (ADD only)" );
-		} );
+		}
 	}
 
 	@Test
@@ -179,12 +179,12 @@ class AuditUnidirectionalOneToManyJoinColumnTest {
 			session.remove( dept );
 		} );
 
-		scope.inSession( session -> {
-			var history = session.getAuditLog().getHistory( Department.class, 20L );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			var history = auditLog.getHistory( Department.class, 20L );
 			// Department: ADD + MOD (collection change) + DEL = 3 revisions
 			assertEquals( 3, history.size(), "Department should have 3 history entries" );
 			assertEquals( "Hist Engineering", history.get( 0 ).entity().name );
-		} );
+		}
 	}
 
 	/**
@@ -217,10 +217,10 @@ class AuditUnidirectionalOneToManyJoinColumnTest {
 		} );
 
 		// Department: ADD + recreate = 2 revisions (not more)
-		scope.inSession( session -> {
-			assertEquals( 2, session.getAuditLog().getRevisions( Department.class, 30L ).size(),
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			assertEquals( 2, auditLog.getRevisions( Department.class, 30L ).size(),
 					"Department should have exactly 2 revisions (ADD + recreate)" );
-		} );
+		}
 
 		// At REV 1: 2 employees
 		try ( var s = scope.getSessionFactory().withOptions()
@@ -261,14 +261,13 @@ class AuditUnidirectionalOneToManyJoinColumnTest {
 		} );
 
 		// Employee should have 2 revisions (ADD + MOD)
-		scope.inSession( session -> {
-			var auditLog = session.getAuditLog();
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			assertEquals( 2, auditLog.getRevisions( Employee.class, 40L ).size(),
 					"Employee should have 2 revisions (ADD + property update)" );
 			// Department: only 1 revision (initial persist) — no collection change
 			assertEquals( 1, auditLog.getRevisions( Department.class, 40L ).size(),
 					"Department should still have 1 revision" );
-		} );
+		}
 
 		// Point-in-time: employee name should reflect the update
 		try ( var s = scope.getSessionFactory().withOptions()

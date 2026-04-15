@@ -9,6 +9,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinTable;
 import jakarta.persistence.OneToMany;
 import org.hibernate.annotations.Audited;
+import org.hibernate.audit.AuditLogFactory;
 import org.hibernate.cfg.StateManagementSettings;
 import org.hibernate.SharedSessionContract;
 import org.hibernate.temporal.spi.TransactionIdentifierSupplier;
@@ -81,14 +82,13 @@ class AuditUnidirectionalOneToManyJoinTableTest {
 			session.remove( team );
 		} );
 
-		scope.inSession( session -> {
-			var auditLog = session.getAuditLog();
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			// Team: ADD + 2 collection changes + DEL = 4 revisions
 			assertEquals( 4, auditLog.getRevisions( Team.class, 1L ).size(),
 					"Team should have 4 revisions (ADD + 2 collection changes + DEL)" );
 			assertEquals( 1, auditLog.getRevisions( Player.class, 1L ).size() );
 			assertEquals( 1, auditLog.getRevisions( Player.class, 2L ).size() );
-		} );
+		}
 	}
 
 	@Test
@@ -174,10 +174,10 @@ class AuditUnidirectionalOneToManyJoinTableTest {
 		} );
 
 		// Team: ADD + recreate = 2 revisions (not more)
-		scope.inSession( session -> {
-			assertEquals( 2, session.getAuditLog().getRevisions( Team.class, 30L ).size(),
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			assertEquals( 2, auditLog.getRevisions( Team.class, 30L ).size(),
 					"Team should have exactly 2 revisions (ADD + recreate)" );
-		} );
+		}
 
 		// At REV 1: 2 players
 		try ( var s = scope.getSessionFactory().withOptions()
@@ -216,11 +216,11 @@ class AuditUnidirectionalOneToManyJoinTableTest {
 			session.find( Team.class, 20L ).players.add( player );
 		} );
 
-		scope.inSession( session -> {
-			var history = session.getAuditLog().getHistory( Team.class, 20L );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			var history = auditLog.getHistory( Team.class, 20L );
 			assertEquals( 2, history.size(), "Team has ADD + MOD (collection change)" );
 			assertEquals( "Hist Team", history.get( 0 ).entity().name );
-		} );
+		}
 	}
 
 	// ---- Entity classes ----

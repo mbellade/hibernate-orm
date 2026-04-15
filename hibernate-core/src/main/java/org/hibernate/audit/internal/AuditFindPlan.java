@@ -7,6 +7,7 @@ package org.hibernate.audit.internal;
 import org.hibernate.LockOptions;
 import org.hibernate.audit.AuditLog;
 import org.hibernate.audit.ModificationType;
+import org.hibernate.audit.spi.AuditEntityLoader;
 import org.hibernate.engine.spi.LoadQueryInfluencers;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.hibernate.engine.spi.SharedSessionContractImplementor;
@@ -41,14 +42,14 @@ import static org.hibernate.query.sqm.ComparisonOperator.NOT_EQUAL;
  * Two {@link JdbcSelect} variants are built at construction time:
  * one excluding deletions ({@code REVTYPE <> DEL}), one including all.
  */
-class AuditFindPlan {
+public class AuditFindPlan implements AuditEntityLoader {
 	private final EntityMappingType entityMappingType;
 	private final SelectableMapping revMapping;
 	private final JdbcParametersList jdbcParams;
 	private final JdbcSelect excludingDeletions;
 	private final JdbcSelect includingDeletions;
 
-	AuditFindPlan(EntityMappingType entityMappingType, SessionFactoryImplementor sessionFactory) {
+	public AuditFindPlan(EntityMappingType entityMappingType, SessionFactoryImplementor sessionFactory) {
 		this.entityMappingType = entityMappingType;
 
 		final var auditMapping = entityMappingType.getAuditMapping();
@@ -57,6 +58,10 @@ class AuditFindPlan {
 		this.revMapping = auditMapping.getTransactionIdMapping( revTableName );
 		final var revTypeMapping = auditMapping.getModificationTypeMapping( revTypeTableName );
 
+		// todo (envers-rewrite) : uses exact REV = ? match, but envers used
+		//  MAX(REV) WHERE REV <= ? (most recent revision at or before txId).
+		//  Need to build the same MAX subquery restriction but with an explicit
+		//  parameter instead of TemporalJdbcParameter (which reads from session).
 		// Build SQL AST once: SELECT ... WHERE id = ? AND REV = ?
 		final var influencers = new LoadQueryInfluencers( sessionFactory );
 		influencers.setTemporalIdentifier( AuditLog.ALL_REVISIONS );
@@ -102,7 +107,8 @@ class AuditFindPlan {
 		this.excludingDeletions = translate( sqlAst, sessionFactory );
 	}
 
-	<T> T find(Object id, Object transactionId, boolean includeDeletions,
+	@Override
+	public <T> T find(Object id, Object transactionId, boolean includeDeletions,
 			SharedSessionContractImplementor session) {
 		final var select = includeDeletions ? includingDeletions : excludingDeletions;
 		return execute( select, id, transactionId, session );

@@ -7,15 +7,15 @@ package org.hibernate.audit.legacy;
 import jakarta.persistence.EntityManager;
 import org.hibernate.Incubating;
 import org.hibernate.Session;
-import org.hibernate.SharedSessionContract;
+import org.hibernate.audit.AuditLogFactory;
 
 /**
  * Legacy compatibility factory mirroring
  * {@code org.hibernate.envers.AuditReaderFactory}.
  * <p>
- * Migrate to {@code session.getAuditLog()} instead.
+ * Migrate to {@link AuditLogFactory} instead.
  *
- * @deprecated Use {@link SharedSessionContract#getAuditLog()}
+ * @deprecated Use {@link AuditLogFactory}
  */
 @Incubating
 @Deprecated(forRemoval = true)
@@ -27,17 +27,17 @@ public final class AuditReaderFactory {
 	 * Create an {@link AuditReader} for the given session.
 	 *
 	 * @param session the Hibernate session
-	 * @return the audit reader
+	 * @return the audit reader (must be closed by the caller)
 	 */
 	public static AuditReader get(Session session) {
-		return (AuditReader) session.getAuditLog();
+		return (AuditReader) AuditLogFactory.create( session );
 	}
 
 	/**
 	 * Create an {@link AuditReader} for the given entity manager.
 	 *
 	 * @param entityManager the JPA entity manager
-	 * @return the audit reader
+	 * @return the audit reader (must be closed by the caller)
 	 */
 	public static AuditReader get(EntityManager entityManager) {
 		return get( entityManager.unwrap( Session.class ) );

@@ -14,8 +14,6 @@ import org.hibernate.audit.legacy.AuditReader;
 import org.hibernate.audit.spi.RevisionEntitySupplier;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.hibernate.engine.spi.SharedSessionContractImplementor;
-import org.hibernate.internal.util.cache.InternalCache;
-import org.hibernate.internal.util.cache.InternalCacheFactory;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -28,7 +26,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static java.util.Objects.requireNonNull;
 
@@ -37,20 +34,16 @@ import static java.util.Objects.requireNonNull;
  * audit tables using HQL with {@code transactionId()} and
  * {@code modificationType()} functions.
  * <p>
- * Obtained via {@link org.hibernate.SharedSessionContract#getAuditLog()}.
- * Queries run on a child session (via
- * {@link org.hibernate.SharedSessionContract#sessionWithOptions()})
- * that shares the parent session's JDBC connection but has an
- * isolated persistence context, so audit snapshots don't pollute
- * the parent session's cache. The child session is created lazily
- * and closed automatically when the parent session closes.
+ * Obtained via {@link org.hibernate.audit.AuditLogFactory#create}.
+ * Uses an internal session with {@code ALL_REVISIONS} temporal
+ * context for querying audit tables.
  *
  * @author Marco Belladelli
  * @since envers-rewrite
  */
 public class AuditLogImpl implements AuditReader {
 	private final SessionFactoryImplementor sessionFactory;
-	private final SharedSessionContractImplementor session;
+	private final Session auditSession;
 	private final @Nullable RevisionEntitySupplier<?> revisionEntitySupplier;
 	private final @Nullable String revisionEntityName;
 	private final @Nullable String revisionNumberProperty;
@@ -59,27 +52,12 @@ public class AuditLogImpl implements AuditReader {
 	private final @Nullable Class<?> timestampFieldType;
 
 	/**
-	 * Lazily initialized child session used for all-revisions queries.
-	 * Shares the parent session's connection and is closed automatically
-	 * when the parent session closes (via {@code ParentSessionObserver}).
+	 * @param auditSession a session configured with {@link AuditLog#ALL_REVISIONS}
+	 *        temporal context for reading audit tables
 	 */
-	private @Nullable Session allRevisionsSession;
-
-	private final InternalCache<String, AuditFindPlan> findPlanCache;
-
-	public AuditLogImpl(SharedSessionContractImplementor session) {
-		this.session = session; // todo (envers-rewrite) : we could move this back to be SF-scoped
-		this.sessionFactory = session.getSessionFactory();
-		final var auditedCount = new AtomicInteger();
-		sessionFactory.getMappingMetamodel().forEachEntityDescriptor( p -> {
-			if ( p.getAuditMapping() != null ) {
-				auditedCount.incrementAndGet();
-			}
-		} );
-		final var cacheFactory = sessionFactory.getServiceRegistry()
-				.requireService( InternalCacheFactory.class );
-		final int cacheSize = Math.max( auditedCount.get(), 16 );
-		this.findPlanCache = cacheFactory.createInternalCache( cacheSize );
+	public AuditLogImpl(SharedSessionContractImplementor auditSession) {
+		this.auditSession = (Session) auditSession;
+		this.sessionFactory = auditSession.getSessionFactory();
 		final var supplier = RevisionEntitySupplier.resolve( sessionFactory.getServiceRegistry() );
 		if ( supplier != null ) {
 			this.revisionEntitySupplier = supplier;
@@ -104,15 +82,12 @@ public class AuditLogImpl implements AuditReader {
 		}
 	}
 
-	// todo (envers-rewrite) : we should really try to cache the query plans to avoid the overhead of interpreting the HQL at runtime
-	//  (where we can, ideally for all the equivalent operations as the old AuditReader API)
-
 	@Override
 	public List<Object> getRevisions(Class<?> entityClass, Object id) {
 		requireNonNull( entityClass, "Entity class" );
 		requireNonNull( id, "Primary key" );
 		final var entityName = requireAuditedEntityName( entityClass );
-		return allRevisionsSession().createSelectionQuery(
+		return auditSession.createSelectionQuery(
 				"select transactionId(e) from " + entityName + " e"
 				+ " where e.id = :id"
 				+ " order by transactionId(e)",
@@ -126,7 +101,7 @@ public class AuditLogImpl implements AuditReader {
 		requireNonNull( id, "Primary key" );
 		requireNonNull( transactionId, "Transaction identifier" );
 		final var entityName = requireAuditedEntityName( entityClass );
-		return allRevisionsSession().createSelectionQuery(
+		return auditSession.createSelectionQuery(
 						"select modificationType(e) from " + entityName + " e"
 						+ " where e.id = :id"
 						+ " and transactionId(e) = :txId",
@@ -159,15 +134,11 @@ public class AuditLogImpl implements AuditReader {
 						Object transactionId, boolean includeDeletions) {
 		requireNonNull( id, "Primary key" );
 		requireNonNull( transactionId, "Transaction identifier" );
-		final var plan = findPlanCache.computeIfAbsent(
-				entityName,
-				name -> new AuditFindPlan(
-						sessionFactory.getMappingMetamodel().getEntityDescriptor( name ),
-						sessionFactory
-				)
-		);
-		return plan.find( id, transactionId, includeDeletions,
-				(SharedSessionContractImplementor) allRevisionsSession() );
+		final var persister = sessionFactory.getMappingMetamodel().getEntityDescriptor( entityName );
+		return persister.getAuditMapping()
+				.getEntityLoader( persister, sessionFactory )
+				.find( id, transactionId, includeDeletions,
+						(SharedSessionContractImplementor) auditSession );
 	}
 
 	@Override
@@ -225,7 +196,7 @@ public class AuditLogImpl implements AuditReader {
 		if ( modificationType != null ) {
 			hql += " and modificationType(e) = :modType";
 		}
-		final var query = allRevisionsSession()
+		final var query = auditSession
 				.createSelectionQuery( hql, resultType )
 				.setParameter( "txId", transactionId );
 		if ( modificationType != null ) {
@@ -242,7 +213,7 @@ public class AuditLogImpl implements AuditReader {
 		for ( ModificationType mt : values ) {
 			result.put( mt, new ArrayList<>() );
 		}
-		final List<Object[]> rows = allRevisionsSession().createSelectionQuery(
+		final List<Object[]> rows = auditSession.createSelectionQuery(
 				"select e, modificationType(e) from " + entityName + " e"
 				+ " where transactionId(e) = :txId",
 				Object[].class
@@ -278,7 +249,7 @@ public class AuditLogImpl implements AuditReader {
 				+ " order by transactionId(e)";
 		}
 
-		final List<Object[]> rows = allRevisionsSession()
+		final List<Object[]> rows = auditSession
 				.createSelectionQuery( hql, Object[].class )
 				.setParameter( "id", id ).getResultList();
 
@@ -347,7 +318,7 @@ public class AuditLogImpl implements AuditReader {
 	}
 
 	private List<String> queryRevChangesEntityNames(Object transactionId) {
-		return allRevisionsSession().createSelectionQuery(
+		return auditSession.createSelectionQuery(
 				"select element(r." + modifiedEntityNamesProperty + ")"
 				+ " from " + revisionEntityName + " r"
 				+ " where r.id = :txId",
@@ -374,7 +345,7 @@ public class AuditLogImpl implements AuditReader {
 		final String hql = "select e." + revisionTimestampProperty
 						+ " from " + revisionEntityName + " e"
 						+ " where e." + revisionNumberProperty + " = :rev";
-		final var result = allRevisionsSession()
+		final var result = auditSession
 				.createSelectionQuery( hql, Object.class )
 				.setParameter( "rev", transactionId )
 				.getSingleResultOrNull();
@@ -394,7 +365,7 @@ public class AuditLogImpl implements AuditReader {
 	@SuppressWarnings("unchecked")
 	public <T> T findRevision(Object transactionId) {
 		requireRevisionEntity();
-		final var result = allRevisionsSession().createSelectionQuery(
+		final var result = auditSession.createSelectionQuery(
 				"from " + revisionEntityName + " where id = :rev",
 				Object.class
 		).setParameter( "rev", transactionId ).getSingleResultOrNull();
@@ -408,13 +379,13 @@ public class AuditLogImpl implements AuditReader {
 	@SuppressWarnings("unchecked")
 	public <T> Map<Object, T> findRevisions(Set<?> transactionIds) {
 		requireRevisionEntity();
-		final var results = allRevisionsSession().createSelectionQuery(
+		final var results = auditSession.createSelectionQuery(
 				"from " + revisionEntityName + " where id in :revs order by id",
 				Object.class
 		).setParameter( "revs", transactionIds ).getResultList();
 		final Map<Object, T> map = new LinkedHashMap<>();
 		for ( var rev : results ) {
-			final var id = allRevisionsSession().getIdentifier( rev );
+			final var id = auditSession.getIdentifier( rev );
 			map.put( id, (T) rev );
 		}
 		return map;
@@ -427,7 +398,7 @@ public class AuditLogImpl implements AuditReader {
 		final String hql = "select max(e." + revisionNumberProperty + ")"
 						+ " from " + revisionEntityName + " e"
 						+ " where e." + revisionTimestampProperty + " <= :ts";
-		final var result = allRevisionsSession()
+		final var result = auditSession
 				.createSelectionQuery( hql, Object.class )
 				.setParameter( "ts", timestampValue )
 				.getSingleResultOrNull();
@@ -467,20 +438,11 @@ public class AuditLogImpl implements AuditReader {
 		}
 	}
 
-	/**
-	 * Returns the lazily-initialized child session for
-	 * {@link AuditLog#ALL_REVISIONS} queries. The child session
-	 * shares the parent's JDBC connection and is closed
-	 * automatically when the parent session closes.
-	 */
-	private Session allRevisionsSession() {
-		if ( allRevisionsSession == null ) {
-			allRevisionsSession = session.sessionWithOptions()
-					.connection()
-					.atTransaction( ALL_REVISIONS )
-					.open();
+	@Override
+	public void close() {
+		if ( auditSession.isOpen() ) {
+			auditSession.close();
 		}
-		return allRevisionsSession;
 	}
 
 	private String requireAuditedEntityName(Class<?> entityClass) {

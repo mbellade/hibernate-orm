@@ -14,6 +14,7 @@ import jakarta.persistence.OneToMany;
 import jakarta.persistence.OneToOne;
 import org.hibernate.annotations.Audited;
 import org.hibernate.audit.AuditLog;
+import org.hibernate.audit.AuditLogFactory;
 import org.hibernate.audit.ModificationType;
 import org.hibernate.cfg.StateManagementSettings;
 import org.hibernate.SharedSessionContract;
@@ -104,10 +105,9 @@ class AuditTargetNotAuditedTest {
 
 	@Test
 	void testManyToOneWriteSide(SessionFactoryScope scope) {
-		scope.inSession( session ->
-			assertEquals( 3, session.getAuditLog()
-					.getRevisions( Product.class, 1L ).size() )
-		);
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			assertEquals( 3, auditLog.getRevisions( Product.class, 1L ).size() );
+		}
 	}
 
 	@Test
@@ -194,8 +194,8 @@ class AuditTargetNotAuditedTest {
 
 	@Test
 	void testManyToOneGetHistory(SessionFactoryScope scope) {
-		scope.inSession( session -> {
-			var history = session.getAuditLog().getHistory( Product.class, 1L );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			var history = auditLog.getHistory( Product.class, 1L );
 			assertEquals( 3, history.size() );
 
 			assertEquals( ModificationType.ADD, history.get( 0 ).modificationType() );
@@ -206,7 +206,7 @@ class AuditTargetNotAuditedTest {
 
 			assertEquals( ModificationType.MOD, history.get( 2 ).modificationType() );
 			assertNull( history.get( 2 ).entity().category );
-		} );
+		}
 	}
 
 	@Test
@@ -264,12 +264,12 @@ class AuditTargetNotAuditedTest {
 		}
 
 		// History
-		scope.inSession( session -> {
-			var history = session.getAuditLog().getHistory( Item.class, 1L );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			var history = auditLog.getHistory( Item.class, 1L );
 			assertEquals( 2, history.size() );
 			assertNotNull( history.get( 0 ).entity().store );
 			assertNotNull( history.get( 1 ).entity().store );
-		} );
+		}
 	}
 
 	// ---- @ManyToMany to non-audited ----
@@ -299,10 +299,9 @@ class AuditTargetNotAuditedTest {
 		} );
 
 		// Verify audit rows for the entity
-		scope.inSession( session ->
-			assertEquals( 3, session.getAuditLog()
-					.getRevisions( Product.class, 10L ).size() )
-		);
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			assertEquals( 3, auditLog.getRevisions( Product.class, 10L ).size() );
+		}
 
 		// Point-in-time: tags should be loaded from current table
 		try ( var s = scope.getSessionFactory().withOptions()
@@ -334,10 +333,9 @@ class AuditTargetNotAuditedTest {
 		} );
 
 		// Verify audit rows for the entity
-		scope.inSession( session ->
-			assertEquals( 2, session.getAuditLog()
-					.getRevisions( Product.class, 20L ).size() )
-		);
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			assertEquals( 2, auditLog.getRevisions( Product.class, 20L ).size() );
+		}
 
 		// Point-in-time
 		try ( var s = scope.getSessionFactory().withOptions()

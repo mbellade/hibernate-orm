@@ -23,8 +23,7 @@ import org.hibernate.audit.AuditLog;
  * supported in core auditing. Unsupported methods throw
  * {@link UnsupportedOperationException} with migration hints.
  * <p>
- * Obtain an instance via {@link AuditReaderFactory#get} or
- * directly via {@code session.getAuditLog()}.
+ * Obtain an instance via {@link AuditReaderFactory#get}.
  *
  * @deprecated Use {@link AuditLog}
  */

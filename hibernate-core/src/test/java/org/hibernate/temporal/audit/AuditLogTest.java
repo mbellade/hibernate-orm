@@ -8,6 +8,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import org.hibernate.annotations.Audited;
 import org.hibernate.audit.AuditLog;
+import org.hibernate.audit.AuditLogFactory;
 import org.hibernate.audit.ModificationType;
 import org.hibernate.cfg.StateManagementSettings;
 import org.hibernate.testing.orm.junit.DomainModel;
@@ -131,11 +132,10 @@ class AuditLogTest {
 	@Test
 	@Order(1)
 	void testIsAudited(SessionFactoryScope scope) {
-		scope.inSession( session -> {
-			final var auditLog = session.getAuditLog();
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			assertTrue( auditLog.isAudited( AuditedEntity.class ) );
 			assertFalse( auditLog.isAudited( NonAuditedEntity.class ) );
-		} );
+		}
 	}
 
 	// --- getRevisions ---
@@ -143,35 +143,35 @@ class AuditLogTest {
 	@Test
 	@Order(2)
 	void testGetRevisionsForEntity1(SessionFactoryScope scope) {
-		scope.inSession( session -> {
-			final var revisions = session.getAuditLog().getRevisions( AuditedEntity.class, 1L );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			final var revisions = auditLog.getRevisions( AuditedEntity.class, 1L );
 
 			// Entity 1 was: created (rev1), updated (rev2), deleted (rev4)
 			assertEquals( 3, revisions.size() );
 			assertEquals( revCreate1, revisions.get( 0 ) );
 			assertEquals( revCreate2, revisions.get( 1 ) );
 			assertEquals( revDelete, revisions.get( 2 ) );
-		} );
+		}
 	}
 
 	@Test
 	@Order(3)
 	void testGetRevisionsForEntity2(SessionFactoryScope scope) {
-		scope.inSession( session -> {
-			final var revisions = session.getAuditLog().getRevisions( AuditedEntity.class, 2L );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			final var revisions = auditLog.getRevisions( AuditedEntity.class, 2L );
 
 			// Entity 2 was: created (rev2), updated (rev3)
 			assertEquals( 2, revisions.size() );
 			assertEquals( revCreate2, revisions.get( 0 ) );
 			assertEquals( revUpdate, revisions.get( 1 ) );
-		} );
+		}
 	}
 
 	@Test
 	@Order(4)
 	void testGetRevisionsChronologicalOrder(SessionFactoryScope scope) {
-		scope.inSession( session -> {
-			final var revisions = session.getAuditLog().getRevisions( AuditedEntity.class, 1L );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			final var revisions = auditLog.getRevisions( AuditedEntity.class, 1L );
 
 			// Should be in ascending order
 			for ( int i = 1; i < revisions.size(); i++ ) {
@@ -180,16 +180,16 @@ class AuditLogTest {
 						"Revisions should be in ascending order"
 				);
 			}
-		} );
+		}
 	}
 
 	@Test
 	@Order(5)
 	void testGetRevisionsForNonExistentEntity(SessionFactoryScope scope) {
-		scope.inSession( session -> {
-			final var revisions = session.getAuditLog().getRevisions( AuditedEntity.class, 999L );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			final var revisions = auditLog.getRevisions( AuditedEntity.class, 999L );
 			assertTrue( revisions.isEmpty() );
-		} );
+		}
 	}
 
 	// --- getModificationType ---
@@ -197,52 +197,50 @@ class AuditLogTest {
 	@Test
 	@Order(6)
 	void testGetModificationTypeAdd(SessionFactoryScope scope) {
-		scope.inSession( session -> {
-			final var auditLog = session.getAuditLog();
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			assertEquals( ModificationType.ADD,
 					auditLog.getModificationType( AuditedEntity.class, 1L, revCreate1 ) );
 			assertEquals( ModificationType.ADD,
 					auditLog.getModificationType( AuditedEntity.class, 2L, revCreate2 ) );
-		} );
+		}
 	}
 
 	@Test
 	@Order(7)
 	void testGetModificationTypeMod(SessionFactoryScope scope) {
-		scope.inSession( session -> {
-			final var auditLog = session.getAuditLog();
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			// Entity 1 was also updated in rev2
 			assertEquals( ModificationType.MOD,
 					auditLog.getModificationType( AuditedEntity.class, 1L, revCreate2 ) );
 			assertEquals( ModificationType.MOD,
 					auditLog.getModificationType( AuditedEntity.class, 2L, revUpdate ) );
-		} );
+		}
 	}
 
 	@Test
 	@Order(8)
 	void testGetModificationTypeDel(SessionFactoryScope scope) {
-		scope.inSession( session -> {
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			assertEquals( ModificationType.DEL,
-					session.getAuditLog().getModificationType( AuditedEntity.class, 1L, revDelete ) );
-		} );
+					auditLog.getModificationType( AuditedEntity.class, 1L, revDelete ) );
+		}
 	}
 
 	@Test
 	@Order(9)
 	void testGetModificationTypeReturnsNullForUnmodified(SessionFactoryScope scope) {
-		scope.inSession( session -> {
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			// Entity 2 was not modified at rev1
-			assertNull( session.getAuditLog().getModificationType( AuditedEntity.class, 2L, revCreate1 ) );
-		} );
+			assertNull( auditLog.getModificationType( AuditedEntity.class, 2L, revCreate1 ) );
+		}
 	}
 
 	@Test
 	@Order(10)
 	void testGetModificationTypeReturnsNullForNonExistentEntity(SessionFactoryScope scope) {
-		scope.inSession( session -> {
-			assertNull( session.getAuditLog().getModificationType( AuditedEntity.class, 999L, revCreate1 ) );
-		} );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			assertNull( auditLog.getModificationType( AuditedEntity.class, 999L, revCreate1 ) );
+		}
 	}
 
 	// --- findEntitiesModifiedAt with ModificationType ---
@@ -250,9 +248,7 @@ class AuditLogTest {
 	@Test
 	@Order(11)
 	void testFindEntitiesModifiedAtWithModificationType(SessionFactoryScope scope) {
-		scope.inSession( session -> {
-			final var auditLog = session.getAuditLog();
-
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			// Rev 1: entity 1 was ADD
 			final var adds = auditLog.findEntitiesModifiedAt( AuditedEntity.class, revCreate1, ModificationType.ADD );
 			assertEquals( 1, adds.size() );
@@ -261,17 +257,16 @@ class AuditLogTest {
 			// No MODs or DELs in rev 1
 			assertTrue( auditLog.findEntitiesModifiedAt( AuditedEntity.class, revCreate1, ModificationType.MOD ).isEmpty() );
 			assertTrue( auditLog.findEntitiesModifiedAt( AuditedEntity.class, revCreate1, ModificationType.DEL ).isEmpty() );
-		} );
+		}
 	}
 
 	@Test
 	@Order(12)
 	void testFindEntitiesModifiedAtWithDelType(SessionFactoryScope scope) {
-		scope.inSession( session -> {
-			final var dels = session.getAuditLog()
-					.findEntitiesModifiedAt( AuditedEntity.class, revDelete, ModificationType.DEL );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			final var dels = auditLog.findEntitiesModifiedAt( AuditedEntity.class, revDelete, ModificationType.DEL );
 			assertEquals( 1, dels.size() );
-		} );
+		}
 	}
 
 	// --- findEntitiesGroupedByModificationType ---
@@ -279,16 +274,15 @@ class AuditLogTest {
 	@Test
 	@Order(13)
 	void testFindEntitiesGroupedByModificationType(SessionFactoryScope scope) {
-		scope.inSession( session -> {
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			// Rev 2: entity 1 was MOD, entity 2 was ADD
-			final var grouped = session.getAuditLog()
-					.findEntitiesGroupedByModificationType( AuditedEntity.class, revCreate2 );
+			final var grouped = auditLog.findEntitiesGroupedByModificationType( AuditedEntity.class, revCreate2 );
 			assertEquals( 1, grouped.get( ModificationType.ADD ).size() );
 			assertEquals( "second", grouped.get( ModificationType.ADD ).get( 0 ).name );
 			assertEquals( 1, grouped.get( ModificationType.MOD ).size() );
 			assertEquals( "first-updated", grouped.get( ModificationType.MOD ).get( 0 ).name );
 			assertTrue( grouped.get( ModificationType.DEL ).isEmpty() );
-		} );
+		}
 	}
 
 	// --- empty revisions ---
@@ -296,9 +290,7 @@ class AuditLogTest {
 	@Test
 	@Order(14)
 	void testNoEmptyRevisionsForNonAuditedChanges(SessionFactoryScope scope) {
-		scope.inSession( session -> {
-			final var auditLog = session.getAuditLog();
-
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			// The non-audited entity was persisted in a separate transaction
 			// but should NOT have created any audit rows
 			final var revisions1 = auditLog.getRevisions( AuditedEntity.class, 1L );
@@ -312,7 +304,7 @@ class AuditLogTest {
 			for ( var rev : revisions2 ) {
 				assertTrue( ((Number) rev).intValue() <= revUpdate );
 			}
-		} );
+		}
 	}
 
 	// --- atTransaction + AuditLog combined ---
@@ -320,8 +312,7 @@ class AuditLogTest {
 	@Test
 	@Order(15)
 	void testAuditLogWithAtTransactionReads(SessionFactoryScope scope) {
-		scope.inSession( session -> {
-			final var auditLog = session.getAuditLog();
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			final var sf = scope.getSessionFactory();
 
 			// Use AuditLog to get revisions, then read entity state via atTransaction
@@ -353,7 +344,7 @@ class AuditLogTest {
 				final var entity = s.find( AuditedEntity.class, 1L );
 				assertNull( entity );
 			}
-		} );
+		}
 	}
 
 	// --- convenience methods: find + findEntitiesModifiedAt ---
@@ -361,9 +352,7 @@ class AuditLogTest {
 	@Test
 	@Order(16)
 	void testFindAtRevision(SessionFactoryScope scope) {
-		scope.inSession( session -> {
-			final var auditLog = session.getAuditLog();
-
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			// At revCreate1: entity 1 was just created
 			final var entity1 = auditLog.find( AuditedEntity.class, 1L, revCreate1 );
 			assertNotNull( entity1 );
@@ -382,49 +371,49 @@ class AuditLogTest {
 			// At revDelete: entity 1 was deleted
 			final var deleted = auditLog.find( AuditedEntity.class, 1L, revDelete );
 			assertNull( deleted );
-		} );
+		}
 	}
 
 	@Test
 	@Order(17)
 	void testFindEntitiesModifiedAtSingleEntity(SessionFactoryScope scope) {
-		scope.inSession( session -> {
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			// Rev 1: only entity 1 was created
-			final var modified = session.getAuditLog().findEntitiesModifiedAt( AuditedEntity.class, revCreate1 );
+			final var modified = auditLog.findEntitiesModifiedAt( AuditedEntity.class, revCreate1 );
 			assertEquals( 1, modified.size() );
 			assertEquals( "first", modified.get( 0 ).name );
-		} );
+		}
 	}
 
 	@Test
 	@Order(18)
 	void testFindEntitiesModifiedAtMultipleEntities(SessionFactoryScope scope) {
-		scope.inSession( session -> {
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			// Rev 2: entity 2 created + entity 1 updated = 2 entities
-			final var modified = session.getAuditLog().findEntitiesModifiedAt( AuditedEntity.class, revCreate2 );
+			final var modified = auditLog.findEntitiesModifiedAt( AuditedEntity.class, revCreate2 );
 			assertEquals( 2, modified.size() );
 			final var names = modified.stream().map( e -> e.name ).sorted().toList();
 			assertEquals( List.of( "first-updated", "second" ), names );
-		} );
+		}
 	}
 
 	@Test
 	@Order(19)
 	void testFindEntitiesModifiedAtIncludesDeleted(SessionFactoryScope scope) {
-		scope.inSession( session -> {
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			// Rev 4: entity 1 was deleted — should be included in results
-			final var modified = session.getAuditLog().findEntitiesModifiedAt( AuditedEntity.class, revDelete );
+			final var modified = auditLog.findEntitiesModifiedAt( AuditedEntity.class, revDelete );
 			assertEquals( 1, modified.size() );
-		} );
+		}
 	}
 
 	@Test
 	@Order(20)
 	void testFindEntitiesModifiedAtNoResults(SessionFactoryScope scope) {
-		scope.inSession( session -> {
-			final var modified = session.getAuditLog().findEntitiesModifiedAt( AuditedEntity.class, 999 );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			final var modified = auditLog.findEntitiesModifiedAt( AuditedEntity.class, 999 );
 			assertTrue( modified.isEmpty() );
-		} );
+		}
 	}
 
 	// --- getHistory ---
@@ -432,22 +421,22 @@ class AuditLogTest {
 	@Test
 	@Order(21)
 	void testGetHistoryIncludesAllModificationTypes(SessionFactoryScope scope) {
-		scope.inSession( session -> {
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			// Entity 1: created (rev1), updated (rev2), deleted (rev4)
-			final var history = session.getAuditLog().getHistory( AuditedEntity.class, 1L );
+			final var history = auditLog.getHistory( AuditedEntity.class, 1L );
 			assertEquals( 3, history.size() );
 
 			assertEquals( ModificationType.ADD, history.get( 0 ).modificationType() );
 			assertEquals( ModificationType.MOD, history.get( 1 ).modificationType() );
 			assertEquals( ModificationType.DEL, history.get( 2 ).modificationType() );
-		} );
+		}
 	}
 
 	@Test
 	@Order(22)
 	void testGetHistoryEntityStateAtEachRevision(SessionFactoryScope scope) {
-		scope.inSession( session -> {
-			final var history = session.getAuditLog().getHistory( AuditedEntity.class, 1L );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			final var history = auditLog.getHistory( AuditedEntity.class, 1L );
 
 			// ADD: entity was created with "first"
 			assertEquals( "first", history.get( 0 ).entity().name );
@@ -458,28 +447,28 @@ class AuditLogTest {
 			// DEL: entity snapshot preserves the last state before deletion
 			assertNotNull( history.get( 2 ).entity() );
 			assertEquals( "first-updated", history.get( 2 ).entity().name );
-		} );
+		}
 	}
 
 	@Test
 	@Order(23)
 	void testGetHistoryRevisionValues(SessionFactoryScope scope) {
-		scope.inSession( session -> {
-			final var history = session.getAuditLog().getHistory( AuditedEntity.class, 1L );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			final var history = auditLog.getHistory( AuditedEntity.class, 1L );
 
 			// Without a RevisionEntitySupplier, revision should be the plain txId
 			assertEquals( revCreate1, history.get( 0 ).revision() );
 			assertEquals( revCreate2, history.get( 1 ).revision() );
 			assertEquals( revDelete, history.get( 2 ).revision() );
-		} );
+		}
 	}
 
 	@Test
 	@Order(24)
 	void testGetHistoryForEntityWithNoDeletes(SessionFactoryScope scope) {
-		scope.inSession( session -> {
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			// Entity 2: created (rev2), updated (rev3) — no delete
-			final var history = session.getAuditLog().getHistory( AuditedEntity.class, 2L );
+			final var history = auditLog.getHistory( AuditedEntity.class, 2L );
 			assertEquals( 2, history.size() );
 
 			assertEquals( ModificationType.ADD, history.get( 0 ).modificationType() );
@@ -487,15 +476,15 @@ class AuditLogTest {
 
 			assertEquals( ModificationType.MOD, history.get( 1 ).modificationType() );
 			assertEquals( "second-updated", history.get( 1 ).entity().name );
-		} );
+		}
 	}
 
 	@Test
 	@Order(25)
 	void testGetHistoryForNonExistentEntity(SessionFactoryScope scope) {
-		scope.inSession( session -> {
-			final var history = session.getAuditLog().getHistory( AuditedEntity.class, 999L );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			final var history = auditLog.getHistory( AuditedEntity.class, 999L );
 			assertTrue( history.isEmpty() );
-		} );
+		}
 	}
 }

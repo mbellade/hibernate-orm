@@ -854,11 +854,6 @@ abstract class AbstractSharedSessionContract implements SharedSessionContractImp
 		}
 	}
 
-	@Override
-	public org.hibernate.audit.AuditLog getAuditLog() {
-		return new org.hibernate.audit.internal.AuditLogImpl( this );
-	}
-
 	private AuditWorkQueue auditWorkQueue;
 
 	@Override

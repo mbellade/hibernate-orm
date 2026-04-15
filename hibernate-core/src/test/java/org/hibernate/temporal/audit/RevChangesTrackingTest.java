@@ -16,6 +16,7 @@ import jakarta.persistence.Table;
 import org.hibernate.annotations.Audited;
 import org.hibernate.annotations.Fetch;
 import org.hibernate.annotations.FetchMode;
+import org.hibernate.audit.AuditLogFactory;
 import org.hibernate.audit.ModifiedEntityNames;
 import org.hibernate.audit.ModificationType;
 import org.hibernate.audit.RevisionEntity;
@@ -124,27 +125,27 @@ class RevChangesTrackingTest {
 			author.name = "Gavin King";
 			session.persist( author );
 		} );
-		scope.inSession( session ->
-				rev1 = session.getAuditLog().getRevisions( Book.class, 1L ).get( 0 )
-		);
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			rev1 = auditLog.getRevisions( Book.class, 1L ).get( 0 );
+		}
 
 		// Rev 2: update Book only
 		scope.getSessionFactory().inTransaction( session ->
 				session.find( Book.class, 1L ).title = "Hibernate in Action 2e"
 		);
-		scope.inSession( session -> {
-			final var revisions = session.getAuditLog().getRevisions( Book.class, 1L );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			final var revisions = auditLog.getRevisions( Book.class, 1L );
 			rev2 = revisions.get( revisions.size() - 1 );
-		} );
+		}
 
 		// Rev 3: delete Author only
 		scope.getSessionFactory().inTransaction( session ->
 				session.remove( session.find( Author.class, 1L ) )
 		);
-		scope.inSession( session -> {
-			final var revisions = session.getAuditLog().getRevisions( Author.class, 1L );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			final var revisions = auditLog.getRevisions( Author.class, 1L );
 			rev3 = revisions.get( revisions.size() - 1 );
-		} );
+		}
 	}
 
 	// --- Schema verification ---
@@ -169,24 +170,24 @@ class RevChangesTrackingTest {
 	@Test
 	@Order(2)
 	void testEntityTypesModifiedAtMultiType(SessionFactoryScope scope) {
-		scope.inSession( session -> {
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			// Rev 1: both Book and Author were created
-			final var types = session.getAuditLog().getEntityTypesModifiedAt( rev1 );
+			final var types = auditLog.getEntityTypesModifiedAt( rev1 );
 			assertEquals( 2, types.size() );
 			assertTrue( types.contains( Book.class ) );
 			assertTrue( types.contains( Author.class ) );
-		} );
+		}
 	}
 
 	@Test
 	@Order(3)
 	void testEntityTypesModifiedAtSingleType(SessionFactoryScope scope) {
-		scope.inSession( session -> {
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			// Rev 2: only Book was modified
-			final var types = session.getAuditLog().getEntityTypesModifiedAt( rev2 );
+			final var types = auditLog.getEntityTypesModifiedAt( rev2 );
 			assertEquals( 1, types.size() );
 			assertTrue( types.contains( Book.class ) );
-		} );
+		}
 	}
 
 	// --- findAllEntitiesModifiedAt ---
@@ -194,23 +195,23 @@ class RevChangesTrackingTest {
 	@Test
 	@Order(4)
 	void testFindAllEntitiesModifiedAtMultiType(SessionFactoryScope scope) {
-		scope.inSession( session -> {
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			// Rev 1: both entities created
-			final var entities = session.getAuditLog().findAllEntitiesModifiedAt( rev1 );
+			final var entities = auditLog.findAllEntitiesModifiedAt( rev1 );
 			assertEquals( 2, entities.size() );
-		} );
+		}
 	}
 
 	@Test
 	@Order(5)
 	void testFindAllEntitiesModifiedAtSingleType(SessionFactoryScope scope) {
-		scope.inSession( session -> {
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			// Rev 2: only Book updated
-			final var entities = session.getAuditLog().findAllEntitiesModifiedAt( rev2 );
+			final var entities = auditLog.findAllEntitiesModifiedAt( rev2 );
 			assertEquals( 1, entities.size() );
 			assertTrue( entities.get( 0 ) instanceof Book );
 			assertEquals( "Hibernate in Action 2e", ((Book) entities.get( 0 )).title );
-		} );
+		}
 	}
 
 	// --- findAllEntitiesModifiedAt with ModificationType ---
@@ -218,29 +219,25 @@ class RevChangesTrackingTest {
 	@Test
 	@Order(6)
 	void testFindAllEntitiesModifiedAtWithAddFilter(SessionFactoryScope scope) {
-		scope.inSession( session -> {
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			// Rev 1: both were ADDs
-			final var adds = session.getAuditLog()
-					.findAllEntitiesModifiedAt( rev1, ModificationType.ADD );
+			final var adds = auditLog.findAllEntitiesModifiedAt( rev1, ModificationType.ADD );
 			assertEquals( 2, adds.size() );
 
 			// No MODs or DELs in rev 1
-			assertTrue( session.getAuditLog()
-					.findAllEntitiesModifiedAt( rev1, ModificationType.MOD ).isEmpty() );
-			assertTrue( session.getAuditLog()
-					.findAllEntitiesModifiedAt( rev1, ModificationType.DEL ).isEmpty() );
-		} );
+			assertTrue( auditLog.findAllEntitiesModifiedAt( rev1, ModificationType.MOD ).isEmpty() );
+			assertTrue( auditLog.findAllEntitiesModifiedAt( rev1, ModificationType.DEL ).isEmpty() );
+		}
 	}
 
 	@Test
 	@Order(7)
 	void testFindAllEntitiesModifiedAtWithDelFilter(SessionFactoryScope scope) {
-		scope.inSession( session -> {
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			// Rev 3: Author was deleted
-			final var dels = session.getAuditLog()
-					.findAllEntitiesModifiedAt( rev3, ModificationType.DEL );
+			final var dels = auditLog.findAllEntitiesModifiedAt( rev3, ModificationType.DEL );
 			assertEquals( 1, dels.size() );
-		} );
+		}
 	}
 
 	// --- findAllEntitiesGroupedByModificationType ---
@@ -248,41 +245,38 @@ class RevChangesTrackingTest {
 	@Test
 	@Order(8)
 	void testGroupedByModificationTypeAllAdds(SessionFactoryScope scope) {
-		scope.inSession( session -> {
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			// Rev 1: both entities were ADDs
-			final var grouped = session.getAuditLog()
-					.findAllEntitiesGroupedByModificationType( rev1 );
+			final var grouped = auditLog.findAllEntitiesGroupedByModificationType( rev1 );
 			assertEquals( 2, grouped.get( ModificationType.ADD ).size() );
 			assertTrue( grouped.get( ModificationType.MOD ).isEmpty() );
 			assertTrue( grouped.get( ModificationType.DEL ).isEmpty() );
-		} );
+		}
 	}
 
 	@Test
 	@Order(9)
 	void testGroupedByModificationTypeMod(SessionFactoryScope scope) {
-		scope.inSession( session -> {
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			// Rev 2: Book was MOD
-			final var grouped = session.getAuditLog()
-					.findAllEntitiesGroupedByModificationType( rev2 );
+			final var grouped = auditLog.findAllEntitiesGroupedByModificationType( rev2 );
 			assertTrue( grouped.get( ModificationType.ADD ).isEmpty() );
 			assertEquals( 1, grouped.get( ModificationType.MOD ).size() );
 			assertTrue( grouped.get( ModificationType.MOD ).get( 0 ) instanceof Book );
 			assertTrue( grouped.get( ModificationType.DEL ).isEmpty() );
-		} );
+		}
 	}
 
 	@Test
 	@Order(10)
 	void testGroupedByModificationTypeDel(SessionFactoryScope scope) {
-		scope.inSession( session -> {
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			// Rev 3: Author was DEL
-			final var grouped = session.getAuditLog()
-					.findAllEntitiesGroupedByModificationType( rev3 );
+			final var grouped = auditLog.findAllEntitiesGroupedByModificationType( rev3 );
 			assertTrue( grouped.get( ModificationType.ADD ).isEmpty() );
 			assertTrue( grouped.get( ModificationType.MOD ).isEmpty() );
 			assertEquals( 1, grouped.get( ModificationType.DEL ).size() );
-		} );
+		}
 	}
 
 	// --- Revision entity verification ---
@@ -290,9 +284,9 @@ class RevChangesTrackingTest {
 	@Test
 	@Order(11)
 	void testRevisionEntityHasModifiedEntityNames(SessionFactoryScope scope) {
-		scope.inSession( session -> {
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			// Load the revision entity and verify modifiedEntityNames was populated
-			TrackingRevisionInfo revInfo = session.getAuditLog().findRevision( rev1 );
+			TrackingRevisionInfo revInfo = auditLog.findRevision( rev1 );
 			assertNotNull( revInfo.modifiedEntityNames );
 			assertEquals( 2, revInfo.modifiedEntityNames.size() );
 			// Entity names are FQN of the @Entity name mapping
@@ -300,6 +294,6 @@ class RevChangesTrackingTest {
 					.anyMatch( n -> n.contains( "Book" ) ) );
 			assertTrue( revInfo.modifiedEntityNames.stream()
 					.anyMatch( n -> n.contains( "Author" ) ) );
-		} );
+		}
 	}
 }

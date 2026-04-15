@@ -8,6 +8,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.ManyToMany;
 import org.hibernate.annotations.Audited;
+import org.hibernate.audit.AuditLogFactory;
 import org.hibernate.cfg.StateManagementSettings;
 import org.hibernate.SharedSessionContract;
 import org.hibernate.temporal.spi.TransactionIdentifierSupplier;
@@ -80,14 +81,13 @@ class AuditManyToManyTest {
 			session.remove( student );
 		} );
 
-		scope.inSession( session -> {
-			var auditLog = session.getAuditLog();
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			// Student: ADD + 2 collection changes + DEL = 4 revisions
 			assertEquals( 4, auditLog.getRevisions( Student.class, 1L ).size(),
 					"Student should have 4 revisions (ADD + 2 collection changes + DEL)" );
 			assertEquals( 1, auditLog.getRevisions( Course.class, 1L ).size() );
 			assertEquals( 1, auditLog.getRevisions( Course.class, 2L ).size() );
-		} );
+		}
 	}
 
 	@Test
@@ -172,10 +172,10 @@ class AuditManyToManyTest {
 		} );
 
 		// Student: ADD + recreate = 2 revisions (not more)
-		scope.inSession( session -> {
-			assertEquals( 2, session.getAuditLog().getRevisions( Student.class, 30L ).size(),
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			assertEquals( 2, auditLog.getRevisions( Student.class, 30L ).size(),
 					"Student should have exactly 2 revisions (ADD + recreate)" );
-		} );
+		}
 
 		// At REV 1: 2 courses (Math + Physics)
 		try ( var s = scope.getSessionFactory().withOptions()
@@ -214,11 +214,11 @@ class AuditManyToManyTest {
 			session.find( Student.class, 20L ).courses.add( course );
 		} );
 
-		scope.inSession( session -> {
-			var history = session.getAuditLog().getHistory( Student.class, 20L );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			var history = auditLog.getHistory( Student.class, 20L );
 			assertEquals( 2, history.size(), "Student has ADD + MOD (collection change)" );
 			assertEquals( "Hist Alice", history.get( 0 ).entity().name );
-		} );
+		}
 	}
 
 	// ---- Entity classes ----

@@ -15,6 +15,7 @@ import org.hibernate.audit.RevisionListener;
 import org.hibernate.audit.RevisionNumber;
 import org.hibernate.audit.RevisionTimestamp;
 import org.hibernate.audit.AuditException;
+import org.hibernate.audit.AuditLogFactory;
 import org.hibernate.testing.orm.junit.DomainModel;
 import org.hibernate.testing.orm.junit.AuditedTest;
 import org.hibernate.testing.orm.junit.SessionFactory;
@@ -134,8 +135,7 @@ class AuditRevisionEntityTest {
 		} );
 
 		// Verify revision reads via atTransaction
-		scope.getSessionFactory().inTransaction( session -> {
-			final var auditLog = session.getAuditLog();
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			final var revisions = auditLog.getRevisions( MyEntity.class, 1L );
 			assertEquals( 3, revisions.size() );
 
@@ -162,7 +162,7 @@ class AuditRevisionEntityTest {
 				final var entity = s.find( MyEntity.class, 1L );
 				assertNull( entity );
 			}
-		} );
+		}
 	}
 
 	@Test
@@ -177,8 +177,7 @@ class AuditRevisionEntityTest {
 			session.remove( session.find( MyEntity.class, 10L ) )
 		);
 
-		scope.inSession( session -> {
-			final var auditLog = session.getAuditLog();
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			final var revisions = auditLog.getRevisions( MyEntity.class, 10L );
 			assertEquals( 2, revisions.size() );
 			final var delRevision = revisions.get( 1 );
@@ -190,7 +189,7 @@ class AuditRevisionEntityTest {
 			final var deleted = auditLog.find( MyEntity.class, 10L, delRevision, true );
 			assertNotNull( deleted );
 			assertEquals( "to-delete", deleted.name );
-		} );
+		}
 	}
 
 	@Test
@@ -204,12 +203,11 @@ class AuditRevisionEntityTest {
 
 		Thread.sleep( 50 );
 
-		scope.inSession( session -> {
-			final var entity = session.getAuditLog()
-					.find( MyEntity.class, 20L, Instant.now() );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			final var entity = auditLog.find( MyEntity.class, 20L, Instant.now() );
 			assertNotNull( entity );
 			assertEquals( "instant-test", entity.name );
-		} );
+		}
 	}
 
 	@Test
@@ -221,23 +219,22 @@ class AuditRevisionEntityTest {
 			session.persist( entity );
 		} );
 
-		scope.inSession( session -> {
-			final var auditLog = session.getAuditLog();
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			final var revisions = auditLog.getRevisions( MyEntity.class, 30L );
 			assertEquals( 1, revisions.size() );
 
 			final Instant timestamp = auditLog.getTransactionTimestamp( revisions.get( 0 ) );
 			assertNotNull( timestamp );
 			assertTrue( timestamp.isAfter( Instant.now().minusSeconds( 60 ) ) );
-		} );
+		}
 	}
 
 	@Test
 	void testGetTransactionTimestampNonExistent(SessionFactoryScope scope) {
-		scope.inSession( session ->
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			assertThrows( AuditException.class,
-					() -> session.getAuditLog().getTransactionTimestamp( 999999 ) )
-		);
+					() -> auditLog.getTransactionTimestamp( 999999 ) );
+		}
 	}
 
 	@Test
@@ -251,24 +248,22 @@ class AuditRevisionEntityTest {
 
 		Thread.sleep( 50 );
 
-		scope.inSession( session -> {
-			final var auditLog = session.getAuditLog();
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			final var txId = auditLog.getTransactionId( Instant.now() );
 			assertNotNull( txId );
 
 			final var entity = auditLog.find( MyEntity.class, 40L, txId );
 			assertNotNull( entity );
 			assertEquals( "txid-test", entity.name );
-		} );
+		}
 	}
 
 	@Test
 	void testGetTransactionIdForDateTooEarly(SessionFactoryScope scope) {
-		scope.inSession( session ->
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			assertThrows( AuditException.class,
-					() -> session.getAuditLog()
-							.getTransactionId( Instant.parse( "2000-01-01T00:00:00Z" ) ) )
-		);
+					() -> auditLog.getTransactionId( Instant.parse( "2000-01-01T00:00:00Z" ) ) );
+		}
 	}
 
 	@Test
@@ -280,8 +275,7 @@ class AuditRevisionEntityTest {
 			session.persist( entity );
 		} );
 
-		scope.inSession( session -> {
-			final var auditLog = session.getAuditLog();
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			final var revisions = auditLog.getRevisions( MyEntity.class, 50L );
 			final var txId = revisions.get( 0 );
 
@@ -289,15 +283,15 @@ class AuditRevisionEntityTest {
 			assertNotNull( revInfo );
 			assertEquals( "test-user", revInfo.username );
 			assertTrue( revInfo.timestamp > 0 );
-		} );
+		}
 	}
 
 	@Test
 	void testFindRevisionNonExistent(SessionFactoryScope scope) {
-		scope.inSession( session ->
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			assertThrows( AuditException.class,
-					() -> session.getAuditLog().findRevision( 999999 ) )
-		);
+					() -> auditLog.findRevision( 999999 ) );
+		}
 	}
 
 	@Test
@@ -312,8 +306,7 @@ class AuditRevisionEntityTest {
 			session.find( MyEntity.class, 60L ).name = "findrevs-v2"
 		);
 
-		scope.inSession( session -> {
-			final var auditLog = session.getAuditLog();
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			final var revisions = auditLog.getRevisions( MyEntity.class, 60L );
 			assertEquals( 2, revisions.size() );
 
@@ -322,15 +315,14 @@ class AuditRevisionEntityTest {
 			for ( var entry : revMap.values() ) {
 				assertEquals( "test-user", entry.username );
 			}
-		} );
+		}
 	}
 
 	@Test
 	void testIsAudited(SessionFactoryScope scope) {
-		scope.inSession( session -> {
-			final var auditLog = session.getAuditLog();
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			assertTrue( auditLog.isAudited( MyEntity.class ) );
-		} );
+		}
 	}
 
 	@Test

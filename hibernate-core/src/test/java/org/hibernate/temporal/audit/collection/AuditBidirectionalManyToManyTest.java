@@ -8,6 +8,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.ManyToMany;
 import org.hibernate.annotations.Audited;
+import org.hibernate.audit.AuditLogFactory;
 import org.hibernate.cfg.StateManagementSettings;
 import org.hibernate.SharedSessionContract;
 import org.hibernate.temporal.spi.TransactionIdentifierSupplier;
@@ -92,8 +93,7 @@ class AuditBidirectionalManyToManyTest {
 			ing1.references.clear();
 		} );
 
-		scope.inSession( session -> {
-			var auditLog = session.getAuditLog();
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			// Owning side: ing1 at [1, 2, 3, 4, 5], ing2 at [1, 2]
 			assertEquals( 5, auditLog.getRevisions( OwningEntity.class, 3 ).size(),
 					"ing1 should have 5 revisions" );
@@ -105,7 +105,7 @@ class AuditBidirectionalManyToManyTest {
 					"ed1 should have 1 revision (ADD only)" );
 			assertEquals( 1, auditLog.getRevisions( OwnedEntity.class, 2 ).size(),
 					"ed2 should have 1 revision (ADD only)" );
-		} );
+		}
 	}
 
 	@Test
@@ -126,8 +126,7 @@ class AuditBidirectionalManyToManyTest {
 			session.find( OwningEntity.class, 21 ).references.add( ed2 );
 		} );
 
-		scope.inSession( session -> {
-			var auditLog = session.getAuditLog();
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			// Owning entity should have 2 revisions (ADD + collection change MOD)
 			var history = auditLog.getHistory( OwningEntity.class, 21 );
 			assertEquals( 2, history.size() );
@@ -136,7 +135,7 @@ class AuditBidirectionalManyToManyTest {
 			// Owned entities: only 1 revision each (ADD)
 			assertEquals( 1, auditLog.getHistory( OwnedEntity.class, 20 ).size() );
 			assertEquals( 1, auditLog.getHistory( OwnedEntity.class, 22 ).size() );
-		} );
+		}
 	}
 
 	@Test
@@ -217,10 +216,10 @@ class AuditBidirectionalManyToManyTest {
 		} );
 
 		// Owning entity: ADD + recreate = 2 revisions (not more)
-		scope.inSession( session -> {
-			assertEquals( 2, session.getAuditLog().getRevisions( OwningEntity.class, 32 ).size(),
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			assertEquals( 2, auditLog.getRevisions( OwningEntity.class, 32 ).size(),
 					"Owning entity should have exactly 2 revisions (ADD + recreate)" );
-		} );
+		}
 
 		// At REV 1: 2 references
 		try ( var s = scope.getSessionFactory().withOptions()

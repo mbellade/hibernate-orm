@@ -46,4 +46,13 @@ public interface AuditMapping extends AuxiliaryMapping {
 	 */
 	@Nullable SelectableMapping getTransactionEndTimestampMapping(String originalTableName);
 
+	/**
+	 * Get the entity loader for single-entity audit queries.
+	 * The loader is lazily built on first access and cached
+	 * for reuse across {@link org.hibernate.audit.AuditLog} instances.
+	 */
+	org.hibernate.audit.spi.AuditEntityLoader getEntityLoader(
+			EntityMappingType entityMappingType,
+			org.hibernate.engine.spi.SessionFactoryImplementor sessionFactory);
+
 }

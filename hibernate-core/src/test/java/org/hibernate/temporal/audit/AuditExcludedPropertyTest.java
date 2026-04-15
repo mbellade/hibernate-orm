@@ -15,6 +15,7 @@ import jakarta.persistence.Id;
 
 import org.hibernate.SharedSessionContract;
 import org.hibernate.annotations.Audited;
+import org.hibernate.audit.AuditLogFactory;
 import org.hibernate.audit.ModificationType;
 import org.hibernate.cfg.StateManagementSettings;
 import org.hibernate.testing.orm.junit.AuditedTest;
@@ -130,8 +131,7 @@ class AuditExcludedPropertyTest {
 	@Order(1)
 	void testAuditTableHasNoExcludedColumns(SessionFactoryScope scope) {
 		// Read audit data via AuditLog.find (uses AuditFindPlan / LoaderSelectBuilder)
-		scope.inSession( session -> {
-			final var auditLog = session.getAuditLog();
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			final var entity = auditLog.find( MyEntity.class, 1L, revCreate );
 			assertNotNull( entity );
 			assertEquals( "visible", entity.name );
@@ -139,20 +139,20 @@ class AuditExcludedPropertyTest {
 			assertNull( entity.secret );
 			assertNull( entity.address );
 			assertNull( entity.tags );
-		} );
+		}
 	}
 
 	@Test
 	@Order(2)
 	void testExcludedPropertiesNullAfterUpdate(SessionFactoryScope scope) {
-		scope.inSession( session -> {
-			final var entity = session.getAuditLog().find( MyEntity.class, 1L, revUpdate );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			final var entity = auditLog.find( MyEntity.class, 1L, revUpdate );
 			assertNotNull( entity );
 			assertEquals( "updated", entity.name );
 			assertNull( entity.secret );
 			assertNull( entity.address );
 			assertNull( entity.tags );
-		} );
+		}
 	}
 
 	@Test
@@ -172,8 +172,8 @@ class AuditExcludedPropertyTest {
 	@Test
 	@Order(4)
 	void testGetHistoryWithExcludedProperties(SessionFactoryScope scope) {
-		scope.inSession( session -> {
-			final var history = session.getAuditLog().getHistory( MyEntity.class, 1L );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			final var history = auditLog.getHistory( MyEntity.class, 1L );
 			assertEquals( 2, history.size() );
 			assertEquals( ModificationType.ADD, history.get( 0 ).modificationType() );
 			assertNull( history.get( 0 ).entity().secret );
@@ -183,7 +183,7 @@ class AuditExcludedPropertyTest {
 			assertEquals( "updated", history.get( 1 ).entity().name );
 			assertNull( history.get( 1 ).entity().secret );
 			assertNull( history.get( 1 ).entity().tags );
-		} );
+		}
 	}
 
 	@Test

@@ -16,6 +16,7 @@ import jakarta.persistence.InheritanceType;
 import jakarta.persistence.ManyToMany;
 import jakarta.persistence.ManyToOne;
 import org.hibernate.annotations.Audited;
+import org.hibernate.audit.AuditLogFactory;
 import org.hibernate.cfg.StateManagementSettings;
 import org.hibernate.SharedSessionContract;
 import org.hibernate.temporal.spi.TransactionIdentifierSupplier;
@@ -74,11 +75,10 @@ class AuditJoinedDiscriminatorInheritanceTest {
 
 		scope.inTransaction( session -> session.remove( session.find( SportsCar.class, 1L ) ) );
 
-		scope.inSession( session -> {
-			var auditLog = session.getAuditLog();
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			assertThat( auditLog.getRevisions( SportsCar.class, 1L ) ).hasSize( 3 );
 			assertThat( auditLog.getRevisions( Truck.class, 2L ) ).hasSize( 2 );
-		} );
+		}
 	}
 
 	@Test
@@ -158,15 +158,15 @@ class AuditJoinedDiscriminatorInheritanceTest {
 
 		scope.inTransaction( session -> session.remove( session.find( SportsCar.class, 20L ) ) );
 
-		scope.inSession( session -> {
-			var history = session.getAuditLog().getHistory( SportsCar.class, 20L );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			var history = auditLog.getHistory( SportsCar.class, 20L );
 			assertThat( history ).hasSize( 3 );
 			assertThat( history.get( 0 ).entity().name ).isEqualTo( "Sedan" );
 			assertThat( history.get( 0 ).entity().seatCount ).isEqualTo( 5 );
 			assertThat( history.get( 1 ).entity().name ).isEqualTo( "Sports Car" );
 			assertThat( history.get( 1 ).entity().seatCount ).isEqualTo( 2 );
 			assertThat( history.get( 2 ).entity() ).isNotNull();
-		} );
+		}
 	}
 
 	@Test
@@ -184,10 +184,10 @@ class AuditJoinedDiscriminatorInheritanceTest {
 			sc.horsepower = 700;
 		} );
 
-		scope.inSession( session -> {
-			assertThat( session.getAuditLog().getRevisions( Car.class, 30L ) ).hasSize( 1 );
-			assertThat( session.getAuditLog().getRevisions( SportsCar.class, 31L ) ).hasSize( 2 );
-		} );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			assertThat( auditLog.getRevisions( Car.class, 30L ) ).hasSize( 1 );
+			assertThat( auditLog.getRevisions( SportsCar.class, 31L ) ).hasSize( 2 );
+		}
 
 		try ( var s = scope.getSessionFactory().withOptions().atTransaction( 301 ).openSession() ) {
 			assertThat( s.find( Car.class, 31L ) ).isNotNull()
@@ -199,13 +199,13 @@ class AuditJoinedDiscriminatorInheritanceTest {
 					.extracting( v -> v.name ).isEqualTo( "Lamborghini" );
 		}
 
-		scope.inSession( session -> {
-			var history = session.getAuditLog().getHistory( SportsCar.class, 31L );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			var history = auditLog.getHistory( SportsCar.class, 31L );
 			assertThat( history ).hasSize( 2 );
 			assertThat( history.get( 0 ).entity().name ).isEqualTo( "Ferrari" );
 			assertThat( history.get( 0 ).entity().horsepower ).isEqualTo( 600 );
 			assertThat( history.get( 1 ).entity().name ).isEqualTo( "Lamborghini" );
-		} );
+		}
 	}
 
 	@Test

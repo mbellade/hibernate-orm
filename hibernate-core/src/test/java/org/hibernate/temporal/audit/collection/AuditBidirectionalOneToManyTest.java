@@ -9,6 +9,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToMany;
 import org.hibernate.annotations.Audited;
+import org.hibernate.audit.AuditLogFactory;
 import org.hibernate.cfg.StateManagementSettings;
 import org.hibernate.SharedSessionContract;
 import org.hibernate.temporal.spi.TransactionIdentifierSupplier;
@@ -78,8 +79,7 @@ class AuditBidirectionalOneToManyTest {
 		} );
 
 		// Verify audit revisions exist for parent and children
-		scope.inSession( session -> {
-			var auditLog = session.getAuditLog();
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			// Parent: REV 1 only (not modified in REV 2/3 since it's the inverse side)
 			var parentRevs = auditLog.getRevisions( Parent.class, 1L );
 			assertEquals( 1, parentRevs.size(), "Parent should have 1 revision (initial persist)" );
@@ -91,7 +91,7 @@ class AuditBidirectionalOneToManyTest {
 			// Child B: REV 2 (add)
 			var childBRevs = auditLog.getRevisions( Child.class, 2L );
 			assertEquals( 1, childBRevs.size(), "Child B should have 1 revision (add)" );
-		} );
+		}
 	}
 
 	@Test
@@ -184,8 +184,8 @@ class AuditBidirectionalOneToManyTest {
 		} );
 
 		// getHistory on child A: should show 3 revisions (ADD, MOD, DEL)
-		scope.inSession( session -> {
-			var history = session.getAuditLog().getHistory( Child.class, 20L );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			var history = auditLog.getHistory( Child.class, 20L );
 			assertEquals( 3, history.size(), "Child A should have 3 revisions" );
 
 			assertEquals( "Hist Child A", history.get( 0 ).entity().name );
@@ -196,14 +196,12 @@ class AuditBidirectionalOneToManyTest {
 
 			// DEL entry should still have the entity state
 			assertNotNull( history.get( 2 ).entity() );
-		} );
 
-		// getHistory on parent: only 1 revision (initial persist)
-		// but at each point in time, the collection should reflect the correct state
-		scope.inSession( session -> {
-			var history = session.getAuditLog().getHistory( Parent.class, 20L );
-			assertEquals( 1, history.size(), "Parent should have 1 revision" );
-		} );
+			// getHistory on parent: only 1 revision (initial persist)
+			// but at each point in time, the collection should reflect the correct state
+			var parentHistory = auditLog.getHistory( Parent.class, 20L );
+			assertEquals( 1, parentHistory.size(), "Parent should have 1 revision" );
+		}
 	}
 
 	/**
@@ -239,10 +237,10 @@ class AuditBidirectionalOneToManyTest {
 		} );
 
 		// Parent is inverse side: only 1 revision (ADD, no collection-change MOD)
-		scope.inSession( session -> {
-			assertEquals( 1, session.getAuditLog().getRevisions( Parent.class, 30L ).size(),
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			assertEquals( 1, auditLog.getRevisions( Parent.class, 30L ).size(),
 					"Parent should have exactly 1 revision (inverse side)" );
-		} );
+		}
 
 		// At REV 1: 2 children
 		try ( var s = scope.getSessionFactory().withOptions()
@@ -282,14 +280,13 @@ class AuditBidirectionalOneToManyTest {
 		} );
 
 		// Child should have 2 revisions (ADD + MOD)
-		scope.inSession( session -> {
-			var auditLog = session.getAuditLog();
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			assertEquals( 2, auditLog.getRevisions( Child.class, 40L ).size(),
 					"Child should have 2 revisions (ADD + property update)" );
 			// Parent: still only 1 revision (inverse side, no collection change)
 			assertEquals( 1, auditLog.getRevisions( Parent.class, 40L ).size(),
 					"Parent should still have 1 revision" );
-		} );
+		}
 
 		// Point-in-time: child name should reflect the update
 		try ( var s = scope.getSessionFactory().withOptions()

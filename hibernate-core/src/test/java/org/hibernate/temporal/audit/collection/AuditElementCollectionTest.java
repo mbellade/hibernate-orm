@@ -23,6 +23,7 @@ import jakarta.persistence.MapKeyColumn;
 import jakarta.persistence.OrderColumn;
 import jakarta.persistence.Tuple;
 import org.hibernate.annotations.Audited;
+import org.hibernate.audit.AuditLogFactory;
 import org.hibernate.annotations.SortNatural;
 import org.hibernate.cfg.StateManagementSettings;
 import org.hibernate.SharedSessionContract;
@@ -83,9 +84,9 @@ class AuditElementCollectionTest {
 			e.strings.remove( 0 );
 		} );
 
-		scope.inSession( session -> {
-			assertThat( session.getAuditLog().getRevisions( ListEntity.class, 1L ) ).hasSize( 2 );
-		} );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			assertThat( auditLog.getRevisions( ListEntity.class, 1L ) ).hasSize( 2 );
+		}
 
 		// At REV 1: [alpha, beta]
 		try ( var s = scope.getSessionFactory().withOptions().atTransaction( 1 ).openSession() ) {
@@ -137,9 +138,9 @@ class AuditElementCollectionTest {
 			e.strings.remove( "key2" );
 		} );
 
-		scope.inSession( session -> {
-			assertThat( session.getAuditLog().getRevisions( MapEntity.class, 1L ) ).hasSize( 2 );
-		} );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			assertThat( auditLog.getRevisions( MapEntity.class, 1L ) ).hasSize( 2 );
+		}
 
 		// At REV 1: {key1=value1, key2=value2}
 		try ( var s = scope.getSessionFactory().withOptions().atTransaction( 101 ).openSession() ) {
@@ -199,9 +200,9 @@ class AuditElementCollectionTest {
 			e.components.add( new Component( "Charlie", 95 ) );
 		} );
 
-		scope.inSession( session -> {
-			assertThat( session.getAuditLog().getRevisions( EmbeddableSetEntity.class, 1L ) ).hasSize( 2 );
-		} );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			assertThat( auditLog.getRevisions( EmbeddableSetEntity.class, 1L ) ).hasSize( 2 );
+		}
 
 		// At REV 1: {Alice/30, Bob/25}
 		try ( var s = scope.getSessionFactory().withOptions().atTransaction( 201 ).openSession() ) {
@@ -250,9 +251,9 @@ class AuditElementCollectionTest {
 			e.strings = new String[] { "gamma", "beta", "delta" };
 		} );
 
-		scope.inSession( session -> {
-			assertThat( session.getAuditLog().getRevisions( ArrayEntity.class, 1L ) ).hasSize( 2 );
-		} );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			assertThat( auditLog.getRevisions( ArrayEntity.class, 1L ) ).hasSize( 2 );
+		}
 
 		// At REV 1: [alpha, beta]
 		try ( var s = scope.getSessionFactory().withOptions().atTransaction( 301 ).openSession() ) {
@@ -297,9 +298,9 @@ class AuditElementCollectionTest {
 			e.tags.add( "gamma" );
 		} );
 
-		scope.inSession( session -> {
-			assertThat( session.getAuditLog().getRevisions( SortedSetEntity.class, 1L ) ).hasSize( 2 );
-		} );
+		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
+			assertThat( auditLog.getRevisions( SortedSetEntity.class, 1L ) ).hasSize( 2 );
+		}
 
 		// At REV 1: {alpha, beta} (sorted)
 		try ( var s = scope.getSessionFactory().withOptions().atTransaction( 401 ).openSession() ) {
