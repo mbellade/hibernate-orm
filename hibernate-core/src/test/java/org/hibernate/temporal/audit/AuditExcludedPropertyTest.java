@@ -20,6 +20,7 @@ import org.hibernate.cfg.StateManagementSettings;
 import org.hibernate.testing.orm.junit.AuditedTest;
 import org.hibernate.testing.orm.junit.BeforeClassTemplate;
 import org.hibernate.testing.orm.junit.DomainModel;
+import org.hibernate.testing.orm.junit.DomainModelScope;
 import org.hibernate.testing.orm.junit.ServiceRegistry;
 import org.hibernate.testing.orm.junit.SessionFactory;
 import org.hibernate.testing.orm.junit.SessionFactoryScope;
@@ -32,6 +33,7 @@ import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.TestMethodOrder;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -114,6 +116,15 @@ class AuditExcludedPropertyTest {
 
 	private static final int revCreate = 1;
 	private static final int revUpdate = 2;
+
+	@Test
+	@Order(0)
+	void testNoCollectionAuditTableForExcludedCollection(DomainModelScope scope) {
+		for ( var table : scope.getDomainModel().collectTableMappings() ) {
+			assertFalse( table.getName().contains( "tags_AUD" ),
+					"Excluded @ElementCollection should not have an audit table" );
+		}
+	}
 
 	@Test
 	@Order(1)

@@ -348,8 +348,8 @@ public class AuditLogImpl implements AuditReader {
 
 	private List<String> queryRevChangesEntityNames(Object transactionId) {
 		return allRevisionsSession().createSelectionQuery(
-				"select name from " + revisionEntityName
-				+ " r join r." + modifiedEntityNamesProperty + " name"
+				"select element(r." + modifiedEntityNamesProperty + ")"
+				+ " from " + revisionEntityName + " r"
 				+ " where r.id = :txId",
 				String.class
 		).setParameter( "txId", transactionId ).getResultList();

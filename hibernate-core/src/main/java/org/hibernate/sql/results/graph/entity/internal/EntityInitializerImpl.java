@@ -270,11 +270,17 @@ public class EntityInitializerImpl
 		final var versionMapping = entityDescriptor.getVersionMapping();
 		if ( versionMapping != null ) {
 			final var versionFetch = resultDescriptor.findFetch( versionMapping );
-			// versionFetch may be null when the version property is excluded
-			// from auditing (e.g. @Audited.Excluded or @Version auto-exclusion)
-			versionAssembler = versionFetch != null
-					? versionFetch.createAssembler( this, creationState )
-					: null;
+			if ( versionFetch != null ) {
+				versionAssembler = versionFetch.createAssembler( this, creationState );
+			}
+			else {
+				// Version fetch is only expected to be null when the version
+				// property is excluded from audit tables
+				assert entityDescriptor.getAuditMapping() != null
+						&& entityDescriptor.isPropertyAuditedExcluded(
+								versionMapping.getVersionAttribute().getStateArrayPosition() );
+				versionAssembler = null;
+			}
 		}
 		else {
 			versionAssembler = null;

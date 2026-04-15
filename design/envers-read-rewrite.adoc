@@ -398,10 +398,11 @@ provides a clean boundary.
 
 | W13
 | `DO_NOT_AUDIT_OPTIMISTIC_LOCKING_FIELD` (skip `@Version`)
-| [yellow]#DIFFERS# -- core includes `@Version` in audit table. Excluding columns from audit
-  tables (`@Audited.Excluded`, `@Version` auto-exclusion) has a read-side gap: the SQL AST
-  still references the excluded columns. See G8 in remaining work.
-  Auto-exclusion requires coordinating boot-time column exclusion, write-side mask, AND read-side SQL generation.
+| [green]#DONE# -- `@Version` properties are auto-excluded from audit tables (matching envers
+  behavior). `@Audited.Excluded` also works for basic, embedded, and collection properties.
+  Read-side fix: `LoaderSelectBuilder`, `SingleIdEntityLoaderStandardImpl`, and
+  `BaseSqmToSqlAstConverter` skip excluded fetchables via `AuditHelper.isFetchableAuditExcluded`.
+  `NullValueAssembler` returns `javaType.getDefaultValue()` for primitive-safe hydration.
 | Low
 
 | W14
@@ -1165,16 +1166,6 @@ link:envers-migration-guide.adoc#not-audited-target-behavior[migration guide].
 
 === Medium Priority
 
-* **W13 / G8: `@Version` auto-exclusion and `@Audited.Excluded` read-side gap** --
-  Boot-time column exclusion and write-side mask work, but the read-side has a gap:
-  `LoaderSelectBuilder` builds SQL AST from the entity's full attribute set, including
-  excluded columns that don't exist in the audit table. For regular attributes, adding
-  exclusion support in `LoaderSelectBuilder` would work because `EntityInitializerImpl`
-  uses `NullValueAssembler` when a fetch is missing (line 322). For `@Version` specifically,
-  `EntityInitializerImpl` has a hard assert that the version fetch exists (line 274),
-  requiring special handling. Envers avoided this entirely by using separate dynamically
-  generated entity descriptors for audit data; our rewrite reuses the same persister
-  with table name substitution.
 * **G18: Pre-built SQL AST for `getHistory()`** -- investigate DomainResult position mapping bug.
 * **W12 / G10: `@AuditOverride`** -- `forClass` pattern has no equivalent.
 

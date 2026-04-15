@@ -76,7 +76,7 @@ public final class AuditHelper {
 			RootClass rootClass,
 			ClassDetails classDetails,
 			MetadataBuildingContext context) {
-		bindAuditTable( audited, (Stateful) rootClass, context );
+		bindAuditTable( audited, rootClass, context );
 		bindSecondaryAuditTables( audited, rootClass, classDetails, context );
 		bindSubclassAuditTables( audited, rootClass, context );
 	}

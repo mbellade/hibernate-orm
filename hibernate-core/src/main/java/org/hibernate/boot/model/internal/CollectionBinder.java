@@ -1573,7 +1573,7 @@ public abstract class CollectionBinder {
 		// to track collection membership changes (same approach as @ManyToMany / @JoinTable)
 		if ( !collection.isInverse() ) {
 			final var audited = extract( Audited.class, property, buildingContext );
-			if ( audited != null ) {
+			if ( audited != null && !property.hasDirectAnnotationUsage( Audited.Excluded.class ) ) {
 				AuditHelper.bindOneToManyAuditTable(
 						audited,
 						collection,
@@ -2460,7 +2460,7 @@ public abstract class CollectionBinder {
 			return;
 		}
 		final var audited = extract( Audited.class, property, buildingContext );
-		if ( audited != null ) {
+		if ( audited != null && !property.hasDirectAnnotationUsage( Audited.Excluded.class ) ) {
 			AuditHelper.bindAuditTable( audited, collection, buildingContext );
 		}
 	}
