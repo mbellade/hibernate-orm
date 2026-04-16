@@ -87,12 +87,12 @@ class AuditTargetNotAuditedTest {
 		// REV 3: update the non-audited category name directly
 		// (this does NOT create a product audit row)
 		scope.getSessionFactory().inTransaction( session ->
-			session.find( Category.class, 2L ).name = "Updated Gadgets"
+				session.find( Category.class, 2L ).name = "Updated Gadgets"
 		);
 
 		// REV 4: clear the association
 		scope.getSessionFactory().inTransaction( session ->
-			session.find( Product.class, 1L ).category = null
+				session.find( Product.class, 1L ).category = null
 		);
 	}
 
@@ -113,8 +113,8 @@ class AuditTargetNotAuditedTest {
 	@Test
 	void testManyToOnePointInTimeRead(SessionFactoryScope scope) {
 		// REV 1: product with Electronics category (FK=1)
-		try ( var s = scope.getSessionFactory().withOptions()
-				.atTransaction( 1 ).openSession() ) {
+		try (var s = scope.getSessionFactory().withOptions()
+				.atTransaction( 1 ).openSession()) {
 			var product = s.find( Product.class, 1L );
 			assertNotNull( product );
 			assertEquals( "Phone", product.name );
@@ -125,8 +125,8 @@ class AuditTargetNotAuditedTest {
 		}
 
 		// REV 2: product switched to Gadgets (FK=2)
-		try ( var s = scope.getSessionFactory().withOptions()
-				.atTransaction( 2 ).openSession() ) {
+		try (var s = scope.getSessionFactory().withOptions()
+				.atTransaction( 2 ).openSession()) {
 			var product = s.find( Product.class, 1L );
 			assertNotNull( product );
 			assertNotNull( product.category );
@@ -138,8 +138,8 @@ class AuditTargetNotAuditedTest {
 		}
 
 		// REV 4: category cleared (FK=null)
-		try ( var s = scope.getSessionFactory().withOptions()
-				.atTransaction( 4 ).openSession() ) {
+		try (var s = scope.getSessionFactory().withOptions()
+				.atTransaction( 4 ).openSession()) {
 			var product = s.find( Product.class, 1L );
 			assertNotNull( product );
 			assertNull( product.category );
@@ -165,7 +165,7 @@ class AuditTargetNotAuditedTest {
 
 		// Delete the original non-audited category
 		scope.getSessionFactory().inTransaction( session ->
-			session.remove( session.find( Category.class, 99L ) )
+				session.remove( session.find( Category.class, 99L ) )
 		);
 
 		// REV 1 pointed to Category#99 which no longer exists.
@@ -173,8 +173,8 @@ class AuditTargetNotAuditedTest {
 		// has been deleted from the current table. Since @ManyToOne is
 		// eagerly fetched via JOIN, the LEFT JOIN yields null columns
 		// and the association resolves to null.
-		try ( var s = scope.getSessionFactory().withOptions()
-				.atTransaction( 401 ).openSession() ) {
+		try (var s = scope.getSessionFactory().withOptions()
+				.atTransaction( 401 ).openSession()) {
 			var product = s.find( Product.class, 99L );
 			assertNotNull( product );
 			assertEquals( "Doomed", product.name );
@@ -183,8 +183,8 @@ class AuditTargetNotAuditedTest {
 		}
 
 		// REV 2 pointed to Category#98 which still exists
-		try ( var s = scope.getSessionFactory().withOptions()
-				.atTransaction( 402 ).openSession() ) {
+		try (var s = scope.getSessionFactory().withOptions()
+				.atTransaction( 402 ).openSession()) {
 			var product = s.find( Product.class, 99L );
 			assertNotNull( product );
 			assertNotNull( product.category );
@@ -211,13 +211,13 @@ class AuditTargetNotAuditedTest {
 
 	@Test
 	void testManyToOneJoinFetchAllRevisions(SessionFactoryScope scope) {
-		try ( var session = scope.getSessionFactory().withOptions()
-				.atTransaction( AuditLog.ALL_REVISIONS ).openSession() ) {
+		try (var session = scope.getSessionFactory().withOptions()
+				.atTransaction( AuditLog.ALL_REVISIONS ).openSession()) {
 			final var rows = session.createSelectionQuery(
 					"select e, transactionId(e), modificationType(e)"
-							+ " from Product e left join fetch e.category"
-							+ " where e.id = :id"
-							+ " order by transactionId(e)",
+					+ " from Product e left join fetch e.category"
+					+ " where e.id = :id"
+					+ " order by transactionId(e)",
 					Object[].class
 			).setParameter( "id", 1L ).getResultList();
 
@@ -249,15 +249,15 @@ class AuditTargetNotAuditedTest {
 		} );
 
 		// Point-in-time: non-audited store loads from current table
-		try ( var s = scope.getSessionFactory().withOptions()
-				.atTransaction( 101 ).openSession() ) {
+		try (var s = scope.getSessionFactory().withOptions()
+				.atTransaction( 101 ).openSession()) {
 			var item = s.find( Item.class, 1L );
 			assertNotNull( item.store );
 			assertEquals( "Main Store", item.store.name );
 		}
 
-		try ( var s = scope.getSessionFactory().withOptions()
-				.atTransaction( 102 ).openSession() ) {
+		try (var s = scope.getSessionFactory().withOptions()
+				.atTransaction( 102 ).openSession()) {
 			var item = s.find( Item.class, 1L );
 			assertNotNull( item.store );
 			assertEquals( "Branch", item.store.name );
@@ -304,8 +304,8 @@ class AuditTargetNotAuditedTest {
 		}
 
 		// Point-in-time: tags should be loaded from current table
-		try ( var s = scope.getSessionFactory().withOptions()
-				.atTransaction( 202 ).openSession() ) {
+		try (var s = scope.getSessionFactory().withOptions()
+				.atTransaction( 202 ).openSession()) {
 			var product = s.find( Product.class, 10L );
 			assertNotNull( product );
 			assertEquals( "Laptop", product.name );
@@ -338,8 +338,8 @@ class AuditTargetNotAuditedTest {
 		}
 
 		// Point-in-time
-		try ( var s = scope.getSessionFactory().withOptions()
-				.atTransaction( 301 ).openSession() ) {
+		try (var s = scope.getSessionFactory().withOptions()
+				.atTransaction( 301 ).openSession()) {
 			var product = s.find( Product.class, 20L );
 			assertNotNull( product );
 			assertEquals( "Table", product.name );
@@ -363,7 +363,8 @@ class AuditTargetNotAuditedTest {
 		@JoinColumn(name = "product_id")
 		List<Category> relatedCategories = new ArrayList<>();
 
-		Product() {}
+		Product() {
+		}
 
 		Product(long id, String name, Category category) {
 			this.id = id;
@@ -378,7 +379,8 @@ class AuditTargetNotAuditedTest {
 		long id;
 		String name;
 
-		Category() {}
+		Category() {
+		}
 
 		Category(long id, String name) {
 			this.id = id;
@@ -392,7 +394,8 @@ class AuditTargetNotAuditedTest {
 		long id;
 		String name;
 
-		Tag() {}
+		Tag() {
+		}
 
 		Tag(long id, String name) {
 			this.id = id;
@@ -409,7 +412,8 @@ class AuditTargetNotAuditedTest {
 		@OneToOne
 		Store store;
 
-		Item() {}
+		Item() {
+		}
 
 		Item(long id, String name) {
 			this.id = id;
@@ -423,7 +427,8 @@ class AuditTargetNotAuditedTest {
 		long id;
 		String name;
 
-		Store() {}
+		Store() {
+		}
 
 		Store(long id, String name) {
 			this.id = id;

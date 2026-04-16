@@ -5,6 +5,7 @@
 package org.hibernate.audit.spi;
 
 import org.checkerframework.checker.nullness.qual.Nullable;
+
 import org.hibernate.SharedSessionContract;
 import org.hibernate.Session;
 import org.hibernate.audit.AuditException;
@@ -37,6 +38,7 @@ import java.util.Date;
  * @param <T> the type of the transaction identifier
  * (the {@link RevisionEntity.TransactionId @TransactionId}
  * property type)
+ *
  * @author Marco Belladelli
  * @since envers-rewrite
  */
@@ -128,7 +130,7 @@ public class RevisionEntitySupplier<T> implements TransactionIdentifierSupplier<
 		if ( timestampAttr == null ) {
 			throw new AuditException(
 					"@RevisionEntity.Timestamp property '" + timestampProperty
-					+ "' not found on " + revisionEntityClass.getName()
+							+ "' not found on " + revisionEntityClass.getName()
 			);
 		}
 		final Object timestamp = resolveTimestamp( timestampAttr.getJavaType().getJavaTypeClass() );
@@ -157,8 +159,8 @@ public class RevisionEntitySupplier<T> implements TransactionIdentifierSupplier<
 		if ( txId == null ) {
 			throw new AuditException(
 					"@RevisionEntity.TransactionId property '" + transactionIdProperty
-					+ "' is null after persisting revision entity '"
-					+ revisionEntityClass.getName() + "'"
+							+ "' is null after persisting revision entity '"
+							+ revisionEntityClass.getName() + "'"
 			);
 		}
 		return txId;
@@ -180,7 +182,7 @@ public class RevisionEntitySupplier<T> implements TransactionIdentifierSupplier<
 		else {
 			throw new AuditException(
 					"Unsupported @RevisionEntity.Timestamp type: " + type.getName()
-					+ ". Supported: long, Long, Instant, Date, LocalDateTime"
+							+ ". Supported: long, Long, Instant, Date, LocalDateTime"
 			);
 		}
 	}

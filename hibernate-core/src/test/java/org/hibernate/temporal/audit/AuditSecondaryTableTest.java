@@ -69,11 +69,11 @@ class AuditSecondaryTableTest {
 		} );
 
 		scope.getSessionFactory().inTransaction( session ->
-			session.remove( session.find( Employee.class, 1L ) )
+				session.remove( session.find( Employee.class, 1L ) )
 		);
 
-		try ( var s = scope.getSessionFactory().withStatelessOptions()
-				.atTransaction( 1 ).openStatelessSession() ) {
+		try (var s = scope.getSessionFactory().withStatelessOptions()
+				.atTransaction( 1 ).openStatelessSession()) {
 			var emp = s.get( Employee.class, 1L );
 			assertEquals( "Alice", emp.name );
 			assertEquals( "123 Main St", emp.address );
@@ -82,16 +82,16 @@ class AuditSecondaryTableTest {
 			assertEquals( "Engineering", emp.department.name );
 		}
 
-		try ( var s = scope.getSessionFactory().withStatelessOptions()
-				.atTransaction( 2 ).openStatelessSession() ) {
+		try (var s = scope.getSessionFactory().withStatelessOptions()
+				.atTransaction( 2 ).openStatelessSession()) {
 			var emp = s.get( Employee.class, 1L );
 			assertEquals( "Alice B.", emp.name );
 			assertEquals( "456 Oak Ave", emp.address );
 			assertEquals( "555-0200", emp.phone );
 		}
 
-		try ( var s = scope.getSessionFactory().withStatelessOptions()
-				.atTransaction( 3 ).openStatelessSession() ) {
+		try (var s = scope.getSessionFactory().withStatelessOptions()
+				.atTransaction( 3 ).openStatelessSession()) {
 			assertNull( s.get( Employee.class, 1L ) );
 		}
 	}
@@ -116,7 +116,7 @@ class AuditSecondaryTableTest {
 		} );
 
 		scope.getSessionFactory().inTransaction( session ->
-			session.remove( session.find( Employee.class, 10L ) )
+				session.remove( session.find( Employee.class, 10L ) )
 		);
 
 		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
@@ -158,18 +158,18 @@ class AuditSecondaryTableTest {
 			emp.department = null;
 		} );
 
-		try ( var s = scope.getSessionFactory().withStatelessOptions()
-				.atTransaction( 201 ).openStatelessSession() ) {
+		try (var s = scope.getSessionFactory().withStatelessOptions()
+				.atTransaction( 201 ).openStatelessSession()) {
 			assertEquals( "Engineering", s.get( Employee.class, 20L ).department.name );
 		}
 
-		try ( var s = scope.getSessionFactory().withStatelessOptions()
-				.atTransaction( 202 ).openStatelessSession() ) {
+		try (var s = scope.getSessionFactory().withStatelessOptions()
+				.atTransaction( 202 ).openStatelessSession()) {
 			assertEquals( "Marketing", s.get( Employee.class, 20L ).department.name );
 		}
 
-		try ( var s = scope.getSessionFactory().withStatelessOptions()
-				.atTransaction( 203 ).openStatelessSession() ) {
+		try (var s = scope.getSessionFactory().withStatelessOptions()
+				.atTransaction( 203 ).openStatelessSession()) {
 			assertNull( s.get( Employee.class, 20L ).department );
 		}
 
@@ -197,11 +197,11 @@ class AuditSecondaryTableTest {
 		} );
 
 		scope.getSessionFactory().inTransaction( session ->
-			session.find( Employee.class, 30L ).address = "123 Main St"
+				session.find( Employee.class, 30L ).address = "123 Main St"
 		);
 
 		scope.getSessionFactory().inTransaction( session ->
-			session.find( Employee.class, 30L ).phone = "555-0100"
+				session.find( Employee.class, 30L ).phone = "555-0100"
 		);
 
 		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {

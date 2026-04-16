@@ -170,21 +170,21 @@ class AuditBidirectionalManyToManyTest {
 		final var sf = scope.getSessionFactory();
 
 		// At revLink: ing1 has 1 reference (ed1)
-		try ( var s = sf.withOptions().atTransaction( revLink ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revLink ).openSession()) {
 			var ing = s.find( OwningEntity.class, 3 );
 			assertNotNull( ing );
 			assertEquals( 1, ing.references.size(), "At revLink, ing1 should have 1 reference" );
 		}
 
 		// At revAddRef: ing1 has 2 references (ed1 + ed2)
-		try ( var s = sf.withOptions().atTransaction( revAddRef ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revAddRef ).openSession()) {
 			var ing = s.find( OwningEntity.class, 3 );
 			assertNotNull( ing );
 			assertEquals( 2, ing.references.size(), "At revAddRef, ing1 should have 2 references" );
 		}
 
 		// At revRemoveRef: ing1 has 1 reference (ed2 only)
-		try ( var s = sf.withOptions().atTransaction( revRemoveRef ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revRemoveRef ).openSession()) {
 			var ing = s.find( OwningEntity.class, 3 );
 			assertNotNull( ing );
 			assertEquals( 1, ing.references.size(), "At revRemoveRef, ing1 should have 1 reference" );
@@ -223,14 +223,14 @@ class AuditBidirectionalManyToManyTest {
 		}
 
 		// At revRecCreate: 2 references
-		try ( var s = sf.withOptions().atTransaction( revRecCreate ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revRecCreate ).openSession()) {
 			var ing = s.find( OwningEntity.class, 12 );
 			assertNotNull( ing );
 			assertEquals( 2, ing.references.size(), "At revRecCreate, should have 2 references" );
 		}
 
 		// At revRecReplace: 2 references (ed2 + ed3, ed1 dropped)
-		try ( var s = sf.withOptions().atTransaction( revRecReplace ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revRecReplace ).openSession()) {
 			var ing = s.find( OwningEntity.class, 12 );
 			assertNotNull( ing );
 			assertEquals( 2, ing.references.size(), "At revRecReplace, should have 2 references" );
@@ -250,7 +250,8 @@ class AuditBidirectionalManyToManyTest {
 		@ManyToMany
 		Set<OwnedEntity> references = new HashSet<>();
 
-		OwningEntity() {}
+		OwningEntity() {
+		}
 
 		OwningEntity(int id, String data) {
 			this.id = id;
@@ -267,7 +268,8 @@ class AuditBidirectionalManyToManyTest {
 		@ManyToMany(mappedBy = "references")
 		Set<OwningEntity> referencing = new HashSet<>();
 
-		OwnedEntity() {}
+		OwnedEntity() {
+		}
 
 		OwnedEntity(int id, String data) {
 			this.id = id;

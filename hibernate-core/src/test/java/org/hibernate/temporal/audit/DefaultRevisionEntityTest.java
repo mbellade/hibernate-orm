@@ -93,24 +93,24 @@ class DefaultRevisionEntityTest {
 			assertTrue( rev2 < rev3 );
 
 			// Read at rev1: entity was created
-			try ( var s = scope.getSessionFactory().withOptions()
-					.atTransaction( rev1 ).open() ) {
+			try (var s = scope.getSessionFactory().withOptions()
+					.atTransaction( rev1 ).open()) {
 				final var book = s.find( Book.class, 1L );
 				assertNotNull( book );
 				assertEquals( "Original Title", book.title );
 			}
 
 			// Read at rev2: entity was updated
-			try ( var s = scope.getSessionFactory().withOptions()
-					.atTransaction( rev2 ).open() ) {
+			try (var s = scope.getSessionFactory().withOptions()
+					.atTransaction( rev2 ).open()) {
 				final var book = s.find( Book.class, 1L );
 				assertNotNull( book );
 				assertEquals( "Updated Title", book.title );
 			}
 
 			// Read at rev3: entity was deleted
-			try ( var s = scope.getSessionFactory().withOptions()
-					.atTransaction( rev3 ).open() ) {
+			try (var s = scope.getSessionFactory().withOptions()
+					.atTransaction( rev3 ).open()) {
 				final var book = s.find( Book.class, 1L );
 				assertNull( book );
 			}

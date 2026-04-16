@@ -154,7 +154,7 @@ class AuditUnidirectionalOneToManyJoinTableTest {
 		final var sf = scope.getSessionFactory();
 
 		// At revCreate: team should have 1 player (Alice)
-		try ( var s = sf.withOptions().atTransaction( revCreate ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revCreate ).openSession()) {
 			var team = s.find( Team.class, 1L );
 			assertNotNull( team );
 			assertEquals( 1, team.players.size(), "At revCreate, team should have 1 player" );
@@ -162,14 +162,14 @@ class AuditUnidirectionalOneToManyJoinTableTest {
 		}
 
 		// At revAdd: team should have 2 players
-		try ( var s = sf.withOptions().atTransaction( revAdd ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revAdd ).openSession()) {
 			var team = s.find( Team.class, 1L );
 			assertNotNull( team );
 			assertEquals( 2, team.players.size(), "At revAdd, team should have 2 players" );
 		}
 
 		// At revRemove: 1 player (Bob only)
-		try ( var s = sf.withOptions().atTransaction( revRemove ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revRemove ).openSession()) {
 			var team = s.find( Team.class, 1L );
 			assertNotNull( team );
 			assertEquals( 1, team.players.size(), "At revRemove, team should have 1 player" );
@@ -203,14 +203,14 @@ class AuditUnidirectionalOneToManyJoinTableTest {
 		}
 
 		// At revRecCreate: 2 players
-		try ( var s = sf.withOptions().atTransaction( revRecCreate ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revRecCreate ).openSession()) {
 			var team = s.find( Team.class, 10L );
 			assertNotNull( team );
 			assertEquals( 2, team.players.size(), "At revRecCreate, team should have 2 players" );
 		}
 
 		// At revRecReplace: 2 players (Bob + Charlie, Alice dropped)
-		try ( var s = sf.withOptions().atTransaction( revRecReplace ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revRecReplace ).openSession()) {
 			var team = s.find( Team.class, 10L );
 			assertNotNull( team );
 			assertEquals( 2, team.players.size(), "At revRecReplace, team should have 2 players" );
@@ -231,7 +231,8 @@ class AuditUnidirectionalOneToManyJoinTableTest {
 		@JoinTable
 		List<Player> players = new ArrayList<>();
 
-		Team() {}
+		Team() {
+		}
 
 		Team(long id, String name) {
 			this.id = id;
@@ -246,7 +247,8 @@ class AuditUnidirectionalOneToManyJoinTableTest {
 		long id;
 		String name;
 
-		Player() {}
+		Player() {
+		}
 
 		Player(long id, String name) {
 			this.id = id;

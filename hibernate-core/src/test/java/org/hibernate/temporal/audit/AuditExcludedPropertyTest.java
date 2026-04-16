@@ -9,6 +9,7 @@ import jakarta.persistence.Embeddable;
 
 import java.util.ArrayList;
 import java.util.List;
+
 import jakarta.persistence.Embedded;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
@@ -158,8 +159,8 @@ class AuditExcludedPropertyTest {
 	@Test
 	@Order(3)
 	void testPointInTimeReadViaAtTransaction(SessionFactoryScope scope) {
-		try ( var s = scope.getSessionFactory().withOptions()
-				.atTransaction( revCreate ).openSession() ) {
+		try (var s = scope.getSessionFactory().withOptions()
+				.atTransaction( revCreate ).openSession()) {
 			final var entity = s.find( MyEntity.class, 1L );
 			assertNotNull( entity );
 			assertEquals( "visible", entity.name );

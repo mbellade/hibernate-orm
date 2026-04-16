@@ -36,5 +36,5 @@ public @interface AuditedTest {
 	 * The audit strategies to test with.
 	 * Defaults to both {@code "default"} and {@code "validity"}.
 	 */
-	String[] strategies() default { "default", "validity" };
+	String[] strategies() default {"default", "validity"};
 }

@@ -22,6 +22,7 @@ public interface AuditEntityLoader {
 	 * @param transactionId the transaction identifier
 	 * @param includeDeletions whether to include DEL revisions
 	 * @param session the session to use for loading
+	 *
 	 * @return the entity instance, or {@code null}
 	 */
 	<T> T find(Object id, Object transactionId, boolean includeDeletions, SharedSessionContractImplementor session);

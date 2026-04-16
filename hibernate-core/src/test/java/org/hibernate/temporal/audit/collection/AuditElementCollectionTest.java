@@ -149,14 +149,14 @@ class AuditElementCollectionTest {
 
 		sf.inTransaction( session -> {
 			var e = new ArrayEntity( 1L );
-			e.strings = new String[] { "alpha", "beta" };
+			e.strings = new String[] {"alpha", "beta"};
 			session.persist( e );
 		} );
 		revArrCreate = currentTxId;
 
 		sf.inTransaction( session -> {
 			var e = session.find( ArrayEntity.class, 1L );
-			e.strings = new String[] { "gamma", "beta", "delta" };
+			e.strings = new String[] {"gamma", "beta", "delta"};
 		} );
 		revArrMod = currentTxId;
 
@@ -188,14 +188,14 @@ class AuditElementCollectionTest {
 		}
 
 		// At revListCreate: [alpha, beta]
-		try ( var s = scope.getSessionFactory().withOptions().atTransaction( revListCreate ).openSession() ) {
+		try (var s = scope.getSessionFactory().withOptions().atTransaction( revListCreate ).openSession()) {
 			var e = s.find( ListEntity.class, 1L );
 			assertThat( e ).isNotNull();
 			assertThat( e.strings ).containsExactly( "alpha", "beta" );
 		}
 
 		// At revListMod: [beta, gamma] (alpha removed, gamma added)
-		try ( var s = scope.getSessionFactory().withOptions().atTransaction( revListMod ).openSession() ) {
+		try (var s = scope.getSessionFactory().withOptions().atTransaction( revListMod ).openSession()) {
 			var e = s.find( ListEntity.class, 1L );
 			assertThat( e ).isNotNull();
 			assertThat( e.strings ).containsExactly( "beta", "gamma" );
@@ -205,7 +205,7 @@ class AuditElementCollectionTest {
 		scope.inSession( session -> {
 			var delRows = session.createNativeQuery(
 					"select strings, strings_ORDER from ListEntity_strings_aud"
-							+ " where REVTYPE = 2 order by strings_ORDER", Tuple.class
+					+ " where REVTYPE = 2 order by strings_ORDER", Tuple.class
 			).getResultList();
 			assertThat( delRows ).hasSizeGreaterThanOrEqualTo( 1 );
 			assertThat( delRows ).anySatisfy( row -> {
@@ -225,7 +225,7 @@ class AuditElementCollectionTest {
 		}
 
 		// At revMapCreate: {key1=value1, key2=value2}
-		try ( var s = scope.getSessionFactory().withOptions().atTransaction( revMapCreate ).openSession() ) {
+		try (var s = scope.getSessionFactory().withOptions().atTransaction( revMapCreate ).openSession()) {
 			var e = s.find( MapEntity.class, 1L );
 			assertThat( e ).isNotNull();
 			assertThat( e.strings ).containsEntry( "key1", "value1" )
@@ -234,7 +234,7 @@ class AuditElementCollectionTest {
 		}
 
 		// At revMapMod: {key1=updated1, key3=value3}
-		try ( var s = scope.getSessionFactory().withOptions().atTransaction( revMapMod ).openSession() ) {
+		try (var s = scope.getSessionFactory().withOptions().atTransaction( revMapMod ).openSession()) {
 			var e = s.find( MapEntity.class, 1L );
 			assertThat( e ).isNotNull();
 			assertThat( e.strings ).containsEntry( "key1", "updated1" )
@@ -246,7 +246,7 @@ class AuditElementCollectionTest {
 		scope.inSession( session -> {
 			var delRows = session.createNativeQuery(
 					"select strings_KEY, strings from MapEntity_strings_aud"
-							+ " where REVTYPE = 2 order by strings_KEY", Tuple.class
+					+ " where REVTYPE = 2 order by strings_KEY", Tuple.class
 			).getResultList();
 			// key1 value update -> DEL old + ADD new
 			assertThat( delRows ).anySatisfy( row -> {
@@ -271,7 +271,7 @@ class AuditElementCollectionTest {
 		}
 
 		// At revEmbCreate: {Alice/90, Bob/85}
-		try ( var s = scope.getSessionFactory().withOptions().atTransaction( revEmbCreate ).openSession() ) {
+		try (var s = scope.getSessionFactory().withOptions().atTransaction( revEmbCreate ).openSession()) {
 			var e = s.find( EmbeddableSetEntity.class, 1L );
 			assertThat( e ).isNotNull();
 			assertThat( e.components ).extracting( c -> c.name )
@@ -279,7 +279,7 @@ class AuditElementCollectionTest {
 		}
 
 		// At revEmbMod: {Bob/85, Charlie/95}
-		try ( var s = scope.getSessionFactory().withOptions().atTransaction( revEmbMod ).openSession() ) {
+		try (var s = scope.getSessionFactory().withOptions().atTransaction( revEmbMod ).openSession()) {
 			var e = s.find( EmbeddableSetEntity.class, 1L );
 			assertThat( e ).isNotNull();
 			assertThat( e.components ).extracting( c -> c.name )
@@ -290,7 +290,7 @@ class AuditElementCollectionTest {
 		scope.inSession( session -> {
 			var delRows = session.createNativeQuery(
 					"select name, score from EmbeddableSetEntity_components_aud"
-							+ " where REVTYPE = 2", Tuple.class
+					+ " where REVTYPE = 2", Tuple.class
 			).getResultList();
 			assertThat( delRows ).hasSize( 1 );
 			assertThat( delRows.get( 0 ).get( "name" ) ).isEqualTo( "Alice" );
@@ -308,14 +308,14 @@ class AuditElementCollectionTest {
 		}
 
 		// At revArrCreate: [alpha, beta]
-		try ( var s = scope.getSessionFactory().withOptions().atTransaction( revArrCreate ).openSession() ) {
+		try (var s = scope.getSessionFactory().withOptions().atTransaction( revArrCreate ).openSession()) {
 			var e = s.find( ArrayEntity.class, 1L );
 			assertThat( e ).isNotNull();
 			assertThat( e.strings ).containsExactly( "alpha", "beta" );
 		}
 
 		// At revArrMod: [gamma, beta, delta]
-		try ( var s = scope.getSessionFactory().withOptions().atTransaction( revArrMod ).openSession() ) {
+		try (var s = scope.getSessionFactory().withOptions().atTransaction( revArrMod ).openSession()) {
 			var e = s.find( ArrayEntity.class, 1L );
 			assertThat( e ).isNotNull();
 			assertThat( e.strings ).containsExactly( "gamma", "beta", "delta" );
@@ -325,7 +325,7 @@ class AuditElementCollectionTest {
 		scope.inSession( session -> {
 			var rev2Rows = session.createNativeQuery(
 					"select strings, strings_ORDER, REVTYPE from ArrayEntity_strings_aud"
-							+ " where REV = " + revArrMod + " order by strings_ORDER, REVTYPE", Tuple.class
+					+ " where REV = " + revArrMod + " order by strings_ORDER, REVTYPE", Tuple.class
 			).getResultList();
 			assertThat( rev2Rows ).noneMatch( row -> "beta".equals( row.get( "strings" ) ) );
 		} );
@@ -341,14 +341,14 @@ class AuditElementCollectionTest {
 		}
 
 		// At revSsCreate: {alpha, beta} (sorted)
-		try ( var s = scope.getSessionFactory().withOptions().atTransaction( revSsCreate ).openSession() ) {
+		try (var s = scope.getSessionFactory().withOptions().atTransaction( revSsCreate ).openSession()) {
 			var e = s.find( SortedSetEntity.class, 1L );
 			assertThat( e ).isNotNull();
 			assertThat( e.tags ).containsExactly( "alpha", "beta" );
 		}
 
 		// At revSsMod: {beta, gamma} (sorted)
-		try ( var s = scope.getSessionFactory().withOptions().atTransaction( revSsMod ).openSession() ) {
+		try (var s = scope.getSessionFactory().withOptions().atTransaction( revSsMod ).openSession()) {
 			var e = s.find( SortedSetEntity.class, 1L );
 			assertThat( e ).isNotNull();
 			assertThat( e.tags ).containsExactly( "beta", "gamma" );
@@ -366,7 +366,8 @@ class AuditElementCollectionTest {
 		@OrderColumn
 		List<String> strings = new ArrayList<>();
 
-		ListEntity() {}
+		ListEntity() {
+		}
 
 		ListEntity(long id) {
 			this.id = id;
@@ -382,7 +383,8 @@ class AuditElementCollectionTest {
 		@MapKeyColumn(nullable = false)
 		Map<String, String> strings = new HashMap<>();
 
-		MapEntity() {}
+		MapEntity() {
+		}
 
 		MapEntity(long id) {
 			this.id = id;
@@ -397,7 +399,8 @@ class AuditElementCollectionTest {
 		@ElementCollection
 		Set<Component> components = new HashSet<>();
 
-		EmbeddableSetEntity() {}
+		EmbeddableSetEntity() {
+		}
 
 		EmbeddableSetEntity(long id) {
 			this.id = id;
@@ -413,7 +416,8 @@ class AuditElementCollectionTest {
 		@OrderColumn
 		String[] strings;
 
-		ArrayEntity() {}
+		ArrayEntity() {
+		}
 
 		ArrayEntity(long id) {
 			this.id = id;
@@ -429,7 +433,8 @@ class AuditElementCollectionTest {
 		@SortNatural
 		SortedSet<String> tags = new TreeSet<>();
 
-		SortedSetEntity() {}
+		SortedSetEntity() {
+		}
 
 		SortedSetEntity(long id) {
 			this.id = id;
@@ -441,7 +446,8 @@ class AuditElementCollectionTest {
 		String name;
 		int score;
 
-		Component() {}
+		Component() {
+		}
 
 		Component(String name, int score) {
 			this.name = name;

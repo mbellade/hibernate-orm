@@ -17,10 +17,8 @@ import org.checkerframework.checker.nullness.qual.Nullable;
  * points in time. Entities with a temporal key are always read-only.
  *
  * @author Marco Belladelli
- *
- * @since envers-rewrite
- *
  * @see EntityKey
+ * @since envers-rewrite
  */
 public final class TemporalEntityKey extends EntityKey {
 	private final Object txId;

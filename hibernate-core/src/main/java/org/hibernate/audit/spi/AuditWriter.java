@@ -13,7 +13,6 @@ import org.hibernate.engine.spi.SharedSessionContractImplementor;
  * audit table at transaction completion.
  *
  * @see AuditWorkQueue
- *
  * @since envers-rewrite
  */
 @FunctionalInterface

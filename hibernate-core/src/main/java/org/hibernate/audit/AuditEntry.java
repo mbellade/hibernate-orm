@@ -18,11 +18,8 @@ package org.hibernate.audit;
  * @param entity the entity snapshot at this revision
  * @param revision the revision entity (if configured) or transaction identifier
  * @param modificationType the type of modification (ADD/MOD/DEL)
- *
  * @param <T> the entity type
- *
  * @author Marco Belladelli
- *
  * @since envers-rewrite
  */
 public record AuditEntry<T>(T entity, Object revision, ModificationType modificationType) {

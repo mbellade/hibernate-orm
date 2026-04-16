@@ -67,6 +67,7 @@ public interface AuditLog extends AutoCloseable {
 	 *
 	 * @param entityClass the audited entity class
 	 * @param id the entity identifier
+	 *
 	 * @return the list of transaction identifiers
 	 */
 	List<Object> getRevisions(Class<?> entityClass, Object id);
@@ -78,6 +79,7 @@ public interface AuditLog extends AutoCloseable {
 	 * @param entityClass the audited entity class
 	 * @param id the entity identifier
 	 * @param transactionId the transaction identifier
+	 *
 	 * @return the modification type, or {@code null} if the
 	 * entity was not modified at that transaction
 	 */
@@ -87,6 +89,7 @@ public interface AuditLog extends AutoCloseable {
 	 * Check if an entity type is audited.
 	 *
 	 * @param entityClass the entity class
+	 *
 	 * @return {@code true} if the entity is audited
 	 */
 	boolean isAudited(Class<?> entityClass);
@@ -100,6 +103,7 @@ public interface AuditLog extends AutoCloseable {
 	 * @param id the entity identifier
 	 * @param transactionId the transaction identifier
 	 * @param <T> the entity type
+	 *
 	 * @return the entity state at that transaction, or
 	 * {@code null} if the entity did not exist
 	 * (e.g. before creation or after deletion)
@@ -121,6 +125,7 @@ public interface AuditLog extends AutoCloseable {
 	 * @param transactionId the transaction identifier
 	 * @param includeDeletions whether to include deleted entities
 	 * @param <T> the entity type
+	 *
 	 * @return the entity state at that transaction
 	 */
 	<T> T find(Class<T> entityClass, Object id, Object transactionId, boolean includeDeletions);
@@ -133,6 +138,7 @@ public interface AuditLog extends AutoCloseable {
 	 * @param id the entity identifier
 	 * @param instant the point in time
 	 * @param <T> the entity type
+	 *
 	 * @return the entity state, or {@code null}
 	 */
 	<T> T find(Class<T> entityClass, Object id, Instant instant);
@@ -144,6 +150,7 @@ public interface AuditLog extends AutoCloseable {
 	 * @param entityClass the audited entity class
 	 * @param transactionId the transaction identifier
 	 * @param <T> the entity type
+	 *
 	 * @return the entity snapshots at that transaction
 	 */
 	<T> List<T> findEntitiesModifiedAt(Class<T> entityClass, Object transactionId);
@@ -157,6 +164,7 @@ public interface AuditLog extends AutoCloseable {
 	 * @param transactionId the transaction identifier
 	 * @param modificationType the modification type filter
 	 * @param <T> the entity type
+	 *
 	 * @return the matching entity snapshots
 	 */
 	<T> List<T> findEntitiesModifiedAt(Class<T> entityClass, Object transactionId, ModificationType modificationType);
@@ -169,9 +177,12 @@ public interface AuditLog extends AutoCloseable {
 	 * @param entityClass the audited entity class
 	 * @param transactionId the transaction identifier
 	 * @param <T> the entity type
+	 *
 	 * @return entity snapshots grouped by modification type
 	 */
-	<T> Map<ModificationType, List<T>> findEntitiesGroupedByModificationType(Class<T> entityClass, Object transactionId);
+	<T> Map<ModificationType, List<T>> findEntitiesGroupedByModificationType(
+			Class<T> entityClass,
+			Object transactionId);
 
 	/**
 	 * Get the full audit history for an entity, ordered
@@ -188,6 +199,7 @@ public interface AuditLog extends AutoCloseable {
 	 * @param entityClass the audited entity class
 	 * @param id the entity identifier
 	 * @param <T> the entity type
+	 *
 	 * @return the audit history as a list of {@link AuditEntry}
 	 */
 	<T> List<AuditEntry<T>> getHistory(Class<T> entityClass, Object id);
@@ -203,7 +215,9 @@ public interface AuditLog extends AutoCloseable {
 	 * (e.g. {@link DefaultTrackingModifiedEntitiesRevisionEntity}).
 	 *
 	 * @param transactionId the transaction identifier
+	 *
 	 * @return the set of entity classes modified at that transaction
+	 *
 	 * @throws AuditException if entity change tracking is not enabled
 	 */
 	Set<Class<?>> getEntityTypesModifiedAt(Object transactionId);
@@ -217,7 +231,9 @@ public interface AuditLog extends AutoCloseable {
 	 * (e.g. {@link DefaultTrackingModifiedEntitiesRevisionEntity}).
 	 *
 	 * @param transactionId the transaction identifier
+	 *
 	 * @return all entity snapshots modified at that transaction
+	 *
 	 * @throws AuditException if entity change tracking is not enabled
 	 */
 	List<Object> findAllEntitiesModifiedAt(Object transactionId);
@@ -233,7 +249,9 @@ public interface AuditLog extends AutoCloseable {
 	 *
 	 * @param transactionId the transaction identifier
 	 * @param modificationType the modification type filter
+	 *
 	 * @return the matching entity snapshots
+	 *
 	 * @throws AuditException if entity change tracking is not enabled
 	 */
 	List<Object> findAllEntitiesModifiedAt(Object transactionId, ModificationType modificationType);
@@ -247,7 +265,9 @@ public interface AuditLog extends AutoCloseable {
 	 * (e.g. {@link DefaultTrackingModifiedEntitiesRevisionEntity}).
 	 *
 	 * @param transactionId the transaction identifier
+	 *
 	 * @return entity snapshots grouped by modification type
+	 *
 	 * @throws AuditException if entity change tracking is not enabled
 	 */
 	Map<ModificationType, List<Object>> findAllEntitiesGroupedByModificationType(Object transactionId);
@@ -258,7 +278,9 @@ public interface AuditLog extends AutoCloseable {
 	 * {@link RevisionEntity.Timestamp @Timestamp} field.
 	 *
 	 * @param transactionId the transaction identifier
+	 *
 	 * @return the revision timestamp
+	 *
 	 * @throws AuditException if no revision entity is configured
 	 * or the transaction does not exist
 	 */
@@ -271,8 +293,10 @@ public interface AuditLog extends AutoCloseable {
 	 * {@link RevisionEntity.Timestamp @Timestamp} field.
 	 *
 	 * @param instant the point in time
+	 *
 	 * @return the most recent transaction identifier at or
 	 * before the given instant
+	 *
 	 * @throws AuditException if no transaction exists at or
 	 * before the given instant
 	 */
@@ -284,7 +308,9 @@ public interface AuditLog extends AutoCloseable {
 	 *
 	 * @param transactionId the transaction identifier
 	 * @param <T> the revision entity type
+	 *
 	 * @return the revision entity
+	 *
 	 * @throws AuditException if no revision entity is configured
 	 * or the revision does not exist
 	 */
@@ -296,6 +322,7 @@ public interface AuditLog extends AutoCloseable {
 	 *
 	 * @param transactionIds the transaction identifiers
 	 * @param <T> the revision entity type
+	 *
 	 * @return a map from transaction identifier to revision entity
 	 */
 	<T> Map<Object, T> findRevisions(Set<?> transactionIds);

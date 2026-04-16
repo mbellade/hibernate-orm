@@ -48,7 +48,6 @@ import static java.util.Collections.singletonList;
  * mode.
  *
  * @author Marco Belladelli
- *
  * @since envers-rewrite
  */
 public class AuditColumnFunction extends AbstractSqmFunctionDescriptor {
@@ -69,12 +68,12 @@ public class AuditColumnFunction extends AbstractSqmFunctionDescriptor {
 				transactionId
 						// transactionId: type is unknown at registration time, resolved at SQL AST conversion
 						? StandardFunctionReturnTypeResolvers.invariant(
-								new BasicTypeImpl<>( new UnknownBasicJavaType<>( Object.class ), ObjectJdbcType.INSTANCE )
-						)
+						new BasicTypeImpl<>( new UnknownBasicJavaType<>( Object.class ), ObjectJdbcType.INSTANCE )
+				)
 						// modificationType: proper enum type
 						: StandardFunctionReturnTypeResolvers.invariant(
-								typeConfiguration.standardBasicTypeForJavaType( ModificationType.class )
-						),
+						typeConfiguration.standardBasicTypeForJavaType( ModificationType.class )
+				),
 				null
 		);
 		this.transactionId = transactionId;

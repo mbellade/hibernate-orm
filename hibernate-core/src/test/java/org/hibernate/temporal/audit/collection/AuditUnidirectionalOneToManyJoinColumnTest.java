@@ -182,7 +182,7 @@ class AuditUnidirectionalOneToManyJoinColumnTest {
 		final var sf = scope.getSessionFactory();
 
 		// At revCreate: department should have 1 employee (Alice)
-		try ( var s = sf.withOptions().atTransaction( revCreate ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revCreate ).openSession()) {
 			var dept = s.find( Department.class, 1L );
 			assertNotNull( dept );
 			assertEquals( 1, dept.employees.size(), "At revCreate, department should have 1 employee" );
@@ -190,7 +190,7 @@ class AuditUnidirectionalOneToManyJoinColumnTest {
 		}
 
 		// At revAdd: department should have 2 employees
-		try ( var s = sf.withOptions().atTransaction( revAdd ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revAdd ).openSession()) {
 			var dept = s.find( Department.class, 1L );
 			assertNotNull( dept );
 			assertEquals( 2, dept.employees.size(), "At revAdd, department should have 2 employees" );
@@ -199,7 +199,7 @@ class AuditUnidirectionalOneToManyJoinColumnTest {
 		}
 
 		// At revRemove: department should have 1 employee (Bob only)
-		try ( var s = sf.withOptions().atTransaction( revRemove ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revRemove ).openSession()) {
 			var dept = s.find( Department.class, 1L );
 			assertNotNull( dept );
 			assertEquals( 1, dept.employees.size(), "At revRemove, department should have 1 employee" );
@@ -234,14 +234,14 @@ class AuditUnidirectionalOneToManyJoinColumnTest {
 		}
 
 		// At revRecCreate: 2 employees
-		try ( var s = sf.withOptions().atTransaction( revRecCreate ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revRecCreate ).openSession()) {
 			var dept = s.find( Department.class, 10L );
 			assertNotNull( dept );
 			assertEquals( 2, dept.employees.size(), "At revRecCreate, department should have 2 employees" );
 		}
 
 		// At revRecReplace: 2 employees (Bob + Charlie, Alice dropped)
-		try ( var s = sf.withOptions().atTransaction( revRecReplace ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revRecReplace ).openSession()) {
 			var dept = s.find( Department.class, 10L );
 			assertNotNull( dept );
 			assertEquals( 2, dept.employees.size(), "At revRecReplace, department should have 2 employees" );
@@ -267,7 +267,7 @@ class AuditUnidirectionalOneToManyJoinColumnTest {
 		}
 
 		// Point-in-time: employee name should reflect the update
-		try ( var s = sf.withOptions().atTransaction( revUpdMod ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revUpdMod ).openSession()) {
 			var dept = s.find( Department.class, 20L );
 			assertNotNull( dept );
 			assertEquals( 1, dept.employees.size() );
@@ -287,7 +287,8 @@ class AuditUnidirectionalOneToManyJoinColumnTest {
 		@JoinColumn(name = "department_id")
 		List<Employee> employees = new ArrayList<>();
 
-		Department() {}
+		Department() {
+		}
 
 		Department(long id, String name) {
 			this.id = id;
@@ -302,7 +303,8 @@ class AuditUnidirectionalOneToManyJoinColumnTest {
 		long id;
 		String name;
 
-		Employee() {}
+		Employee() {
+		}
 
 		Employee(long id, String name) {
 			this.id = id;

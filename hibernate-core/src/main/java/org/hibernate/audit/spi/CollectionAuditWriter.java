@@ -12,7 +12,6 @@ import org.hibernate.engine.spi.SharedSessionContractImplementor;
  * table at transaction completion.
  *
  * @see AuditWorkQueue
- *
  * @since envers-rewrite
  */
 @FunctionalInterface
@@ -23,7 +22,7 @@ public interface CollectionAuditWriter {
 	 * @param collection the persistent collection
 	 * @param ownerId the owning entity's identifier
 	 * @param originalSnapshot the collection snapshot before the first flush,
-	 *                         or {@code null} for new collections
+	 * or {@code null} for new collections
 	 * @param session the current session
 	 */
 	void writeCollectionAuditRows(

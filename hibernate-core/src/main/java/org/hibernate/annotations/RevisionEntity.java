@@ -39,7 +39,6 @@ import static java.lang.annotation.RetentionPolicy.RUNTIME;
  * @see TransactionId
  * @see Timestamp
  * @see RevisionListener
- *
  * @since envers-rewrite
  */
 @Documented
@@ -64,12 +63,11 @@ public @interface RevisionEntity {
 	 * revision entity is inserted.
 	 *
 	 * @see RevisionEntity
-	 *
 	 * @since envers-rewrite
 	 */
 	@Documented
 	@Retention(RUNTIME)
-	@Target({METHOD, FIELD})
+	@Target({ METHOD, FIELD })
 	@interface TransactionId {
 	}
 
@@ -84,12 +82,11 @@ public @interface RevisionEntity {
 	 * {@link java.time.LocalDateTime}.
 	 *
 	 * @see RevisionEntity
-	 *
 	 * @since envers-rewrite
 	 */
 	@Documented
 	@Retention(RUNTIME)
-	@Target({METHOD, FIELD})
+	@Target({ METHOD, FIELD })
 	@interface Timestamp {
 	}
 
@@ -105,12 +102,11 @@ public @interface RevisionEntity {
 	 * via {@link org.hibernate.audit.AuditLog}.
 	 *
 	 * @see RevisionEntity
-	 *
 	 * @since envers-rewrite
 	 */
 	@Documented
 	@Retention(RUNTIME)
-	@Target({METHOD, FIELD})
+	@Target({ METHOD, FIELD })
 	@interface ModifiedEntities {
 	}
 }

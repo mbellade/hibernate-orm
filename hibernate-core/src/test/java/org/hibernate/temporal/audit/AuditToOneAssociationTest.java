@@ -109,7 +109,7 @@ class AuditToOneAssociationTest {
 
 		// Rev 4: null out Book.author
 		sf.inTransaction( session ->
-			session.find( Book.class, 1L ).setAuthor( null )
+				session.find( Book.class, 1L ).setAuthor( null )
 		);
 		revNull = currentTxId;
 
@@ -117,7 +117,7 @@ class AuditToOneAssociationTest {
 
 		// Rev 5: create Book with null author
 		sf.inTransaction( session ->
-			session.persist( new Book( 10L, "Orphan Book", null ) )
+				session.persist( new Book( 10L, "Orphan Book", null ) )
 		);
 		revNullCreate = currentTxId;
 
@@ -131,7 +131,7 @@ class AuditToOneAssociationTest {
 
 		// Rev 7: clear author
 		sf.inTransaction( session ->
-			session.find( Book.class, 10L ).setAuthor( null )
+				session.find( Book.class, 10L ).setAuthor( null )
 		);
 		revNullClear = currentTxId;
 
@@ -157,7 +157,7 @@ class AuditToOneAssociationTest {
 
 		// Rev 10: null passport
 		sf.inTransaction( session ->
-			session.find( Person.class, 1L ).passport = null
+				session.find( Person.class, 1L ).passport = null
 		);
 		revO2oNull = currentTxId;
 	}
@@ -183,7 +183,7 @@ class AuditToOneAssociationTest {
 		final var sf = scope.getSessionFactory();
 
 		// Rev 1: Book->Author->Publisher at creation
-		try ( var s = sf.withStatelessOptions().atTransaction( revCreate ).openStatelessSession() ) {
+		try (var s = sf.withStatelessOptions().atTransaction( revCreate ).openStatelessSession()) {
 			var book = s.get( Book.class, 1L );
 			assertEquals( "Book V1", book.getTitle() );
 			assertEquals( "Author V1", book.getAuthor().getName() );
@@ -191,7 +191,7 @@ class AuditToOneAssociationTest {
 		}
 
 		// Rev 2: all updated
-		try ( var s = sf.withStatelessOptions().atTransaction( revUpdate ).openStatelessSession() ) {
+		try (var s = sf.withStatelessOptions().atTransaction( revUpdate ).openStatelessSession()) {
 			var book = s.get( Book.class, 1L );
 			assertEquals( "Book V2", book.getTitle() );
 			assertEquals( "Author V2", book.getAuthor().getName() );
@@ -199,14 +199,14 @@ class AuditToOneAssociationTest {
 		}
 
 		// Rev 3: FK reassigned
-		try ( var s = sf.withStatelessOptions().atTransaction( revReassign ).openStatelessSession() ) {
+		try (var s = sf.withStatelessOptions().atTransaction( revReassign ).openStatelessSession()) {
 			var book = s.get( Book.class, 1L );
 			assertEquals( 2L, book.getAuthor().id );
 			assertEquals( "Author B", book.getAuthor().getName() );
 		}
 
 		// Rev 4: FK null
-		try ( var s = sf.withStatelessOptions().atTransaction( revNull ).openStatelessSession() ) {
+		try (var s = sf.withStatelessOptions().atTransaction( revNull ).openStatelessSession()) {
 			assertNull( s.get( Book.class, 1L ).getAuthor() );
 		}
 	}
@@ -216,13 +216,13 @@ class AuditToOneAssociationTest {
 	void testLazyPointInTimeRead(SessionFactoryScope scope) {
 		final var sf = scope.getSessionFactory();
 
-		try ( var s = sf.withOptions().atTransaction( revCreate ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revCreate ).openSession()) {
 			var author = s.find( LazyBook.class, 2L ).getAuthor();
 			assertEquals( "Author V1", author.getName() );
 			assertEquals( "Pub V1", author.getPublisher().getName() );
 		}
 
-		try ( var s = sf.withOptions().atTransaction( revUpdate ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revUpdate ).openSession()) {
 			var author = s.find( LazyBook.class, 2L ).getAuthor();
 			assertEquals( "Author V2", author.getName() );
 			assertEquals( "Pub V2", author.getPublisher().getName() );
@@ -264,8 +264,8 @@ class AuditToOneAssociationTest {
 	@Test
 	@Order(5)
 	void testJoinFetchAllRevisions(SessionFactoryScope scope) {
-		try ( var session = scope.getSessionFactory().withOptions()
-				.atTransaction( AuditLog.ALL_REVISIONS ).openSession() ) {
+		try (var session = scope.getSessionFactory().withOptions()
+				.atTransaction( AuditLog.ALL_REVISIONS ).openSession()) {
 			// Single-level join fetch: inner join filters out revNull (null author)
 			final var rows = session.createSelectionQuery(
 					"select e, transactionId(e), modificationType(e)"
@@ -302,7 +302,7 @@ class AuditToOneAssociationTest {
 	void testJoinFetchPointInTime(SessionFactoryScope scope) {
 		final var sf = scope.getSessionFactory();
 
-		try ( var session = sf.withOptions().atTransaction( revCreate ).openSession() ) {
+		try (var session = sf.withOptions().atTransaction( revCreate ).openSession()) {
 			final var book = session.createSelectionQuery(
 					"from Book e join fetch e.author where e.id = :id",
 					Book.class
@@ -312,7 +312,7 @@ class AuditToOneAssociationTest {
 			assertEquals( "Author V1", book.getAuthor().getName() );
 		}
 
-		try ( var session = sf.withOptions().atTransaction( revUpdate ).openSession() ) {
+		try (var session = sf.withOptions().atTransaction( revUpdate ).openSession()) {
 			final var book = session.createSelectionQuery(
 					"from Book e join fetch e.author where e.id = :id",
 					Book.class
@@ -329,7 +329,7 @@ class AuditToOneAssociationTest {
 		final var sf = scope.getSessionFactory();
 
 		// Explicit entity join (not fetch join), hits consumeEntityJoin path
-		try ( var session = sf.withOptions().atTransaction( revCreate ).openSession() ) {
+		try (var session = sf.withOptions().atTransaction( revCreate ).openSession()) {
 			final var rows = session.createSelectionQuery(
 					"select b, a from Book b join Author a on a.id = b.author.id"
 					+ " where b.id = :id",
@@ -341,7 +341,7 @@ class AuditToOneAssociationTest {
 			assertEquals( "Author V1", ((Author) rows.get( 0 )[1]).getName() );
 		}
 
-		try ( var session = sf.withOptions().atTransaction( revUpdate ).openSession() ) {
+		try (var session = sf.withOptions().atTransaction( revUpdate ).openSession()) {
 			final var rows = session.createSelectionQuery(
 					"select b, a from Book b join Author a on a.id = b.author.id"
 					+ " where b.id = :id",
@@ -361,15 +361,15 @@ class AuditToOneAssociationTest {
 	void testNullAssociationPointInTimeRead(SessionFactoryScope scope) {
 		final var sf = scope.getSessionFactory();
 
-		try ( var s = sf.withStatelessOptions().atTransaction( revNullCreate ).openStatelessSession() ) {
+		try (var s = sf.withStatelessOptions().atTransaction( revNullCreate ).openStatelessSession()) {
 			assertNull( s.get( Book.class, 10L ).getAuthor() );
 		}
 
-		try ( var s = sf.withStatelessOptions().atTransaction( revNullSet ).openStatelessSession() ) {
+		try (var s = sf.withStatelessOptions().atTransaction( revNullSet ).openStatelessSession()) {
 			assertEquals( "Late Author", s.get( Book.class, 10L ).getAuthor().getName() );
 		}
 
-		try ( var s = sf.withStatelessOptions().atTransaction( revNullClear ).openStatelessSession() ) {
+		try (var s = sf.withStatelessOptions().atTransaction( revNullClear ).openStatelessSession()) {
 			assertNull( s.get( Book.class, 10L ).getAuthor() );
 		}
 	}
@@ -395,8 +395,8 @@ class AuditToOneAssociationTest {
 	@Test
 	@Order(10)
 	void testLeftJoinFetchNullAssociationAllRevisions(SessionFactoryScope scope) {
-		try ( var session = scope.getSessionFactory().withOptions()
-				.atTransaction( AuditLog.ALL_REVISIONS ).openSession() ) {
+		try (var session = scope.getSessionFactory().withOptions()
+				.atTransaction( AuditLog.ALL_REVISIONS ).openSession()) {
 			final var rows = session.createSelectionQuery(
 					"select e, transactionId(e), modificationType(e)"
 					+ " from Book e left join fetch e.author"
@@ -419,15 +419,15 @@ class AuditToOneAssociationTest {
 	void testOneToOnePointInTimeRead(SessionFactoryScope scope) {
 		final var sf = scope.getSessionFactory();
 
-		try ( var s = sf.withStatelessOptions().atTransaction( revO2oCreate ).openStatelessSession() ) {
+		try (var s = sf.withStatelessOptions().atTransaction( revO2oCreate ).openStatelessSession()) {
 			assertEquals( "AB123", s.get( Person.class, 1L ).passport.number );
 		}
 
-		try ( var s = sf.withStatelessOptions().atTransaction( revO2oReassign ).openStatelessSession() ) {
+		try (var s = sf.withStatelessOptions().atTransaction( revO2oReassign ).openStatelessSession()) {
 			assertEquals( "CD456", s.get( Person.class, 1L ).passport.number );
 		}
 
-		try ( var s = sf.withStatelessOptions().atTransaction( revO2oNull ).openStatelessSession() ) {
+		try (var s = sf.withStatelessOptions().atTransaction( revO2oNull ).openStatelessSession()) {
 			assertNull( s.get( Person.class, 1L ).passport );
 		}
 	}
@@ -453,7 +453,8 @@ class AuditToOneAssociationTest {
 		long id;
 		String name;
 
-		Publisher() {}
+		Publisher() {
+		}
 
 		Publisher(long id, String name) {
 			this.id = id;
@@ -478,7 +479,8 @@ class AuditToOneAssociationTest {
 		@ManyToOne
 		Publisher publisher;
 
-		Author() {}
+		Author() {
+		}
 
 		Author(long id, String name) {
 			this.id = id;
@@ -513,7 +515,8 @@ class AuditToOneAssociationTest {
 		@ManyToOne
 		Author author;
 
-		Book() {}
+		Book() {
+		}
 
 		Book(long id, String title, Author author) {
 			this.id = id;
@@ -547,7 +550,8 @@ class AuditToOneAssociationTest {
 		@ManyToOne(fetch = FetchType.LAZY)
 		Author author;
 
-		LazyBook() {}
+		LazyBook() {
+		}
 
 		LazyBook(long id, String title, Author author) {
 			this.id = id;
@@ -577,7 +581,8 @@ class AuditToOneAssociationTest {
 		@OneToOne
 		Passport passport;
 
-		Person() {}
+		Person() {
+		}
 
 		Person(long id, String name) {
 			this.id = id;
@@ -592,7 +597,8 @@ class AuditToOneAssociationTest {
 		long id;
 		String number;
 
-		Passport() {}
+		Passport() {
+		}
 
 		Passport(long id, String number) {
 			this.id = id;

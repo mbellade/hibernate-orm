@@ -24,11 +24,9 @@ import org.hibernate.annotations.RevisionEntity;
  * For entity change tracking (cross-type revision queries),
  * use {@link DefaultTrackingModifiedEntitiesRevisionEntity} instead.
  *
+ * @author Marco Belladelli
  * @see RevisionEntity
  * @see DefaultTrackingModifiedEntitiesRevisionEntity
- *
- * @author Marco Belladelli
- *
  * @since envers-rewrite
  */
 @RevisionEntity

@@ -11,7 +11,6 @@ package org.hibernate.audit;
  * the current user or a comment.
  *
  * @author Marco Belladelli
- *
  * @since envers-rewrite
  */
 public interface RevisionListener {

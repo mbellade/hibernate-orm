@@ -10,7 +10,6 @@ import org.hibernate.HibernateException;
  * Indicates a problem related to audit functionality.
  *
  * @author Marco Belladelli
- *
  * @since envers-rewrite
  */
 public class AuditException extends HibernateException {

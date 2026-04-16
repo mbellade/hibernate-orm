@@ -153,7 +153,7 @@ class AuditManyToManyTest {
 		final var sf = scope.getSessionFactory();
 
 		// At revCreate: 1 course
-		try ( var s = sf.withOptions().atTransaction( revCreate ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revCreate ).openSession()) {
 			var student = s.find( Student.class, 1L );
 			assertNotNull( student );
 			assertEquals( 1, student.courses.size(), "At revCreate, student should have 1 course" );
@@ -161,14 +161,14 @@ class AuditManyToManyTest {
 		}
 
 		// At revAdd: 2 courses
-		try ( var s = sf.withOptions().atTransaction( revAdd ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revAdd ).openSession()) {
 			var student = s.find( Student.class, 1L );
 			assertNotNull( student );
 			assertEquals( 2, student.courses.size(), "At revAdd, student should have 2 courses" );
 		}
 
 		// At revDrop: 1 course (Physics only)
-		try ( var s = sf.withOptions().atTransaction( revDrop ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revDrop ).openSession()) {
 			var student = s.find( Student.class, 1L );
 			assertNotNull( student );
 			assertEquals( 1, student.courses.size(), "At revDrop, student should have 1 course" );
@@ -202,14 +202,14 @@ class AuditManyToManyTest {
 		}
 
 		// At revRecCreate: 2 courses (Math + Physics)
-		try ( var s = sf.withOptions().atTransaction( revRecCreate ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revRecCreate ).openSession()) {
 			var student = s.find( Student.class, 10L );
 			assertNotNull( student );
 			assertEquals( 2, student.courses.size(), "At revRecCreate, student should have 2 courses" );
 		}
 
 		// At revRecReplace: 2 courses (Physics + Chemistry, Math dropped)
-		try ( var s = sf.withOptions().atTransaction( revRecReplace ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revRecReplace ).openSession()) {
 			var student = s.find( Student.class, 10L );
 			assertNotNull( student );
 			assertEquals( 2, student.courses.size(), "At revRecReplace, student should have 2 courses" );
@@ -229,7 +229,8 @@ class AuditManyToManyTest {
 		@ManyToMany
 		List<Course> courses = new ArrayList<>();
 
-		Student() {}
+		Student() {
+		}
 
 		Student(long id, String name) {
 			this.id = id;
@@ -244,7 +245,8 @@ class AuditManyToManyTest {
 		long id;
 		String name;
 
-		Course() {}
+		Course() {
+		}
 
 		Course(long id, String name) {
 			this.id = id;

@@ -81,7 +81,7 @@ class AuditEntityTest {
 					assertNull( entity );
 				}
 		);
-		try ( var s = scope.getSessionFactory().withOptions().atTransaction(0).open() ) {
+		try (var s = scope.getSessionFactory().withOptions().atTransaction( 0 ).open()) {
 			AuditEntity entity = s.find( AuditEntity.class, 1L );
 			assertNull( entity );
 			AuditEntity result =
@@ -89,25 +89,25 @@ class AuditEntityTest {
 							.getSingleResultOrNull();
 			assertNull( result );
 		}
-		try ( var s = scope.getSessionFactory().withOptions().atTransaction(1).open() ) {
+		try (var s = scope.getSessionFactory().withOptions().atTransaction( 1 ).open()) {
 			AuditEntity entity = s.find( AuditEntity.class, 1L );
-			assertEquals( "hello", entity.text);
-			assertEquals( Set.of("hello"), entity.stringSet);
+			assertEquals( "hello", entity.text );
+			assertEquals( Set.of( "hello" ), entity.stringSet );
 			AuditEntity result =
 					s.createSelectionQuery( "from AuditEntity where id = 1", AuditEntity.class )
 							.getSingleResultOrNull();
 			assertSame( entity, result );
 		}
-		try ( var s = scope.getSessionFactory().withOptions().atTransaction(2).open() ) {
+		try (var s = scope.getSessionFactory().withOptions().atTransaction( 2 ).open()) {
 			AuditEntity entity = s.find( AuditEntity.class, 1L );
-			assertEquals( "goodbye", entity.text);
-			assertEquals( Set.of("hello","goodbye"), entity.stringSet );
+			assertEquals( "goodbye", entity.text );
+			assertEquals( Set.of( "hello", "goodbye" ), entity.stringSet );
 			AuditEntity result =
 					s.createSelectionQuery( "from AuditEntity where id = 1", AuditEntity.class )
 							.getSingleResultOrNull();
 			assertSame( entity, result );
 		}
-		try ( var s = scope.getSessionFactory().withOptions().atTransaction(3).open() ) {
+		try (var s = scope.getSessionFactory().withOptions().atTransaction( 3 ).open()) {
 			AuditEntity entity = s.find( AuditEntity.class, 1L );
 			assertNull( entity );
 			AuditEntity result =
@@ -115,7 +115,7 @@ class AuditEntityTest {
 							.getSingleResultOrNull();
 			assertNull( result );
 		}
-		try ( var s = scope.getSessionFactory().withOptions().atTransaction(4).open() ) {
+		try (var s = scope.getSessionFactory().withOptions().atTransaction( 4 ).open()) {
 			AuditEntity entity = s.find( AuditEntity.class, 1L );
 			assertNull( entity );
 			AuditEntity result =
@@ -124,6 +124,7 @@ class AuditEntityTest {
 			assertNull( result );
 		}
 	}
+
 	/**
 	 * Test that {@code atTransaction().find()} returns the most recent
 	 * snapshot at or before the given revision, even when the entity
@@ -158,17 +159,17 @@ class AuditEntityTest {
 
 		// Entity A was only modified at rev 701, but should be visible
 		// at rev 702 and 703 with its original state
-		try ( var s = sf.withOptions().atTransaction( 702 ).open() ) {
+		try (var s = sf.withOptions().atTransaction( 702 ).open()) {
 			var a = s.find( AuditEntity.class, 701L );
 			assertEquals( "A-created", a.text );
 		}
-		try ( var s = sf.withOptions().atTransaction( 703 ).open() ) {
+		try (var s = sf.withOptions().atTransaction( 703 ).open()) {
 			var a = s.find( AuditEntity.class, 701L );
 			assertEquals( "A-created", a.text );
 		}
 
 		// Entity B should not be visible at rev 701 (created later)
-		try ( var s = sf.withOptions().atTransaction( 701 ).open() ) {
+		try (var s = sf.withOptions().atTransaction( 701 ).open()) {
 			var b = s.find( AuditEntity.class, 702L );
 			assertNull( b );
 		}
@@ -191,13 +192,13 @@ class AuditEntityTest {
 			e.address = new Address( "456 Oak Ave", "Shelbyville" );
 		} );
 
-		try ( var s = scope.getSessionFactory().withOptions().atTransaction( 101 ).open() ) {
+		try (var s = scope.getSessionFactory().withOptions().atTransaction( 101 ).open()) {
 			var e = s.find( EmbeddedEntity.class, 1L );
 			assertEquals( "123 Main St", e.address.street );
 			assertEquals( "Springfield", e.address.city );
 		}
 
-		try ( var s = scope.getSessionFactory().withOptions().atTransaction( 102 ).open() ) {
+		try (var s = scope.getSessionFactory().withOptions().atTransaction( 102 ).open()) {
 			var e = s.find( EmbeddedEntity.class, 1L );
 			assertEquals( "456 Oak Ave", e.address.street );
 			assertEquals( "Shelbyville", e.address.city );
@@ -230,13 +231,13 @@ class AuditEntityTest {
 		} );
 
 		// Verify: revision 201 = ADD with "initial"
-		try ( var s = scope.getSessionFactory().withOptions().atTransaction( 201 ).open() ) {
+		try (var s = scope.getSessionFactory().withOptions().atTransaction( 201 ).open()) {
 			var e = s.find( AuditEntity.class, 99L );
 			assertEquals( "initial", e.text );
 		}
 
 		// Verify: revision 202 = single MOD with "second change" (not two rows)
-		try ( var s = scope.getSessionFactory().withOptions().atTransaction( 202 ).open() ) {
+		try (var s = scope.getSessionFactory().withOptions().atTransaction( 202 ).open()) {
 			var e = s.find( AuditEntity.class, 99L );
 			assertEquals( "second change", e.text );
 		}
@@ -294,7 +295,7 @@ class AuditEntityTest {
 			final var history = auditLog.getHistory( AuditEntity.class, 77L );
 			assertEquals( 1, history.size() );
 			assertEquals( org.hibernate.audit.ModificationType.ADD, history.get( 0 ).modificationType() );
-			assertEquals( "after", ( (AuditEntity) history.get( 0 ).entity() ).text );
+			assertEquals( "after", ((AuditEntity) history.get( 0 ).entity()).text );
 		}
 	}
 
@@ -324,7 +325,7 @@ class AuditEntityTest {
 		} );
 
 		// Verify: at revision 502, collection has a, b, c
-		try ( var s = scope.getSessionFactory().withOptions().atTransaction( 502 ).open() ) {
+		try (var s = scope.getSessionFactory().withOptions().atTransaction( 502 ).open()) {
 			var e = s.find( AuditEntity.class, 66L );
 			assertEquals( Set.of( "a", "b", "c" ), e.stringSet );
 		}
@@ -376,16 +377,24 @@ class AuditEntityTest {
 	@Audited
 	@Entity(name = "EmbeddedEntity")
 	static class EmbeddedEntity {
-		@Id long id;
+		@Id
+		long id;
 		String name;
-		@Embedded Address address;
+		@Embedded
+		Address address;
 	}
 
 	@Embeddable
 	static class Address {
 		String street;
 		String city;
-		Address() {}
-		Address(String street, String city) { this.street = street; this.city = city; }
+
+		Address() {
+		}
+
+		Address(String street, String city) {
+			this.street = street;
+			this.city = city;
+		}
 	}
 }

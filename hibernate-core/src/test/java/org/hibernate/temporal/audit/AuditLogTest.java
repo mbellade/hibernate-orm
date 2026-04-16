@@ -6,11 +6,13 @@ package org.hibernate.temporal.audit;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
+
 import org.hibernate.annotations.Audited;
 import org.hibernate.audit.AuditLog;
 import org.hibernate.audit.AuditLogFactory;
 import org.hibernate.audit.ModificationType;
 import org.hibernate.cfg.StateManagementSettings;
+
 import org.hibernate.testing.orm.junit.DomainModel;
 import org.hibernate.testing.orm.junit.ServiceRegistry;
 import org.hibernate.testing.orm.junit.AuditedTest;
@@ -176,7 +178,7 @@ class AuditLogTest {
 			// Should be in ascending order
 			for ( int i = 1; i < revisions.size(); i++ ) {
 				assertTrue(
-						((Comparable) revisions.get( i - 1 )).compareTo( revisions.get( i ) ) < 0,
+						( (Comparable) revisions.get( i - 1 ) ).compareTo( revisions.get( i ) ) < 0,
 						"Revisions should be in ascending order"
 				);
 			}
@@ -198,10 +200,14 @@ class AuditLogTest {
 	@Order(6)
 	void testGetModificationTypeAdd(SessionFactoryScope scope) {
 		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
-			assertEquals( ModificationType.ADD,
-					auditLog.getModificationType( AuditedEntity.class, 1L, revCreate1 ) );
-			assertEquals( ModificationType.ADD,
-					auditLog.getModificationType( AuditedEntity.class, 2L, revCreate2 ) );
+			assertEquals(
+					ModificationType.ADD,
+					auditLog.getModificationType( AuditedEntity.class, 1L, revCreate1 )
+			);
+			assertEquals(
+					ModificationType.ADD,
+					auditLog.getModificationType( AuditedEntity.class, 2L, revCreate2 )
+			);
 		}
 	}
 
@@ -210,10 +216,14 @@ class AuditLogTest {
 	void testGetModificationTypeMod(SessionFactoryScope scope) {
 		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
 			// Entity 1 was also updated in rev2
-			assertEquals( ModificationType.MOD,
-					auditLog.getModificationType( AuditedEntity.class, 1L, revCreate2 ) );
-			assertEquals( ModificationType.MOD,
-					auditLog.getModificationType( AuditedEntity.class, 2L, revUpdate ) );
+			assertEquals(
+					ModificationType.MOD,
+					auditLog.getModificationType( AuditedEntity.class, 1L, revCreate2 )
+			);
+			assertEquals(
+					ModificationType.MOD,
+					auditLog.getModificationType( AuditedEntity.class, 2L, revUpdate )
+			);
 		}
 	}
 
@@ -221,8 +231,10 @@ class AuditLogTest {
 	@Order(8)
 	void testGetModificationTypeDel(SessionFactoryScope scope) {
 		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
-			assertEquals( ModificationType.DEL,
-					auditLog.getModificationType( AuditedEntity.class, 1L, revDelete ) );
+			assertEquals(
+					ModificationType.DEL,
+					auditLog.getModificationType( AuditedEntity.class, 1L, revDelete )
+			);
 		}
 	}
 
@@ -255,8 +267,10 @@ class AuditLogTest {
 			assertEquals( "first", adds.get( 0 ).name );
 
 			// No MODs or DELs in rev 1
-			assertTrue( auditLog.findEntitiesModifiedAt( AuditedEntity.class, revCreate1, ModificationType.MOD ).isEmpty() );
-			assertTrue( auditLog.findEntitiesModifiedAt( AuditedEntity.class, revCreate1, ModificationType.DEL ).isEmpty() );
+			assertTrue( auditLog.findEntitiesModifiedAt( AuditedEntity.class, revCreate1, ModificationType.MOD )
+					            .isEmpty() );
+			assertTrue( auditLog.findEntitiesModifiedAt( AuditedEntity.class, revCreate1, ModificationType.DEL )
+					            .isEmpty() );
 		}
 	}
 
@@ -299,10 +313,10 @@ class AuditLogTest {
 			// No revision should exist beyond revDelete for entity 1
 			// or beyond revUpdate for entity 2
 			for ( var rev : revisions1 ) {
-				assertTrue( ((Number) rev).intValue() <= revDelete );
+				assertTrue( ( (Number) rev ).intValue() <= revDelete );
 			}
 			for ( var rev : revisions2 ) {
-				assertTrue( ((Number) rev).intValue() <= revUpdate );
+				assertTrue( ( (Number) rev ).intValue() <= revUpdate );
 			}
 		}
 	}
@@ -320,27 +334,27 @@ class AuditLogTest {
 			assertEquals( 3, revisions.size() );
 
 			// First revision: entity was created with name "first"
-			final int firstRev = ((Number) revisions.get( 0 )).intValue();
+			final int firstRev = ( (Number) revisions.get( 0 ) ).intValue();
 			assertEquals( ModificationType.ADD, auditLog.getModificationType( AuditedEntity.class, 1L, firstRev ) );
-			try ( var s = sf.withOptions().atTransaction( firstRev ).open() ) {
+			try (var s = sf.withOptions().atTransaction( firstRev ).open()) {
 				final var entity = s.find( AuditedEntity.class, 1L );
 				assertNotNull( entity );
 				assertEquals( "first", entity.name );
 			}
 
 			// Second revision: entity was updated to "first-updated"
-			final int secondRev = ((Number) revisions.get( 1 )).intValue();
+			final int secondRev = ( (Number) revisions.get( 1 ) ).intValue();
 			assertEquals( ModificationType.MOD, auditLog.getModificationType( AuditedEntity.class, 1L, secondRev ) );
-			try ( var s = sf.withOptions().atTransaction( secondRev ).open() ) {
+			try (var s = sf.withOptions().atTransaction( secondRev ).open()) {
 				final var entity = s.find( AuditedEntity.class, 1L );
 				assertNotNull( entity );
 				assertEquals( "first-updated", entity.name );
 			}
 
 			// Third revision: entity was deleted
-			final int thirdRev = ((Number) revisions.get( 2 )).intValue();
+			final int thirdRev = ( (Number) revisions.get( 2 ) ).intValue();
 			assertEquals( ModificationType.DEL, auditLog.getModificationType( AuditedEntity.class, 1L, thirdRev ) );
-			try ( var s = sf.withOptions().atTransaction( thirdRev ).open() ) {
+			try (var s = sf.withOptions().atTransaction( thirdRev ).open()) {
 				final var entity = s.find( AuditedEntity.class, 1L );
 				assertNull( entity );
 			}

@@ -54,12 +54,12 @@ class LegacyAuditReaderTest {
 
 		// REV 2: update
 		scope.getSessionFactory().inTransaction( session ->
-			session.find( LegacyEntity.class, 1L ).name = "updated"
+				session.find( LegacyEntity.class, 1L ).name = "updated"
 		);
 
 		// REV 3: delete
 		scope.getSessionFactory().inTransaction( session ->
-			session.remove( session.find( LegacyEntity.class, 1L ) )
+				session.remove( session.find( LegacyEntity.class, 1L ) )
 		);
 	}
 

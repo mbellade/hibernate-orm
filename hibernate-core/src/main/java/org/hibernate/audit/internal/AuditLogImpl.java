@@ -5,6 +5,7 @@
 package org.hibernate.audit.internal;
 
 import org.checkerframework.checker.nullness.qual.Nullable;
+
 import org.hibernate.audit.AuditEntry;
 import org.hibernate.audit.AuditException;
 import org.hibernate.audit.AuditLog;
@@ -52,7 +53,7 @@ public class AuditLogImpl implements AuditReader {
 
 	/**
 	 * @param auditSession a session configured with {@link AuditLog#ALL_REVISIONS}
-	 *        temporal context for reading audit tables
+	 * temporal context for reading audit tables
 	 */
 	public AuditLogImpl(SharedSessionContractImplementor auditSession) {
 		this.auditSession = auditSession;
@@ -88,8 +89,8 @@ public class AuditLogImpl implements AuditReader {
 		final var entityName = requireAuditedEntityName( entityClass );
 		return auditSession.createSelectionQuery(
 				"select transactionId(e) from " + entityName + " e"
-				+ " where e.id = :id"
-				+ " order by transactionId(e)",
+						+ " where e.id = :id"
+						+ " order by transactionId(e)",
 				Object.class
 		).setParameter( "id", id ).getResultList();
 	}
@@ -102,8 +103,8 @@ public class AuditLogImpl implements AuditReader {
 		final var entityName = requireAuditedEntityName( entityClass );
 		return auditSession.createSelectionQuery(
 						"select modificationType(e) from " + entityName + " e"
-						+ " where e.id = :id"
-						+ " and transactionId(e) = :txId",
+								+ " where e.id = :id"
+								+ " and transactionId(e) = :txId",
 						ModificationType.class
 				).setParameter( "id", id )
 				.setParameter( "txId", transactionId )
@@ -114,8 +115,8 @@ public class AuditLogImpl implements AuditReader {
 	public boolean isAudited(Class<?> entityClass) {
 		requireNonNull( entityClass, "Entity class" );
 		return sessionFactory.getMappingMetamodel()
-					.getEntityDescriptor( entityClass )
-					.getAuditMapping() != null;
+				.getEntityDescriptor( entityClass )
+				.getAuditMapping() != null;
 	}
 
 	@Override
@@ -212,7 +213,7 @@ public class AuditLogImpl implements AuditReader {
 		}
 		final List<Object[]> rows = auditSession.createSelectionQuery(
 				"select e, modificationType(e) from " + entityName + " e"
-				+ " where transactionId(e) = :txId",
+						+ " where transactionId(e) = :txId",
 				Object[].class
 		).setParameter( "txId", transactionId ).getResultList();
 		for ( var row : rows ) {
@@ -233,17 +234,17 @@ public class AuditLogImpl implements AuditReader {
 		final String hql;
 		if ( revisionEntityName != null ) {
 			hql = "select e, r, modificationType(e)"
-				+ " from " + entityName + " e"
-				+ " join " + revisionEntityName + " r"
-				+ " on r." + transactionIdProperty + " = transactionId(e)"
-				+ " where e.id = :id"
-				+ " order by transactionId(e)";
+					+ " from " + entityName + " e"
+					+ " join " + revisionEntityName + " r"
+					+ " on r." + transactionIdProperty + " = transactionId(e)"
+					+ " where e.id = :id"
+					+ " order by transactionId(e)";
 		}
 		else {
 			hql = "select e, transactionId(e), modificationType(e)"
-				+ " from " + entityName + " e"
-				+ " where e.id = :id"
-				+ " order by transactionId(e)";
+					+ " from " + entityName + " e"
+					+ " where e.id = :id"
+					+ " order by transactionId(e)";
 		}
 
 		final List<Object[]> rows = auditSession
@@ -317,8 +318,8 @@ public class AuditLogImpl implements AuditReader {
 	private List<String> queryRevChangesEntityNames(Object transactionId) {
 		return auditSession.createSelectionQuery(
 				"select element(r." + modifiedEntitiesProperty + ")"
-				+ " from " + revisionEntityName + " r"
-				+ " where r." + transactionIdProperty + " = :txId",
+						+ " from " + revisionEntityName + " r"
+						+ " where r." + transactionIdProperty + " = :txId",
 				String.class
 		).setParameter( "txId", transactionId ).getResultList();
 	}
@@ -327,8 +328,8 @@ public class AuditLogImpl implements AuditReader {
 		if ( modifiedEntitiesProperty == null ) {
 			throw new AuditException(
 					"Entity change tracking is not enabled. "
-					+ "Use a @RevisionEntity with a @RevisionEntity.ModifiedEntities property "
-					+ "(e.g. DefaultTrackingModifiedEntitiesRevisionEntity)."
+							+ "Use a @RevisionEntity with a @RevisionEntity.ModifiedEntities property "
+							+ "(e.g. DefaultTrackingModifiedEntitiesRevisionEntity)."
 			);
 		}
 	}
@@ -340,8 +341,8 @@ public class AuditLogImpl implements AuditReader {
 		requireNonNull( transactionId, "Transaction identifier" );
 		requireRevisionEntity();
 		final String hql = "select e." + timestampProperty
-						+ " from " + revisionEntityName + " e"
-						+ " where e." + transactionIdProperty + " = :rev";
+				+ " from " + revisionEntityName + " e"
+				+ " where e." + transactionIdProperty + " = :rev";
 		final var result = auditSession
 				.createSelectionQuery( hql, Object.class )
 				.setParameter( "rev", transactionId )
@@ -378,9 +379,9 @@ public class AuditLogImpl implements AuditReader {
 		requireRevisionEntity();
 		final var results = auditSession.createSelectionQuery(
 				"select r." + transactionIdProperty + ", r"
-				+ " from " + revisionEntityName + " r"
-				+ " where r." + transactionIdProperty + " in :revs"
-				+ " order by r." + transactionIdProperty,
+						+ " from " + revisionEntityName + " r"
+						+ " where r." + transactionIdProperty + " in :revs"
+						+ " order by r." + transactionIdProperty,
 				Object[].class
 		).setParameter( "revs", transactionIds ).getResultList();
 		final Map<Object, T> map = new LinkedHashMap<>();
@@ -396,8 +397,8 @@ public class AuditLogImpl implements AuditReader {
 	private Object resolveTransactionIdForTimestamp(Object timestampValue) {
 		requireRevisionEntity();
 		final String hql = "select max(e." + transactionIdProperty + ")"
-						+ " from " + revisionEntityName + " e"
-						+ " where e." + timestampProperty + " <= :ts";
+				+ " from " + revisionEntityName + " e"
+				+ " where e." + timestampProperty + " <= :ts";
 		final var result = auditSession
 				.createSelectionQuery( hql, Object.class )
 				.setParameter( "ts", timestampValue )
@@ -431,8 +432,8 @@ public class AuditLogImpl implements AuditReader {
 		if ( revisionEntitySupplier == null ) {
 			throw new AuditException(
 					"No @RevisionEntity configured. "
-					+ "This operation requires a revision entity with "
-					+ "@RevisionEntity.TransactionId and @RevisionEntity.Timestamp fields."
+							+ "This operation requires a revision entity with "
+							+ "@RevisionEntity.TransactionId and @RevisionEntity.Timestamp fields."
 			);
 		}
 	}

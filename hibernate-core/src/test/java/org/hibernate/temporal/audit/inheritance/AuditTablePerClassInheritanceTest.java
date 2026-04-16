@@ -166,7 +166,7 @@ class AuditTablePerClassInheritanceTest {
 		final var sf = scope.getSessionFactory();
 
 		// At revCreate: original values
-		try ( var s = sf.withOptions().atTransaction( revCreate ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revCreate ).openSession()) {
 			var car = s.find( SportsCar.class, 1L );
 			assertThat( car ).isNotNull();
 			assertThat( car.name ).isEqualTo( "Sedan" );
@@ -179,7 +179,7 @@ class AuditTablePerClassInheritanceTest {
 		}
 
 		// At revUpdate: car updated, truck unchanged. Polymorphic lookups
-		try ( var s = sf.withOptions().atTransaction( revUpdate ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revUpdate ).openSession()) {
 			var car = s.find( SportsCar.class, 1L );
 			assertThat( car ).isNotNull();
 			assertThat( car.name ).isEqualTo( "Sports Car" );
@@ -195,7 +195,7 @@ class AuditTablePerClassInheritanceTest {
 		}
 
 		// At revTruckUpd: truck name updated
-		try ( var s = sf.withOptions().atTransaction( revTruckUpd ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revTruckUpd ).openSession()) {
 			var truck = s.find( Truck.class, 2L );
 			assertThat( truck ).isNotNull();
 			assertThat( truck.name ).isEqualTo( "Big Hauler" );
@@ -203,7 +203,7 @@ class AuditTablePerClassInheritanceTest {
 		}
 
 		// At revDelete: car deleted
-		try ( var s = sf.withOptions().atTransaction( revDelete ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revDelete ).openSession()) {
 			assertThat( s.find( SportsCar.class, 1L ) ).isNull();
 			assertThat( s.find( Truck.class, 2L ) ).isNotNull();
 		}
@@ -233,12 +233,12 @@ class AuditTablePerClassInheritanceTest {
 			assertThat( auditLog.getRevisions( SportsCar.class, 31L ) ).hasSize( 2 );
 		}
 
-		try ( var s = sf.withOptions().atTransaction( revDeepCreate ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revDeepCreate ).openSession()) {
 			assertThat( s.find( Car.class, 31L ) ).isNotNull()
 					.extracting( v -> v.name ).isEqualTo( "Ferrari" );
 		}
 
-		try ( var s = sf.withOptions().atTransaction( revDeepUpdate ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revDeepUpdate ).openSession()) {
 			assertThat( s.find( Car.class, 31L ) ).isNotNull()
 					.extracting( v -> v.name ).isEqualTo( "Lamborghini" );
 		}
@@ -257,14 +257,14 @@ class AuditTablePerClassInheritanceTest {
 	void testToOneAssociation(SessionFactoryScope scope) {
 		final var sf = scope.getSessionFactory();
 
-		try ( var s = sf.withOptions().atTransaction( revToOneCreate ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revToOneCreate ).openSession()) {
 			var driver = s.find( Driver.class, 41L );
 			assertThat( driver ).isNotNull();
 			assertThat( driver.vehicle ).isNotNull();
 			assertThat( driver.vehicle.name ).isEqualTo( "Ferrari" );
 		}
 
-		try ( var s = sf.withOptions().atTransaction( revToOneUpdate ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revToOneUpdate ).openSession()) {
 			var driver = s.find( Driver.class, 41L );
 			assertThat( driver ).isNotNull();
 			assertThat( driver.vehicle.name ).isEqualTo( "Lamborghini" );
@@ -276,14 +276,14 @@ class AuditTablePerClassInheritanceTest {
 	void testManyToManyAssociation(SessionFactoryScope scope) {
 		final var sf = scope.getSessionFactory();
 
-		try ( var s = sf.withOptions().atTransaction( revM2mCreate ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revM2mCreate ).openSession()) {
 			var team = s.find( Team.class, 52L );
 			assertThat( team ).isNotNull();
 			assertThat( team.vehicles ).extracting( v -> v.name )
 					.containsExactlyInAnyOrder( "Ferrari", "Hauler" );
 		}
 
-		try ( var s = sf.withOptions().atTransaction( revM2mUpdate ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revM2mUpdate ).openSession()) {
 			var team = s.find( Team.class, 52L );
 			assertThat( team ).isNotNull();
 			assertThat( team.vehicles ).extracting( v -> v.name )
@@ -297,23 +297,39 @@ class AuditTablePerClassInheritanceTest {
 	@Entity(name = "Vehicle")
 	@Inheritance(strategy = InheritanceType.TABLE_PER_CLASS)
 	static class Vehicle {
-		@Id long id;
+		@Id
+		long id;
 		String name;
-		Vehicle() {}
-		Vehicle(long id, String name) { this.id = id; this.name = name; }
+
+		Vehicle() {
+		}
+
+		Vehicle(long id, String name) {
+			this.id = id;
+			this.name = name;
+		}
 	}
 
 	@Entity(name = "Car")
 	static class Car extends Vehicle {
 		int seatCount;
-		Car() {}
-		Car(long id, String name, int seatCount) { super( id, name ); this.seatCount = seatCount; }
+
+		Car() {
+		}
+
+		Car(long id, String name, int seatCount) {
+			super( id, name );
+			this.seatCount = seatCount;
+		}
 	}
 
 	@Entity(name = "SportsCar")
 	static class SportsCar extends Car {
 		int horsepower;
-		SportsCar() {}
+
+		SportsCar() {
+		}
+
 		SportsCar(long id, String name, int seatCount, int horsepower) {
 			super( id, name, seatCount );
 			this.horsepower = horsepower;
@@ -323,30 +339,50 @@ class AuditTablePerClassInheritanceTest {
 	@Entity(name = "Truck")
 	static class Truck extends Vehicle {
 		double payload;
-		Truck() {}
-		Truck(long id, String name, double payload) { super( id, name ); this.payload = payload; }
+
+		Truck() {
+		}
+
+		Truck(long id, String name, double payload) {
+			super( id, name );
+			this.payload = payload;
+		}
 	}
 
 	@Audited
 	@Entity(name = "Driver")
 	static class Driver {
-		@Id long id;
+		@Id
+		long id;
 		String driverName;
-		@ManyToOne Vehicle vehicle;
-		Driver() {}
+		@ManyToOne
+		Vehicle vehicle;
+
+		Driver() {
+		}
+
 		Driver(long id, String driverName, Vehicle vehicle) {
-			this.id = id; this.driverName = driverName; this.vehicle = vehicle;
+			this.id = id;
+			this.driverName = driverName;
+			this.vehicle = vehicle;
 		}
 	}
 
 	@Audited
 	@Entity(name = "Team")
 	static class Team {
-		@Id long id;
+		@Id
+		long id;
 		String teamName;
 		@ManyToMany
 		List<Vehicle> vehicles = new ArrayList<>();
-		Team() {}
-		Team(long id, String teamName) { this.id = id; this.teamName = teamName; }
+
+		Team() {
+		}
+
+		Team(long id, String teamName) {
+			this.id = id;
+			this.teamName = teamName;
+		}
 	}
 }

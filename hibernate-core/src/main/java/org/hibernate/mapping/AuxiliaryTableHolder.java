@@ -8,11 +8,9 @@ package org.hibernate.mapping;
  * Something that can have an associated auxiliary table,
  * for example, an audit table or a temporal history table.
  *
- * @see Stateful
- *
  * @author Gavin King
  * @author Marco Belladelli
- *
+ * @see Stateful
  * @since 7.4
  */
 public interface AuxiliaryTableHolder {

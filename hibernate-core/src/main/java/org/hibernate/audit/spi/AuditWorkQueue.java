@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.Set;
 
 import org.checkerframework.checker.nullness.qual.Nullable;
+
 import org.hibernate.Session;
 import org.hibernate.annotations.RevisionEntity;
 import org.hibernate.audit.EntityTrackingRevisionListener;
@@ -42,7 +43,6 @@ import static org.hibernate.internal.util.NullnessUtil.castNonNull;
  * at {@code beforeTransactionCompletion}.
  *
  * @see AuditWriter
- *
  * @since envers-rewrite
  */
 public class AuditWorkQueue implements TransactionCompletionCallbacks.BeforeCompletionCallback {
@@ -57,7 +57,8 @@ public class AuditWorkQueue implements TransactionCompletionCallbacks.BeforeComp
 		ModificationType modificationType;
 		final AuditWriter writer;
 
-		QueuedEntry(Object entity, Object[] values,
+		QueuedEntry(
+				Object entity, Object[] values,
 				ModificationType modificationType, AuditWriter writer) {
 			this.entity = entity;
 			this.values = values;
@@ -74,7 +75,8 @@ public class AuditWorkQueue implements TransactionCompletionCallbacks.BeforeComp
 			PersistentCollection<?> collection,
 			Object ownerId,
 			Object originalSnapshot,
-			CollectionAuditWriter writer) {}
+			CollectionAuditWriter writer) {
+	}
 
 	private final Map<EntityKey, QueuedEntry> entries = new LinkedHashMap<>();
 	private final Map<CollectionKey, QueuedCollectionEntry> collectionEntries = new LinkedHashMap<>();
@@ -144,8 +146,10 @@ public class AuditWorkQueue implements TransactionCompletionCallbacks.BeforeComp
 		final var key = new CollectionKey( collectionPersister, ownerId );
 		// Only store the first snapshot; subsequent flushes are ignored,
 		// the diff at completion will use original vs final state
-		collectionEntries.putIfAbsent( key,
-				new QueuedCollectionEntry( collection, ownerId, originalSnapshot, writer ) );
+		collectionEntries.putIfAbsent(
+				key,
+				new QueuedCollectionEntry( collection, ownerId, originalSnapshot, writer )
+		);
 	}
 
 	private void merge(
@@ -256,7 +260,10 @@ public class AuditWorkQueue implements TransactionCompletionCallbacks.BeforeComp
 	private void populateModifiedEntityNames(SharedSessionContractImplementor session) {
 		final var supplier = RevisionEntitySupplier.resolve( session.getFactory().getServiceRegistry() );
 		if ( supplier != null && supplier.getModifiedEntitiesProperty() != null ) {
-			final var persister = session.getEntityPersister( supplier.getRevisionEntityClass().getName(), revisionEntity );
+			final var persister = session.getEntityPersister(
+					supplier.getRevisionEntityClass().getName(),
+					revisionEntity
+			);
 			final var attr = persister.findAttributeMapping( supplier.getModifiedEntitiesProperty() );
 			//noinspection unchecked
 			var entityNames = (Set<String>) persister.getValue( revisionEntity, attr.getStateArrayPosition() );

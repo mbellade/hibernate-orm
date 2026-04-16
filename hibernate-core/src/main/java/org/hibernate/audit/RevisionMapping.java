@@ -79,11 +79,11 @@ public class RevisionMapping implements Serializable {
 		if ( this == o ) {
 			return true;
 		}
-		if ( !(o instanceof RevisionMapping that) ) {
+		if ( !( o instanceof RevisionMapping that ) ) {
 			return false;
 		}
 		return id == that.id
-			&& timestamp == that.timestamp;
+				&& timestamp == that.timestamp;
 	}
 
 	@Override
@@ -96,6 +96,6 @@ public class RevisionMapping implements Serializable {
 	@Override
 	public String toString() {
 		return "RevisionMapping(id = " + id
-			+ ", timestamp = " + getRevisionInstant() + ")";
+				+ ", timestamp = " + getRevisionInstant() + ")";
 	}
 }

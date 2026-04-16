@@ -11,7 +11,6 @@ package org.hibernate.audit;
  * invoked once when the revision entity is created.
  *
  * @author Marco Belladelli
- *
  * @since envers-rewrite
  */
 public interface EntityTrackingRevisionListener extends RevisionListener {
@@ -24,7 +23,7 @@ public interface EntityTrackingRevisionListener extends RevisionListener {
 	 * @param entityId the entity identifier
 	 * @param modificationType the type of change (ADD, MOD, DEL)
 	 * @param revisionEntity the revision entity instance, or
-	 *        {@code null} if no revision entity is configured
+	 * {@code null} if no revision entity is configured
 	 */
 	void entityChanged(
 			Class<?> entityClass,

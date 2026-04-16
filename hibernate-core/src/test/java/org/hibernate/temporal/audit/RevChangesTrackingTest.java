@@ -101,11 +101,17 @@ class RevChangesTrackingTest {
 
 	// --- Test data ---
 
-	/** Rev 1: create Book + Author */
+	/**
+	 * Rev 1: create Book + Author
+	 */
 	private Object rev1;
-	/** Rev 2: update Book only */
+	/**
+	 * Rev 2: update Book only
+	 */
 	private Object rev2;
-	/** Rev 3: delete Author only */
+	/**
+	 * Rev 3: delete Author only
+	 */
 	private Object rev3;
 
 	@BeforeClassTemplate

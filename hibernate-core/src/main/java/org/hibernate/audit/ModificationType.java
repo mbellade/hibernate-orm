@@ -11,14 +11,19 @@ package org.hibernate.audit;
  * modification type column} of the audit log.
  *
  * @author Marco Belladelli
- *
  * @since envers-rewrite
  */
 public enum ModificationType {
-	/** Creation, encoded as 0 */
+	/**
+	 * Creation, encoded as 0
+	 */
 	ADD,
-	/** Modification, encoded as 1 */
+	/**
+	 * Modification, encoded as 1
+	 */
 	MOD,
-	/** Deletion, encoded as 2 */
+	/**
+	 * Deletion, encoded as 2
+	 */
 	DEL
 }

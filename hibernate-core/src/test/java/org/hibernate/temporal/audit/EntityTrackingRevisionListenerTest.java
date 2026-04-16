@@ -63,7 +63,7 @@ class EntityTrackingRevisionListenerTest {
 
 		// REV 2: update
 		scope.getSessionFactory().inTransaction( session ->
-			session.find( TrackedEntity.class, 1L ).name = "Updated"
+				session.find( TrackedEntity.class, 1L ).name = "Updated"
 		);
 
 		assertEquals( 1, TrackingListener.changes.size() );
@@ -75,7 +75,7 @@ class EntityTrackingRevisionListenerTest {
 
 		// REV 3: delete
 		scope.getSessionFactory().inTransaction( session ->
-			session.remove( session.find( TrackedEntity.class, 1L ) )
+				session.remove( session.find( TrackedEntity.class, 1L ) )
 		);
 
 		assertEquals( 1, TrackingListener.changes.size() );
@@ -124,7 +124,8 @@ class EntityTrackingRevisionListenerTest {
 			Class<?> entityClass,
 			Object entityId,
 			ModificationType modificationType,
-			Object revisionEntity) {}
+			Object revisionEntity) {
+	}
 
 	public static class TrackingListener implements EntityTrackingRevisionListener {
 		static final List<EntityChange> changes = new ArrayList<>();

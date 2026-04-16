@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.Set;
 
 import org.hibernate.audit.AuditLog;
+import org.hibernate.audit.RevisionListener;
 
 /**
  * Legacy compatibility interface mirroring
@@ -187,7 +188,7 @@ public interface AuditReader extends AuditLog {
 	 * The entity must be associated with the session.
 	 *
 	 * @deprecated Not needed in core auditing; use standard
-	 *             Hibernate APIs to obtain the entity name.
+	 * Hibernate APIs to obtain the entity name.
 	 */
 	@Deprecated(forRemoval = true)
 	default String getEntityName(Object primaryKey, Number revision, Object entity) {

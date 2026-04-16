@@ -98,9 +98,9 @@ class AuditRevisionEntityTest {
 		// Capture baseline revision count before read-only operations
 		final long[] baseline = new long[1];
 		scope.getSessionFactory().inTransaction( session ->
-			baseline[0] = session.createSelectionQuery(
-					"select count(*) from RevisionInfo", Long.class
-			).getSingleResult()
+				baseline[0] = session.createSelectionQuery(
+						"select count(*) from RevisionInfo", Long.class
+				).getSingleResult()
 		);
 
 		// Read current entity via find(). No revision entity should be created
@@ -142,21 +142,21 @@ class AuditRevisionEntityTest {
 			final int rev3 = ((Number) revisions.get( 2 )).intValue();
 
 			// Read at revision 1: entity was created
-			try ( var s = scope.getSessionFactory().withOptions().atTransaction( rev1 ).open() ) {
+			try (var s = scope.getSessionFactory().withOptions().atTransaction( rev1 ).open()) {
 				final var entity = s.find( MyEntity.class, 1L );
 				assertNotNull( entity );
 				assertEquals( "original", entity.name );
 			}
 
 			// Read at revision 2: entity was updated
-			try ( var s = scope.getSessionFactory().withOptions().atTransaction( rev2 ).open() ) {
+			try (var s = scope.getSessionFactory().withOptions().atTransaction( rev2 ).open()) {
 				final var entity = s.find( MyEntity.class, 1L );
 				assertNotNull( entity );
 				assertEquals( "updated", entity.name );
 			}
 
 			// Read at revision 3: entity was deleted
-			try ( var s = scope.getSessionFactory().withOptions().atTransaction( rev3 ).open() ) {
+			try (var s = scope.getSessionFactory().withOptions().atTransaction( rev3 ).open()) {
 				final var entity = s.find( MyEntity.class, 1L );
 				assertNull( entity );
 			}
@@ -172,7 +172,7 @@ class AuditRevisionEntityTest {
 			session.persist( entity );
 		} );
 		scope.getSessionFactory().inTransaction( session ->
-			session.remove( session.find( MyEntity.class, 10L ) )
+				session.remove( session.find( MyEntity.class, 10L ) )
 		);
 
 		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
@@ -301,7 +301,7 @@ class AuditRevisionEntityTest {
 			session.persist( entity );
 		} );
 		scope.getSessionFactory().inTransaction( session ->
-			session.find( MyEntity.class, 60L ).name = "findrevs-v2"
+				session.find( MyEntity.class, 60L ).name = "findrevs-v2"
 		);
 
 		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
@@ -334,7 +334,7 @@ class AuditRevisionEntityTest {
 					for ( var fk : table.getForeignKeyCollection() ) {
 						final var referencedTable = fk.getReferencedTable();
 						if ( referencedTable != null
-								&& referencedTable.getName().equalsIgnoreCase( "REVINFO" ) ) {
+						     && referencedTable.getName().equalsIgnoreCase( "REVINFO" ) ) {
 							foundRevFk = true;
 							assertEquals( 1, fk.getColumnSpan(),
 									"REV FK should have exactly 1 column" );

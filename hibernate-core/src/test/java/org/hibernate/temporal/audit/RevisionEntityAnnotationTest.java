@@ -90,22 +90,22 @@ class RevisionEntityAnnotationTest {
 			final int rev3 = (int) revisions.get( 2 );
 
 			// Read at each revision
-			try ( var s = scope.getSessionFactory().withOptions()
-					.atTransaction( rev1 ).open() ) {
+			try (var s = scope.getSessionFactory().withOptions()
+					.atTransaction( rev1 ).open()) {
 				final var book = s.find( Book.class, 1L );
 				assertNotNull( book );
 				assertEquals( "Auto-detected", book.title );
 			}
 
-			try ( var s = scope.getSessionFactory().withOptions()
-					.atTransaction( rev2 ).open() ) {
+			try (var s = scope.getSessionFactory().withOptions()
+					.atTransaction( rev2 ).open()) {
 				final var book = s.find( Book.class, 1L );
 				assertNotNull( book );
 				assertEquals( "Updated", book.title );
 			}
 
-			try ( var s = scope.getSessionFactory().withOptions()
-					.atTransaction( rev3 ).open() ) {
+			try (var s = scope.getSessionFactory().withOptions()
+					.atTransaction( rev3 ).open()) {
 				final var book = s.find( Book.class, 1L );
 				assertNull( book );
 			}

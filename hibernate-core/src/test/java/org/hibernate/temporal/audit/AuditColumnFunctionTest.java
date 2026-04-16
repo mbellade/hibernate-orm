@@ -69,13 +69,13 @@ class AuditColumnFunctionTest {
 
 		// Query all revisions using the HQL functions with scalar projections
 		// (avoids entity identity caching issues with duplicate PKs)
-		try ( var s = scope.getSessionFactory().withStatelessOptions()
-				.atTransaction( AuditLog.ALL_REVISIONS ).openStatelessSession() ) {
+		try (var s = scope.getSessionFactory().withStatelessOptions()
+				.atTransaction( AuditLog.ALL_REVISIONS ).openStatelessSession()) {
 
 			List<Object[]> results = s.createSelectionQuery(
 					"select e.title, transactionId(e), modificationType(e) " +
-							"from Book e where e.id = :id " +
-							"order by transactionId(e)",
+					"from Book e where e.id = :id " +
+					"order by transactionId(e)",
 					Object[].class
 			).setParameter( "id", 1L ).getResultList();
 
@@ -98,7 +98,7 @@ class AuditColumnFunctionTest {
 			// Test transactionId() in WHERE clause
 			List<String> titles = s.createSelectionQuery(
 					"select e.title from Book e " +
-							"where e.id = :id and transactionId(e) = :txId",
+					"where e.id = :id and transactionId(e) = :txId",
 					String.class
 			).setParameter( "id", 1L ).setParameter( "txId", 2 ).getResultList();
 
@@ -122,10 +122,10 @@ class AuditColumnFunctionTest {
 
 			// Test modificationType() in WHERE clause to find deletions
 			long delCount = s.createSelectionQuery(
-					"select count(e) from Book e " +
+							"select count(e) from Book e " +
 							"where e.id = :id and modificationType(e) = :delType",
-					Long.class
-			).setParameter( "id", 1L )
+							Long.class
+					).setParameter( "id", 1L )
 					.setParameter( "delType", ModificationType.DEL )
 					.getSingleResult();
 

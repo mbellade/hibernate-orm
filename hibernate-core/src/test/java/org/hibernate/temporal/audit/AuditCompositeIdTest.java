@@ -65,13 +65,13 @@ class AuditCompositeIdTest {
 		scope.inTransaction( session ->
 				session.find( EmbeddedIdEntity.class, key ).data = "updated" );
 
-		try ( var s = scope.getSessionFactory().withOptions().atTransaction( 1 ).openSession() ) {
+		try (var s = scope.getSessionFactory().withOptions().atTransaction( 1 ).openSession()) {
 			var e = s.find( EmbeddedIdEntity.class, key );
 			assertThat( e ).isNotNull();
 			assertThat( e.data ).isEqualTo( "initial" );
 		}
 
-		try ( var s = scope.getSessionFactory().withOptions().atTransaction( 2 ).openSession() ) {
+		try (var s = scope.getSessionFactory().withOptions().atTransaction( 2 ).openSession()) {
 			var e = s.find( EmbeddedIdEntity.class, key );
 			assertThat( e ).isNotNull();
 			assertThat( e.data ).isEqualTo( "updated" );
@@ -94,13 +94,13 @@ class AuditCompositeIdTest {
 		scope.inTransaction( session ->
 				session.find( IdClassEntity.class, key ).data = "updated" );
 
-		try ( var s = scope.getSessionFactory().withOptions().atTransaction( 101 ).openSession() ) {
+		try (var s = scope.getSessionFactory().withOptions().atTransaction( 101 ).openSession()) {
 			var e = s.find( IdClassEntity.class, key );
 			assertThat( e ).isNotNull();
 			assertThat( e.data ).isEqualTo( "initial" );
 		}
 
-		try ( var s = scope.getSessionFactory().withOptions().atTransaction( 102 ).openSession() ) {
+		try (var s = scope.getSessionFactory().withOptions().atTransaction( 102 ).openSession()) {
 			var e = s.find( IdClassEntity.class, key );
 			assertThat( e ).isNotNull();
 			assertThat( e.data ).isEqualTo( "updated" );
@@ -124,7 +124,7 @@ class AuditCompositeIdTest {
 								"from MultiIdEntity where pk1 = 10 and pk2 = 20", MultiIdEntity.class )
 						.getSingleResult().data = "updated" );
 
-		try ( var s = scope.getSessionFactory().withOptions().atTransaction( 201 ).openSession() ) {
+		try (var s = scope.getSessionFactory().withOptions().atTransaction( 201 ).openSession()) {
 			var e = s.createSelectionQuery(
 							"from MultiIdEntity where pk1 = 10 and pk2 = 20", MultiIdEntity.class )
 					.getSingleResultOrNull();
@@ -132,7 +132,7 @@ class AuditCompositeIdTest {
 			assertThat( e.data ).isEqualTo( "initial" );
 		}
 
-		try ( var s = scope.getSessionFactory().withOptions().atTransaction( 202 ).openSession() ) {
+		try (var s = scope.getSessionFactory().withOptions().atTransaction( 202 ).openSession()) {
 			var e = s.createSelectionQuery(
 							"from MultiIdEntity where pk1 = 10 and pk2 = 20", MultiIdEntity.class )
 					.getSingleResultOrNull();
@@ -147,8 +147,14 @@ class AuditCompositeIdTest {
 	static class CompositeKey implements Serializable {
 		long part1;
 		long part2;
-		CompositeKey() {}
-		CompositeKey(long part1, long part2) { this.part1 = part1; this.part2 = part2; }
+
+		CompositeKey() {
+		}
+
+		CompositeKey(long part1, long part2) {
+			this.part1 = part1;
+			this.part2 = part2;
+		}
 
 		@Override
 		public boolean equals(Object o) {
@@ -156,13 +162,16 @@ class AuditCompositeIdTest {
 		}
 
 		@Override
-		public int hashCode() { return Objects.hash( part1, part2 ); }
+		public int hashCode() {
+			return Objects.hash( part1, part2 );
+		}
 	}
 
 	@Audited
 	@Entity(name = "EmbeddedIdEntity")
 	static class EmbeddedIdEntity {
-		@EmbeddedId CompositeKey id;
+		@EmbeddedId
+		CompositeKey id;
 		String data;
 	}
 
@@ -170,16 +179,20 @@ class AuditCompositeIdTest {
 	@Entity(name = "IdClassEntity")
 	@IdClass(CompositeKey.class)
 	static class IdClassEntity {
-		@Id long part1;
-		@Id long part2;
+		@Id
+		long part1;
+		@Id
+		long part2;
 		String data;
 	}
 
 	@Audited
 	@Entity(name = "MultiIdEntity")
 	static class MultiIdEntity {
-		@Id long pk1;
-		@Id long pk2;
+		@Id
+		long pk1;
+		@Id
+		long pk2;
 		String data;
 	}
 }

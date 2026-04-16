@@ -145,7 +145,7 @@ class AuditBidirectionalOneToManyTest {
 
 		// Rev 7: update child name only (no collection membership change)
 		sf.inTransaction( session ->
-			session.find( Child.class, 20L ).name = "Upd Child A v2"
+				session.find( Child.class, 20L ).name = "Upd Child A v2"
 		);
 		revUpdMod = currentTxId;
 	}
@@ -173,7 +173,7 @@ class AuditBidirectionalOneToManyTest {
 		final var sf = scope.getSessionFactory();
 
 		// At revCreate: parent has 1 child (A)
-		try ( var s = sf.withOptions().atTransaction( revCreate ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revCreate ).openSession()) {
 			var parent = s.find( Parent.class, 1L );
 			assertNotNull( parent );
 			assertEquals( 1, parent.children.size() );
@@ -181,7 +181,7 @@ class AuditBidirectionalOneToManyTest {
 		}
 
 		// At revAddChild: parent has 2 children (A v2 + B)
-		try ( var s = sf.withOptions().atTransaction( revAddChild ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revAddChild ).openSession()) {
 			var parent = s.find( Parent.class, 1L );
 			assertNotNull( parent );
 			assertEquals( 2, parent.children.size() );
@@ -190,7 +190,7 @@ class AuditBidirectionalOneToManyTest {
 		}
 
 		// At revRemove: parent has 1 child (B only)
-		try ( var s = sf.withOptions().atTransaction( revRemove ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revRemove ).openSession()) {
 			var parent = s.find( Parent.class, 1L );
 			assertNotNull( parent );
 			assertEquals( 1, parent.children.size() );
@@ -231,14 +231,14 @@ class AuditBidirectionalOneToManyTest {
 		}
 
 		// At revRecCreate: 2 children (A + B)
-		try ( var s = sf.withOptions().atTransaction( revRecCreate ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revRecCreate ).openSession()) {
 			var parent = s.find( Parent.class, 10L );
 			assertNotNull( parent );
 			assertEquals( 2, parent.children.size() );
 		}
 
 		// At revRecReplace: 2 children (B + C, A removed)
-		try ( var s = sf.withOptions().atTransaction( revRecReplace ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revRecReplace ).openSession()) {
 			var parent = s.find( Parent.class, 10L );
 			assertNotNull( parent );
 			assertEquals( 2, parent.children.size() );
@@ -261,7 +261,7 @@ class AuditBidirectionalOneToManyTest {
 					"Parent should still have 1 revision" );
 		}
 
-		try ( var s = sf.withOptions().atTransaction( revUpdMod ).openSession() ) {
+		try (var s = sf.withOptions().atTransaction( revUpdMod ).openSession()) {
 			var parent = s.find( Parent.class, 20L );
 			assertNotNull( parent );
 			assertEquals( 1, parent.children.size() );
@@ -280,7 +280,8 @@ class AuditBidirectionalOneToManyTest {
 		@OneToMany(mappedBy = "parent")
 		List<Child> children = new ArrayList<>();
 
-		Parent() {}
+		Parent() {
+		}
 
 		Parent(long id, String name) {
 			this.id = id;
@@ -297,7 +298,8 @@ class AuditBidirectionalOneToManyTest {
 		@ManyToOne
 		Parent parent;
 
-		Child() {}
+		Child() {
+		}
 
 		Child(long id, String name, Parent parent) {
 			this.id = id;
