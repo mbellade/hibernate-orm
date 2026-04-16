@@ -187,7 +187,7 @@ public abstract class AbstractLazyInitializer implements LazyInitializer {
 							+ entityName + "#" + id + "] - the owning session is disconnected" );
 				}
 				else {
-					target = temporalLoad( session );
+					target = immediateLoad( session );
 					initialized = true;
 					checkTargetState( session );
 				}
@@ -231,7 +231,7 @@ public abstract class AbstractLazyInitializer implements LazyInitializer {
 				}
 
 				try {
-					target = temporalLoad( session );
+					target = immediateLoad( session );
 					initialized = true;
 					checkTargetState( session );
 				}
@@ -254,7 +254,7 @@ public abstract class AbstractLazyInitializer implements LazyInitializer {
 			}
 		}
 		else if ( session.isOpenOrWaitingForAutoClose() && session.isConnected() ) {
-			target = temporalLoad( session );
+			target = immediateLoad( session );
 			initialized = true;
 			checkTargetState( session );
 		}
@@ -264,7 +264,7 @@ public abstract class AbstractLazyInitializer implements LazyInitializer {
 		}
 	}
 
-	private Object temporalLoad(SharedSessionContractImplementor session) {
+	private Object immediateLoad(SharedSessionContractImplementor session) {
 		if ( temporalIdentifier != null ) {
 			final var influencers = session.getLoadQueryInfluencers();
 			final Object previous = influencers.getTemporalIdentifier();

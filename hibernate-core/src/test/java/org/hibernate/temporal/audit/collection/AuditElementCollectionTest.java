@@ -201,7 +201,7 @@ class AuditElementCollectionTest {
 			assertThat( e.strings ).containsExactly( "beta", "gamma" );
 		}
 
-		// Verify DEL audit rows store both index and element value 
+		// Verify DEL audit rows store both index and element value
 		scope.inSession( session -> {
 			var delRows = session.createNativeQuery(
 					"select strings, strings_ORDER from ListEntity_strings_aud"
@@ -242,13 +242,13 @@ class AuditElementCollectionTest {
 					.hasSize( 2 );
 		}
 
-		// Verify DEL audit rows store both key and value 
+		// Verify DEL audit rows store both key and value
 		scope.inSession( session -> {
 			var delRows = session.createNativeQuery(
 					"select strings_KEY, strings from MapEntity_strings_aud"
 							+ " where REVTYPE = 2 order by strings_KEY", Tuple.class
 			).getResultList();
-			// key1 value update -> DEL old + ADD new 
+			// key1 value update -> DEL old + ADD new
 			assertThat( delRows ).anySatisfy( row -> {
 				assertThat( row.get( "strings_KEY" ) ).isEqualTo( "key1" );
 				assertThat( row.get( "strings" ) ).isEqualTo( "value1" );

@@ -27,7 +27,7 @@ import static org.hibernate.pretty.MessageHelper.infoString;
  * Performance considerations: lots of instances of this type are created at runtime. Make sure each one is as small as possible
  * by storing just the essential needed.
  * <p>
- * For temporal (audit) entities, use {@link TemporalEntityKey} which includes a transaction identifier
+ * For temporal entities, use {@link TemporalEntityKey} which includes a transaction identifier
  * to isolate historical snapshots in the persistence context.
  *
  * @author Gavin King

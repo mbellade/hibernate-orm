@@ -25,9 +25,6 @@ import org.hibernate.testing.orm.junit.SessionFactoryScope;
 import org.hibernate.testing.orm.junit.Setting;
 import org.junit.jupiter.api.Test;
 
-import org.hibernate.SharedSessionContract;
-import org.hibernate.temporal.spi.TransactionIdentifierSupplier;
-
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -55,7 +52,6 @@ class TemporalEntityTxIdTest {
 		public Integer generateTransactionIdentifier(SharedSessionContract session) {
 			return ++currentTxId;
 		}
-
 	}
 
 	@Test void test(SessionFactoryScope scope) {
