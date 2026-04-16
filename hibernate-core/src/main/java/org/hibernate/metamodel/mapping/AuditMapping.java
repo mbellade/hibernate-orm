@@ -4,7 +4,8 @@
  */
 package org.hibernate.metamodel.mapping;
 
-import org.checkerframework.checker.nullness.qual.Nullable;
+import java.util.List;
+
 import org.hibernate.Incubating;
 import org.hibernate.audit.spi.AuditEntityLoader;
 import org.hibernate.sql.ast.spi.SqlAliasBaseGenerator;
@@ -13,7 +14,7 @@ import org.hibernate.sql.ast.tree.from.TableGroupProducer;
 import org.hibernate.sql.ast.tree.from.TableReference;
 import org.hibernate.sql.ast.tree.predicate.Predicate;
 
-import java.util.List;
+import org.checkerframework.checker.nullness.qual.Nullable;
 
 /**
  * Metadata about audit log tables for entities and collections enabled for audit logging.

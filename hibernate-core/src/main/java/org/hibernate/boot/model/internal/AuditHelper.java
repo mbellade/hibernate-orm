@@ -13,7 +13,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import org.checkerframework.checker.nullness.qual.Nullable;
 import org.hibernate.MappingException;
 import org.hibernate.annotations.Audited;
 import org.hibernate.annotations.RevisionEntity;
@@ -26,26 +25,28 @@ import org.hibernate.boot.spi.MetadataBuildingContext;
 import org.hibernate.cfg.StateManagementSettings;
 import org.hibernate.engine.config.spi.ConfigurationService;
 import org.hibernate.engine.spi.LoadQueryInfluencers;
-import org.hibernate.metamodel.mapping.EntityMappingType;
-import org.hibernate.sql.results.graph.Fetchable;
-import org.hibernate.models.spi.ClassDetails;
-import org.hibernate.models.spi.MemberDetails;
-import org.hibernate.resource.beans.spi.ManagedBeanRegistry;
 import org.hibernate.mapping.AuxiliaryTableHolder;
 import org.hibernate.mapping.Backref;
 import org.hibernate.mapping.BasicValue;
 import org.hibernate.mapping.Collection;
 import org.hibernate.mapping.Column;
 import org.hibernate.mapping.PersistentClass;
-import org.hibernate.mapping.Property;
 import org.hibernate.mapping.PrimaryKey;
+import org.hibernate.mapping.Property;
 import org.hibernate.mapping.RootClass;
 import org.hibernate.mapping.Stateful;
 import org.hibernate.mapping.Table;
-import org.hibernate.mapping.UnionSubclass;
 import org.hibernate.mapping.TableOwner;
+import org.hibernate.mapping.UnionSubclass;
+import org.hibernate.metamodel.mapping.EntityMappingType;
+import org.hibernate.models.spi.ClassDetails;
+import org.hibernate.models.spi.MemberDetails;
 import org.hibernate.persister.state.internal.AuditStateManagement;
+import org.hibernate.resource.beans.spi.ManagedBeanRegistry;
+import org.hibernate.sql.results.graph.Fetchable;
 import org.hibernate.temporal.spi.TransactionIdentifierService;
+
+import org.checkerframework.checker.nullness.qual.Nullable;
 
 import static org.hibernate.internal.util.StringHelper.isBlank;
 import static org.hibernate.internal.util.StringHelper.nullIfBlank;
@@ -149,8 +150,11 @@ public final class AuditHelper {
 			MetadataBuildingContext context) {
 		final String txIdColumnName = audited.transactionId();
 		final Map<String, String> secondaryAuditTableNames = new HashMap<>();
-		classDetails.forEachAnnotationUsage( Audited.SecondaryTable.class, context.getBootstrapContext().getModelsContext(),
-				sat -> secondaryAuditTableNames.put( sat.secondaryTableName(), sat.secondaryAuditTableName() ) );
+		classDetails.forEachAnnotationUsage(
+				Audited.SecondaryTable.class,
+				context.getBootstrapContext().getModelsContext(),
+				sat -> secondaryAuditTableNames.put( sat.secondaryTableName(), sat.secondaryAuditTableName() )
+		);
 		context.getMetadataCollector().addSecondPass( (OptionalDeterminationSecondPass) ignored -> {
 			for ( var join : rootClass.getJoins() ) {
 				final var sourceTable = join.getTable();
@@ -362,27 +366,57 @@ public final class AuditHelper {
 		MemberDetails modifiedEntityNamesMember = null;
 		for ( var current = classDetails; current != null; current = current.getSuperClass() ) {
 			for ( var member : current.getFields() ) {
-				revNumberMember = checkAnnotation( member, revNumberMember, RevisionEntity.TransactionId.class, classDetails );
-				revTimestampMember = checkAnnotation( member, revTimestampMember, RevisionEntity.Timestamp.class, classDetails );
-				modifiedEntityNamesMember = checkAnnotation( member, modifiedEntityNamesMember, RevisionEntity.ModifiedEntities.class, classDetails );
+				revNumberMember = checkAnnotation(
+						member,
+						revNumberMember,
+						RevisionEntity.TransactionId.class,
+						classDetails
+				);
+				revTimestampMember = checkAnnotation(
+						member,
+						revTimestampMember,
+						RevisionEntity.Timestamp.class,
+						classDetails
+				);
+				modifiedEntityNamesMember = checkAnnotation(
+						member,
+						modifiedEntityNamesMember,
+						RevisionEntity.ModifiedEntities.class,
+						classDetails
+				);
 			}
 			for ( var member : current.getMethods() ) {
-				revNumberMember = checkAnnotation( member, revNumberMember, RevisionEntity.TransactionId.class, classDetails );
-				revTimestampMember = checkAnnotation( member, revTimestampMember, RevisionEntity.Timestamp.class, classDetails );
-				modifiedEntityNamesMember = checkAnnotation( member, modifiedEntityNamesMember, RevisionEntity.ModifiedEntities.class, classDetails );
+				revNumberMember = checkAnnotation(
+						member,
+						revNumberMember,
+						RevisionEntity.TransactionId.class,
+						classDetails
+				);
+				revTimestampMember = checkAnnotation(
+						member,
+						revTimestampMember,
+						RevisionEntity.Timestamp.class,
+						classDetails
+				);
+				modifiedEntityNamesMember = checkAnnotation(
+						member,
+						modifiedEntityNamesMember,
+						RevisionEntity.ModifiedEntities.class,
+						classDetails
+				);
 			}
 		}
 
 		if ( revNumberMember == null ) {
 			throw new MappingException(
 					"@RevisionEntity '" + classDetails.getName()
-					+ "' must have a property annotated with @RevisionEntity.TransactionId"
+							+ "' must have a property annotated with @RevisionEntity.TransactionId"
 			);
 		}
 		if ( revTimestampMember == null ) {
 			throw new MappingException(
 					"@RevisionEntity '" + classDetails.getName()
-					+ "' must have a property annotated with @RevisionEntity.Timestamp"
+							+ "' must have a property annotated with @RevisionEntity.Timestamp"
 			);
 		}
 
@@ -427,8 +461,8 @@ public final class AuditHelper {
 			if ( existing != null ) {
 				throw new MappingException(
 						"@RevisionEntity '" + classDetails.getName()
-						+ "' has multiple members annotated with @"
-						+ annotationType.getSimpleName()
+								+ "' has multiple members annotated with @"
+								+ annotationType.getSimpleName()
 				);
 			}
 			return member;
@@ -450,7 +484,11 @@ public final class AuditHelper {
 		if ( entityBinding == null ) {
 			return;
 		}
-		final var revNumberProperty = requireBasicProperty( entityBinding, revNumberName, "@RevisionEntity.TransactionId" );
+		final var revNumberProperty = requireBasicProperty(
+				entityBinding,
+				revNumberName,
+				"@RevisionEntity.TransactionId"
+		);
 		requireBasicProperty( entityBinding, revTimestampName, "@RevisionEntity.Timestamp" );
 		// Add unique constraint on non-ID @TransactionId
 		if ( revNumberProperty != entityBinding.getIdentifierProperty() ) {
@@ -474,14 +512,14 @@ public final class AuditHelper {
 		catch (MappingException e) {
 			throw new MappingException(
 					annotationName + " member '" + propertyName
-					+ "' is not mapped as a property on @RevisionEntity '"
-					+ entityBinding.getEntityName() + "'"
+							+ "' is not mapped as a property on @RevisionEntity '"
+							+ entityBinding.getEntityName() + "'"
 			);
 		}
-		if ( !(property.getValue() instanceof BasicValue) ) {
+		if ( !( property.getValue() instanceof BasicValue ) ) {
 			throw new MappingException(
 					annotationName + " property '" + entityBinding.getEntityName()
-					+ "." + propertyName + "' must be a basic attribute"
+							+ "." + propertyName + "' must be a basic attribute"
 			);
 		}
 		return property;
@@ -589,8 +627,8 @@ public final class AuditHelper {
 			PhysicalNamingStrategy physicalNamingStrategy) {
 		final Identifier physicalColumnName =
 				physicalNamingStrategy.toPhysicalColumnName(
-					database.toIdentifier( name ),
-					database.getJdbcEnvironment()
+						database.toIdentifier( name ),
+						database.getJdbcEnvironment()
 				);
 		column.setName( physicalColumnName.render( database.getDialect() ) );
 	}

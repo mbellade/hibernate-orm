@@ -4,26 +4,26 @@
  */
 package org.hibernate.persister.collection.mutation;
 
-import org.hibernate.audit.ModificationType;
-import org.hibernate.engine.jdbc.mutation.ParameterUsage;
-import org.hibernate.audit.spi.AuditWorkQueue;
-import org.hibernate.audit.spi.CollectionAuditWriter;
-import org.hibernate.collection.spi.PersistentArrayHolder;
-import org.hibernate.collection.spi.PersistentCollection;
-import org.hibernate.engine.jdbc.batch.internal.BasicBatchKey;
-import org.hibernate.engine.jdbc.mutation.spi.MutationExecutorService;
-import org.hibernate.engine.spi.CollectionKey;
-import org.hibernate.engine.spi.SessionFactoryImplementor;
-import org.hibernate.engine.spi.SharedSessionContractImplementor;
-import org.hibernate.persister.collection.CollectionPersister;
-import org.hibernate.type.Type;
-
 import java.lang.reflect.Array;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.function.UnaryOperator;
+
+import org.hibernate.audit.ModificationType;
+import org.hibernate.audit.spi.AuditWorkQueue;
+import org.hibernate.audit.spi.CollectionAuditWriter;
+import org.hibernate.collection.spi.PersistentArrayHolder;
+import org.hibernate.collection.spi.PersistentCollection;
+import org.hibernate.engine.jdbc.batch.internal.BasicBatchKey;
+import org.hibernate.engine.jdbc.mutation.ParameterUsage;
+import org.hibernate.engine.jdbc.mutation.spi.MutationExecutorService;
+import org.hibernate.engine.spi.CollectionKey;
+import org.hibernate.engine.spi.SessionFactoryImplementor;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.persister.collection.CollectionPersister;
+import org.hibernate.type.Type;
 
 /**
  * InsertRowsCoordinator for audited collections.
@@ -83,7 +83,10 @@ public class InsertRowsCoordinatorAudit implements InsertRowsCoordinator, Collec
 		);
 	}
 
-	private Object resolveSnapshot(PersistentCollection<?> collection, Object id, SharedSessionContractImplementor session) {
+	private Object resolveSnapshot(
+			PersistentCollection<?> collection,
+			Object id,
+			SharedSessionContractImplementor session) {
 		final var persistenceContext = session.getPersistenceContextInternal();
 		final var collectionEntry = persistenceContext.getCollectionEntry( collection );
 		if ( collectionEntry != null && collectionEntry.getLoadedPersister() != null ) {
@@ -198,20 +201,33 @@ public class InsertRowsCoordinatorAudit implements InsertRowsCoordinator, Collec
 				final var jdbcValueBindings = mutationExecutor.getJdbcValueBindings();
 
 				// SET REVEND = :txId
-				jdbcValueBindings.bindValue( txId, tableName,
-						revEndMapping.getSelectionExpression(), ParameterUsage.SET );
+				jdbcValueBindings.bindValue(
+						txId,
+						tableName,
+						revEndMapping.getSelectionExpression(),
+						ParameterUsage.SET
+				);
 
 				// SET REVEND_TSTMP = :tstmp (if configured)
 				final var revEndTsMapping = auditMapping.getTransactionEndTimestampMapping( collectionTableName );
 				if ( revEndTsMapping != null ) {
-					jdbcValueBindings.bindValue( java.time.Instant.now(), tableName,
-							revEndTsMapping.getSelectionExpression(), ParameterUsage.SET );
+					jdbcValueBindings.bindValue(
+							java.time.Instant.now(),
+							tableName,
+							revEndTsMapping.getSelectionExpression(),
+							ParameterUsage.SET
+					);
 				}
 
 				// WHERE: bind key + index/element columns (same as INSERT but RESTRICT)
 				bindings.bindRestrictValues(
-						collection, ownerId, change.rawEntry, change.position,
-						session, jdbcValueBindings );
+						collection,
+						ownerId,
+						change.rawEntry,
+						change.position,
+						session,
+						jdbcValueBindings
+				);
 
 				// 0 rows is valid (element might not have a previous audit row)
 				mutationExecutor.execute( null, null, null, (s, c, b) -> true, session );
@@ -222,8 +238,11 @@ public class InsertRowsCoordinatorAudit implements InsertRowsCoordinator, Collec
 		}
 	}
 
-	/** An audit change to write: the raw entry, its position, and the modification type. */
-	private record AuditChange(Object rawEntry, int position, ModificationType modificationType) {}
+	/**
+	 * An audit change to write: the raw entry, its position, and the modification type.
+	 */
+	private record AuditChange(Object rawEntry, int position, ModificationType modificationType) {
+	}
 
 	/**
 	 * Compute the set of ADD/DEL changes between the collection's snapshot and current
@@ -294,7 +313,9 @@ public class InsertRowsCoordinatorAudit implements InsertRowsCoordinator, Collec
 		return changes;
 	}
 
-	/** Diff for indexed lists and arrays: positional comparison against the snapshot. */
+	/**
+	 * Diff for indexed lists and arrays: positional comparison against the snapshot.
+	 */
 	private List<AuditChange> computeListChanges(
 			PersistentCollection<?> collection,
 			CollectionPersister collectionDescriptor,
@@ -308,7 +329,10 @@ public class InsertRowsCoordinatorAudit implements InsertRowsCoordinator, Collec
 		int i = 0;
 		while ( entries.hasNext() ) {
 			final Object current = collection.getElement( entries.next() );
-			final Object old = i < snapshotSize ? ( snapshotList != null ? snapshotList.get( i ) : Array.get( snapshot, i ) ) : null;
+			final Object old = i < snapshotSize ? ( snapshotList != null ? snapshotList.get( i ) : Array.get(
+					snapshot,
+					i
+			) ) : null;
 			final boolean same = current != null && old != null && elementType.isSame( current, old );
 			if ( current != null && !same ) {
 				changes.add( new AuditChange( current, i, ModificationType.ADD ) );
@@ -330,7 +354,9 @@ public class InsertRowsCoordinatorAudit implements InsertRowsCoordinator, Collec
 		return changes;
 	}
 
-	/** Diff for non-indexed collections (sets, bags): linear scan with mutable snapshot copy. */
+	/**
+	 * Diff for non-indexed collections (sets, bags): linear scan with mutable snapshot copy.
+	 */
 	private List<AuditChange> computeUnindexedChanges(
 			PersistentCollection<?> collection,
 			CollectionPersister collectionDescriptor,

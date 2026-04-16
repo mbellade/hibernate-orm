@@ -8,6 +8,10 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.hibernate.MappingException;
+import org.hibernate.audit.AuditException;
+import org.hibernate.audit.ModificationType;
+import org.hibernate.audit.spi.AuditWriter;
 import org.hibernate.engine.jdbc.batch.internal.BasicBatchKey;
 import org.hibernate.engine.jdbc.batch.spi.BatchKey;
 import org.hibernate.engine.jdbc.mutation.JdbcValueBindings;
@@ -16,17 +20,13 @@ import org.hibernate.engine.jdbc.mutation.group.PreparedStatementDetails;
 import org.hibernate.engine.spi.EntityKey;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.hibernate.engine.spi.SharedSessionContractImplementor;
-import org.hibernate.MappingException;
-import org.hibernate.metamodel.mapping.AuditMapping;
 import org.hibernate.generator.Generator;
 import org.hibernate.generator.OnExecutionGenerator;
 import org.hibernate.metamodel.mapping.AttributeMapping;
+import org.hibernate.metamodel.mapping.AuditMapping;
 import org.hibernate.metamodel.mapping.DiscriminatorValue;
 import org.hibernate.metamodel.mapping.PluralAttributeMapping;
 import org.hibernate.persister.entity.EntityPersister;
-import org.hibernate.audit.AuditException;
-import org.hibernate.audit.ModificationType;
-import org.hibernate.audit.spi.AuditWriter;
 import org.hibernate.sql.ast.tree.expression.ColumnReference;
 import org.hibernate.sql.model.MutationOperationGroup;
 import org.hibernate.sql.model.MutationType;
@@ -145,7 +145,14 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator impl
 				session
 		);
 		try {
-			bindAuditValues( id, values, propertyInclusions, modificationType, session, mutationExecutor.getJdbcValueBindings() );
+			bindAuditValues(
+					id,
+					values,
+					propertyInclusions,
+					modificationType,
+					session,
+					mutationExecutor.getJdbcValueBindings()
+			);
 			mutationExecutor.execute( entity, null, null, AbstractAuditCoordinator::verifyOutcome, session );
 		}
 		finally {
@@ -237,7 +244,8 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator impl
 					mutations.get( 0 ).createMutationOperation( null, factory() )
 			);
 		}
-		return createOperationGroup( null,
+		return createOperationGroup(
+				null,
 				new MutationGroupStandard( MutationType.INSERT, entityPersister(), mutations )
 		);
 	}
@@ -271,13 +279,15 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator impl
 			for ( final int attributeIndex : sourceMappings[tableIndex].getAttributeIndexes() ) {
 				if ( propertyInclusions[attributeIndex] ) {
 					final var attributeMapping = attributeMappings.get( attributeIndex );
-					if ( !(attributeMapping instanceof PluralAttributeMapping) ) {
+					if ( !( attributeMapping instanceof PluralAttributeMapping ) ) {
 						attributeMapping.decompose(
 								values[attributeIndex], 0, jdbcValueBindings, null,
 								(valueIndex, bindings, noop, jdbcValue, selectableMapping) -> {
 									if ( selectableMapping.isInsertable() && !selectableMapping.isFormula() ) {
-										bindings.bindValue( jdbcValue, tableName,
-												selectableMapping.getSelectionExpression(), ParameterUsage.SET );
+										bindings.bindValue(
+												jdbcValue, tableName,
+												selectableMapping.getSelectionExpression(), ParameterUsage.SET
+										);
 									}
 								},
 								session
@@ -455,8 +465,10 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator impl
 					mutations.get( 0 ).createMutationOperation( null, factory() )
 			);
 		}
-		return createOperationGroup( null,
-				new MutationGroupStandard( MutationType.UPDATE, entityPersister(), mutations ) );
+		return createOperationGroup(
+				null,
+				new MutationGroupStandard( MutationType.UPDATE, entityPersister(), mutations )
+		);
 	}
 
 	private boolean[] applyAuditMask(boolean[] propertyInclusions) {
@@ -474,8 +486,8 @@ abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator impl
 
 	private static boolean isValueGenerated(Generator generator) {
 		return generator != null
-			&& generator.generatesOnInsert()
-			&& generator.generatedOnExecution();
+				&& generator.generatesOnInsert()
+				&& generator.generatedOnExecution();
 	}
 
 	private boolean isValueGenerationInSql(Generator generator) {

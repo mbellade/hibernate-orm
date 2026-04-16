@@ -4,6 +4,8 @@
  */
 package org.hibernate.persister.collection.mutation;
 
+import java.util.function.UnaryOperator;
+
 import org.hibernate.audit.ModificationType;
 import org.hibernate.collection.spi.PersistentCollection;
 import org.hibernate.engine.jdbc.mutation.JdbcValueBindings;
@@ -11,8 +13,6 @@ import org.hibernate.engine.jdbc.mutation.ParameterUsage;
 import org.hibernate.engine.spi.SharedSessionContractImplementor;
 import org.hibernate.metamodel.mapping.PluralAttributeMapping;
 import org.hibernate.metamodel.mapping.SelectableMapping;
-
-import java.util.function.UnaryOperator;
 
 /**
  * Binds collection row values for audit table mutations.

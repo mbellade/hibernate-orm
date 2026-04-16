@@ -4,10 +4,10 @@
  */
 package org.hibernate.persister.entity.mutation;
 
+import org.hibernate.audit.ModificationType;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.hibernate.engine.spi.SharedSessionContractImplementor;
 import org.hibernate.persister.entity.EntityPersister;
-import org.hibernate.audit.ModificationType;
 import org.hibernate.sql.model.MutationOperationGroup;
 
 /**

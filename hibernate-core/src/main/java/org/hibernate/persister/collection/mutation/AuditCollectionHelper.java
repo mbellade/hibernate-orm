@@ -4,6 +4,7 @@
  */
 package org.hibernate.persister.collection.mutation;
 
+import java.util.List;
 import java.util.function.UnaryOperator;
 
 import org.hibernate.engine.spi.SessionFactoryImplementor;
@@ -17,8 +18,6 @@ import org.hibernate.sql.model.ast.ColumnValueBinding;
 import org.hibernate.sql.model.ast.ColumnWriteFragment;
 import org.hibernate.sql.model.ast.builder.TableInsertBuilderStandard;
 import org.hibernate.sql.model.ast.builder.TableUpdateBuilderStandard;
-
-import java.util.List;
 
 import static org.hibernate.sql.model.internal.MutationOperationGroupFactory.singleOperation;
 
@@ -170,32 +169,29 @@ public final class AuditCollectionHelper {
 		}
 
 		// WHERE: same identity columns as the INSERT (key + index/identifier + element)
-		attributeMapping.getKeyDescriptor().getKeyPart()
-				.forEachSelectable( (index, selectable) ->
-						updateBuilder.addKeyRestrictionBinding( selectable ) );
+		attributeMapping.getKeyDescriptor()
+				.getKeyPart()
+				.forEachSelectable( (index, selectable) -> updateBuilder.addKeyRestrictionBinding( selectable ) );
 
 		final var identifierDescriptor = attributeMapping.getIdentifierDescriptor();
 		if ( identifierDescriptor != null ) {
-			identifierDescriptor.forEachSelectable( (index, selectable) ->
-					updateBuilder.addKeyRestrictionBinding( selectable ) );
+			identifierDescriptor.forEachSelectable( (index, selectable) -> updateBuilder.addKeyRestrictionBinding( selectable ) );
 		}
 		else {
 			final var indexDescriptor = attributeMapping.getIndexDescriptor();
 			if ( indexDescriptor != null ) {
-				indexDescriptor.forEachSelectable( (index, selectable) ->
-						updateBuilder.addKeyRestrictionBinding( selectable ) );
+				indexDescriptor.forEachSelectable( (index, selectable) -> updateBuilder.addKeyRestrictionBinding( selectable ) );
 			}
 		}
 
 		final var elementDescriptor = attributeMapping.getElementDescriptor();
 		if ( elementDescriptor instanceof OneToManyCollectionPart oneToMany ) {
-			oneToMany.getAssociatedEntityMappingType().getIdentifierMapping()
-					.forEachSelectable( (index, selectable) ->
-							updateBuilder.addKeyRestrictionBinding( selectable ) );
+			oneToMany.getAssociatedEntityMappingType()
+					.getIdentifierMapping()
+					.forEachSelectable( (index, selectable) -> updateBuilder.addKeyRestrictionBinding( selectable ) );
 		}
 		else {
-			elementDescriptor.forEachSelectable( (index, selectable) ->
-					updateBuilder.addKeyRestrictionBinding( selectable ) );
+			elementDescriptor.forEachSelectable( (index, selectable) -> updateBuilder.addKeyRestrictionBinding( selectable ) );
 		}
 
 		// WHERE REVEND IS NULL

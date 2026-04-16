@@ -4,13 +4,13 @@
  */
 package org.hibernate.annotations;
 
-import org.hibernate.Incubating;
-import org.hibernate.cfg.StateManagementSettings;
-
 import java.lang.annotation.Documented;
 import java.lang.annotation.Repeatable;
 import java.lang.annotation.Retention;
 import java.lang.annotation.Target;
+
+import org.hibernate.Incubating;
+import org.hibernate.cfg.StateManagementSettings;
 
 import static java.lang.annotation.ElementType.ANNOTATION_TYPE;
 import static java.lang.annotation.ElementType.FIELD;
@@ -66,7 +66,7 @@ import static java.lang.annotation.RetentionPolicy.RUNTIME;
  * @since 7.4
  */
 @Documented
-@Target({PACKAGE, TYPE, FIELD, METHOD, ANNOTATION_TYPE})
+@Target({ PACKAGE, TYPE, FIELD, METHOD, ANNOTATION_TYPE })
 @Retention(RUNTIME)
 @Incubating
 public @interface Audited {
@@ -133,7 +133,7 @@ public @interface Audited {
 	 * columns mapped by excluded attributes.
 	 */
 	@Documented
-	@Target({FIELD, METHOD})
+	@Target({ FIELD, METHOD })
 	@Retention(RUNTIME)
 	@interface Excluded {
 	}
@@ -143,8 +143,6 @@ public @interface Audited {
 	 * {@link jakarta.persistence.SecondaryTable @SecondaryTable}.
 	 * Placed on the entity class alongside
 	 * {@link Audited @Audited}.
-	 *
-	 * @see Audited
 	 *
 	 * @since envers-rewrite
 	 */
@@ -168,7 +166,6 @@ public @interface Audited {
 	 * Container for repeatable {@link SecondaryTable} annotations.
 	 *
 	 * @see SecondaryTable
-	 *
 	 * @since envers-rewrite
 	 */
 	@Documented
@@ -183,13 +180,11 @@ public @interface Audited {
 	 * and catalog) for an audited collection.
 	 * Placed on the collection field or property.
 	 *
-	 * @see Audited
-	 *
 	 * @since envers-rewrite
 	 */
 	@Documented
 	@Retention(RUNTIME)
-	@Target({FIELD, METHOD})
+	@Target({ FIELD, METHOD })
 	@interface CollectionTable {
 		/**
 		 * The name of the collection audit table.
