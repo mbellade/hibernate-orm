@@ -80,6 +80,6 @@ public class TrackingModifiedEntitiesRevisionMapping extends RevisionMapping {
 	@Override
 	public String toString() {
 		return "TrackingModifiedEntitiesRevisionMapping(" + super.toString()
-		       + ", modifiedEntityNames = " + modifiedEntityNames + ")";
+			+ ", modifiedEntityNames = " + modifiedEntityNames + ")";
 	}
 }

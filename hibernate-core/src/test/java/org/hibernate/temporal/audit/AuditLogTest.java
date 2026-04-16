@@ -267,10 +267,8 @@ class AuditLogTest {
 			assertEquals( "first", adds.get( 0 ).name );
 
 			// No MODs or DELs in rev 1
-			assertTrue( auditLog.findEntitiesModifiedAt( AuditedEntity.class, revCreate1, ModificationType.MOD )
-					            .isEmpty() );
-			assertTrue( auditLog.findEntitiesModifiedAt( AuditedEntity.class, revCreate1, ModificationType.DEL )
-					            .isEmpty() );
+			assertTrue( auditLog.findEntitiesModifiedAt( AuditedEntity.class, revCreate1, ModificationType.MOD ).isEmpty() );
+			assertTrue( auditLog.findEntitiesModifiedAt( AuditedEntity.class, revCreate1, ModificationType.DEL ).isEmpty() );
 		}
 	}
 
