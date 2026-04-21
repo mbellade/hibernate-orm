@@ -7,7 +7,7 @@ package org.hibernate.audit;
 
 /**
  * The type of modification recorded in the
- * {@linkplain org.hibernate.annotations.Audited.Table#modificationType
+ * {@linkplain org.hibernate.annotations.Audited.Table#modificationTypeColumn
  * modification type column} of the audit log.
  *
  * @author Marco Belladelli

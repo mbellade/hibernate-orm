@@ -128,7 +128,7 @@ public @interface Audited {
 		 *
 		 * @see org.hibernate.engine.spi.SharedSessionContractImplementor#getCurrentTransactionIdentifier()
 		 */
-		String transactionId() default DEFAULT_TRANSACTION_ID;
+		String transactionIdColumn() default DEFAULT_TRANSACTION_ID;
 
 		/**
 		 * The name of the column holding the modification type,
@@ -137,7 +137,7 @@ public @interface Audited {
 		 *
 		 * @see org.hibernate.audit.ModificationType
 		 */
-		String modificationType() default DEFAULT_MODIFICATION_TYPE;
+		String modificationTypeColumn() default DEFAULT_MODIFICATION_TYPE;
 
 		/**
 		 * The name of the column holding the end transaction
@@ -150,7 +150,7 @@ public @interface Audited {
 		 * A {@code null} value indicates the row is current
 		 * (not yet superseded).
 		 */
-		String transactionEnd() default DEFAULT_TRANSACTION_END;
+		String transactionEndIdColumn() default DEFAULT_TRANSACTION_END;
 
 		/**
 		 * The name of the column holding the timestamp of the
@@ -160,7 +160,7 @@ public @interface Audited {
 		 * attribute is set to a non-empty value. Stores the
 		 * timestamp of when the audit row was superseded.
 		 */
-		String transactionEndTimestamp() default "";
+		String transactionEndTimestampColumn() default "";
 	}
 
 	/**

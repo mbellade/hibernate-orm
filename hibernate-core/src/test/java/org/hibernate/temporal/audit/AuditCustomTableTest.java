@@ -139,7 +139,7 @@ class AuditCustomTableTest {
 	// ---- Entity ----
 
 	@Audited
-	@Audited.Table(name = "MY_AUDIT_LOG", transactionId = "TX_ID", modificationType = "MOD_TYPE")
+	@Audited.Table(name = "MY_AUDIT_LOG", transactionIdColumn = "TX_ID", modificationTypeColumn = "MOD_TYPE")
 	@Entity(name = "CustomTableEntity")
 	static class CustomTableEntity {
 		@Id

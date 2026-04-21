@@ -222,7 +222,7 @@ public interface SharedSessionContractImplementor
 	 * A transaction id representing the beginning of the current transaction,
 	 * for use with {@linkplain org.hibernate.annotations.Temporal temporal}
 	 * effectivity columns and with
-	 * {@linkplain org.hibernate.annotations.Audited.Table#transactionId audit log
+	 * {@linkplain org.hibernate.annotations.Audited.Table#transactionIdColumn audit log
 	 * transaction id columns}.
 	 */
 	Object getCurrentTransactionIdentifier();

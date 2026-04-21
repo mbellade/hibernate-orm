@@ -97,8 +97,8 @@ public final class AuditHelper {
 			explicitAuditTableName = auditTable.name();
 			auditSchema = auditTable.schema();
 			auditCatalog = auditTable.catalog();
-			txIdColumnName = auditTable.transactionId();
-			modTypeColumnName = auditTable.modificationType();
+			txIdColumnName = auditTable.transactionIdColumn();
+			modTypeColumnName = auditTable.modificationTypeColumn();
 		}
 		else {
 			explicitAuditTableName = "";
@@ -168,7 +168,7 @@ public final class AuditHelper {
 		final String auditSchema;
 		final String auditCatalog;
 		if ( auditTable != null ) {
-			txIdColumnName = auditTable.transactionId();
+			txIdColumnName = auditTable.transactionIdColumn();
 			auditSchema = auditTable.schema();
 			auditCatalog = auditTable.catalog();
 		}
@@ -211,8 +211,8 @@ public final class AuditHelper {
 		final String txIdColumnName;
 		final String modTypeColumnName;
 		if ( auditTable != null ) {
-			txIdColumnName = auditTable.transactionId();
-			modTypeColumnName = auditTable.modificationType();
+			txIdColumnName = auditTable.transactionIdColumn();
+			modTypeColumnName = auditTable.modificationTypeColumn();
 		}
 		else {
 			txIdColumnName = Audited.Table.DEFAULT_TRANSACTION_ID;
@@ -326,8 +326,8 @@ public final class AuditHelper {
 		if ( auditTable != null ) {
 			auditSchema = auditTable.schema();
 			auditCatalog = auditTable.catalog();
-			txIdColumnName = auditTable.transactionId();
-			modTypeColumnName = auditTable.modificationType();
+			txIdColumnName = auditTable.transactionIdColumn();
+			modTypeColumnName = auditTable.modificationTypeColumn();
 		}
 		else {
 			auditSchema = "";
@@ -699,7 +699,7 @@ public final class AuditHelper {
 		}
 		final var revEndColumn =
 				createAuditColumn(
-						auditTableAnnotation != null ? auditTableAnnotation.transactionEnd() : Audited.Table.DEFAULT_TRANSACTION_END,
+						auditTableAnnotation != null ? auditTableAnnotation.transactionEndIdColumn() : Audited.Table.DEFAULT_TRANSACTION_END,
 						getTransactionIdType( context ), auditTable, context );
 		revEndColumn.setNullable( true );
 		auditTable.addColumn( revEndColumn );
@@ -707,7 +707,7 @@ public final class AuditHelper {
 		createRevisionForeignKey( auditTable, revEndColumn, context );
 
 		final String revEndTsName = auditTableAnnotation != null
-				? auditTableAnnotation.transactionEndTimestamp()
+				? auditTableAnnotation.transactionEndTimestampColumn()
 				: "";
 		if ( !isBlank( revEndTsName ) ) {
 			final var revEndTsColumn = createAuditColumn( revEndTsName, Instant.class, auditTable, context );
