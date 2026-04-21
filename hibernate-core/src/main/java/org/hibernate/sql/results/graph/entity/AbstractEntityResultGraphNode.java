@@ -52,7 +52,9 @@ public abstract class AbstractEntityResultGraphNode extends AbstractFetchParent 
 		discriminatorFetch = creationState.visitDiscriminatorFetch( entityResultGraphNode );
 
 		rowIdResult = rowIdResult( creationState, navigablePath, entityTableGroup );
-		auditTransactionIdResult = auditTransactionIdResult( creationState, entityTableGroup );
+		if ( fetchParent == this ) {
+			auditTransactionIdResult = auditTransactionIdResult( creationState, entityTableGroup );
+		}
 
 		super.afterInitialize( fetchParent, creationState );
 	}
@@ -101,7 +103,7 @@ public abstract class AbstractEntityResultGraphNode extends AbstractFetchParent 
 			return null;
 		}
 		final var influencers = creationState.getSqlAstCreationState().getLoadQueryInfluencers();
-		if ( !auditMapping.useAuxiliaryTable( influencers ) ) {
+		if ( !influencers.isAllRevisions() || !auditMapping.useAuxiliaryTable( influencers ) ) {
 			return null;
 		}
 		final String originalTable = entityMappingType.getMappedTableDetails().getTableName();

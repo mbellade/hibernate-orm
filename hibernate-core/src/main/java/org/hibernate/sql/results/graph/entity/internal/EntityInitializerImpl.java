@@ -11,7 +11,6 @@ import java.util.function.BiConsumer;
 
 import org.hibernate.EntityFilterException;
 import org.hibernate.FetchNotFoundException;
-import org.hibernate.audit.AuditLog;
 import org.hibernate.Hibernate;
 import org.hibernate.CacheMode;
 import org.hibernate.LockMode;
@@ -69,6 +68,7 @@ import org.hibernate.type.descriptor.java.MutabilityPlan;
 import org.checkerframework.checker.nullness.qual.EnsuresNonNull;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
+import static org.hibernate.audit.AuditLog.ALL_REVISIONS;
 import static org.hibernate.bytecode.enhance.spi.LazyPropertyInitializer.UNFETCHED_PROPERTY;
 import static org.hibernate.engine.internal.ManagedTypeHelper.asPersistentAttributeInterceptable;
 import static org.hibernate.engine.internal.ManagedTypeHelper.isPersistentAttributeInterceptable;
@@ -818,9 +818,18 @@ public class EntityInitializerImpl
 		// For audited entities, include the per-row transaction identifier
 		// in the key so the PC distinguishes the same entity at different
 		// points in time
-		final Object txId = auditTransactionIdAssembler != null
-				? auditTransactionIdAssembler.assemble( data.getRowProcessingState() )
-				: null;
+		final var temporalIdentifier = data.getRowProcessingState().getLoadQueryInfluencers().getTemporalIdentifier();
+		final Object txId;
+		if ( auditTransactionIdAssembler != null ) {
+			txId = auditTransactionIdAssembler.assemble( data.getRowProcessingState() );
+		}
+		else if ( entityDescriptor.getAuditMapping() != null
+				&& temporalIdentifier != null && temporalIdentifier != ALL_REVISIONS ) {
+			txId = temporalIdentifier;
+		}
+		else {
+			txId = null;
+		}
 		data.entityKey = txId != null
 				? new TemporalEntityKey( id, concreteDescriptor, txId )
 				: new EntityKey( id, concreteDescriptor );
@@ -1559,7 +1568,7 @@ public class EntityInitializerImpl
 			// Restore ALL_REVISIONS sentinel after all initializers are done with this row
 			data.getRowProcessingState().getSession()
 					.getLoadQueryInfluencers()
-					.setTemporalIdentifier( AuditLog.ALL_REVISIONS );
+					.setTemporalIdentifier( ALL_REVISIONS );
 			data.allRevisions = false;
 		}
 		super.finishUpRow( data );
