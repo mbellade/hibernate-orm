@@ -99,31 +99,30 @@ public abstract class AbstractEntityResultGraphNode extends AbstractFetchParent 
 			TableGroup entityTableGroup) {
 		final var entityMappingType = getEntityValuedModelPart().getEntityMappingType();
 		final var auditMapping = entityMappingType.getAuditMapping();
-		if ( auditMapping == null ) {
-			return null;
+		if ( auditMapping != null ) {
+			final var influencers = creationState.getSqlAstCreationState().getLoadQueryInfluencers();
+			if ( influencers.isAllRevisions() && auditMapping.useAuxiliaryTable( influencers ) ) {
+				final String originalTable = entityMappingType.getMappedTableDetails().getTableName();
+				final var transactionIdMapping = auditMapping.getTransactionIdMapping( originalTable );
+				final var sqlAstCreationState = creationState.getSqlAstCreationState();
+				final var expressionResolver = sqlAstCreationState.getSqlExpressionResolver();
+				final var tableReference = entityTableGroup.resolveTableReference(
+						auditMapping.resolveTableName( originalTable ) );
+				final var expression = expressionResolver.resolveSqlExpression( tableReference, transactionIdMapping );
+				final var sqlSelection = expressionResolver.resolveSqlSelection(
+						expression,
+						transactionIdMapping.getJdbcMapping().getJdbcJavaType(),
+						null,
+						sqlAstCreationState.getCreationContext().getTypeConfiguration()
+				);
+				return new BasicResult<>(
+						sqlSelection.getValuesArrayPosition(),
+						"audit_txn_id",
+						transactionIdMapping.getJdbcMapping()
+				);
+			}
 		}
-		final var influencers = creationState.getSqlAstCreationState().getLoadQueryInfluencers();
-		if ( !influencers.isAllRevisions() || !auditMapping.useAuxiliaryTable( influencers ) ) {
-			return null;
-		}
-		final String originalTable = entityMappingType.getMappedTableDetails().getTableName();
-		final var transactionIdMapping = auditMapping.getTransactionIdMapping( originalTable );
-		final var sqlAstCreationState = creationState.getSqlAstCreationState();
-		final var expressionResolver = sqlAstCreationState.getSqlExpressionResolver();
-		final var tableReference = entityTableGroup.resolveTableReference(
-				auditMapping.resolveTableName( originalTable ) );
-		final var expression = expressionResolver.resolveSqlExpression( tableReference, transactionIdMapping );
-		final var sqlSelection = expressionResolver.resolveSqlSelection(
-				expression,
-				transactionIdMapping.getJdbcMapping().getJdbcJavaType(),
-				null,
-				sqlAstCreationState.getCreationContext().getTypeConfiguration()
-		);
-		return new BasicResult<>(
-				sqlSelection.getValuesArrayPosition(),
-				"audit_txn_id",
-				transactionIdMapping.getJdbcMapping()
-		);
+		return null;
 	}
 
 	@Override

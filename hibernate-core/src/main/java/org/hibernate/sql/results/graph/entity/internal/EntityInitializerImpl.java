@@ -815,24 +815,26 @@ public class EntityInitializerImpl
 							discriminatorAssembler, entityDescriptor );
 			assert concreteDescriptor != null;
 		}
-		// For audited entities, include the per-row transaction identifier
-		// in the key so the PC distinguishes the same entity at different
-		// points in time
-		final var temporalIdentifier = data.getRowProcessingState().getLoadQueryInfluencers().getTemporalIdentifier();
-		final Object txId;
-		if ( auditTransactionIdAssembler != null ) {
-			txId = auditTransactionIdAssembler.assemble( data.getRowProcessingState() );
-		}
-		else if ( entityDescriptor.getAuditMapping() != null
-				&& temporalIdentifier != null && temporalIdentifier != ALL_REVISIONS ) {
-			txId = temporalIdentifier;
-		}
-		else {
-			txId = null;
-		}
+		final Object txId = resolveTransactionId( data );
 		data.entityKey = txId != null
 				? new TemporalEntityKey( id, concreteDescriptor, txId )
 				: new EntityKey( id, concreteDescriptor );
+	}
+
+	protected Object resolveTransactionId(EntityInitializerData data) {
+		// For audited entities, include the per-row transaction identifier in the key
+		// so the PC distinguishes the same entity at different points in time
+		final var temporalIdentifier = data.getRowProcessingState().getLoadQueryInfluencers().getTemporalIdentifier();
+		if ( auditTransactionIdAssembler != null ) {
+			return auditTransactionIdAssembler.assemble( data.getRowProcessingState() );
+		}
+		else if ( entityDescriptor.getAuditMapping() != null
+				&& temporalIdentifier != null && temporalIdentifier != ALL_REVISIONS ) {
+			return temporalIdentifier;
+		}
+		else {
+			return null;
+		}
 	}
 
 	protected void setMissing(EntityInitializerData data) {
