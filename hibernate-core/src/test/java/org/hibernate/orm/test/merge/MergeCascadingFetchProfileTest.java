@@ -4,214 +4,195 @@
  */
 package org.hibernate.orm.test.merge;
 
-import java.util.ArrayList;
-import java.util.List;
-
+import jakarta.persistence.CascadeType;
+import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.Id;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToMany;
 import org.hibernate.Hibernate;
-import org.hibernate.engine.spi.SessionImplementor;
-
 import org.hibernate.testing.orm.junit.DomainModel;
 import org.hibernate.testing.orm.junit.SessionFactory;
 import org.hibernate.testing.orm.junit.SessionFactoryScope;
 import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
-import jakarta.persistence.CascadeType;
-import jakarta.persistence.Entity;
-import jakarta.persistence.Id;
-import jakarta.persistence.JoinColumn;
-import jakarta.persistence.ManyToOne;
-import jakarta.persistence.OneToMany;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Verifies that merging an entity with a non-cascade eager {@link ManyToOne}
- * does not trigger loading of cascade-eligible collections on the
- * transitively loaded associated entity. The {@code CascadingFetchProfile.MERGE}
- * should only affect associations reachable through a cascade-eligible path.
+ * Verifies that {@code CascadingFetchProfile.MERGE} only eagerly loads
+ * associations reachable through a cascade-eligible path.
+ * <p>
+ * The model has a {@code Root} entity with two {@link ManyToOne} associations
+ * to {@code Parent}: one with {@code cascade=ALL} and one without.
+ * Each {@code Parent} owns a lazy {@code cascade=MERGE} collection of {@code Child}.
+ * When merging {@code Root}, only the cascade-reachable parent's children
+ * should be eagerly initialized.
  *
  * @author Marco Belladelli
  */
-@DomainModel( annotatedClasses = {
-		MergeCascadingFetchProfileTest.UserPassword.class,
-		MergeCascadingFetchProfileTest.PasswordPolicy.class,
-		MergeCascadingFetchProfileTest.PolicyAuditLog.class,
-} )
-@SessionFactory( generateStatistics = true )
+@DomainModel(annotatedClasses = {
+		MergeCascadingFetchProfileTest.Root.class,
+		MergeCascadingFetchProfileTest.Parent.class,
+		MergeCascadingFetchProfileTest.Child.class,
+})
+@SessionFactory(useCollectingStatementInspector = true)
 public class MergeCascadingFetchProfileTest {
-	@BeforeEach
+	@BeforeAll
 	public void setUp(SessionFactoryScope scope) {
-		scope.getSessionFactory().getSchemaManager().truncateMappedObjects();
 		scope.inTransaction( session -> {
-			var policy = new PasswordPolicy( 1L, "default" );
-			session.persist( policy );
-			for ( int i = 0; i < 10; i++ ) {
-				session.persist( new PolicyAuditLog( (long) ( i + 1 ), policy, "event_" + i ) );
+			var cascadeParent = new Parent( 1L, "cascadeParent" );
+			var noCascadeParent = new Parent( 2L, "noCascadeParent" );
+			session.persist( cascadeParent );
+			session.persist( noCascadeParent );
+			for ( int i = 0; i < 5; i++ ) {
+				session.persist( new Child( (long) (i + 1), cascadeParent, "c_" + i ) );
+				session.persist( new Child( (long) (i + 6), noCascadeParent, "nc_" + i ) );
 			}
-			session.persist( new UserPassword( 1L, "hash_value", policy ) );
+			session.persist( new Root( 1L, cascadeParent, noCascadeParent ) );
 		} );
 	}
 
 	@AfterAll
 	public void tearDown(SessionFactoryScope scope) {
-		scope.getSessionFactory().getSchemaManager().truncateMappedObjects();
+		scope.dropData();
 	}
 
 	@Test
-	public void testMergeDoesNotLoadNonCascadeReachableCollections(SessionFactoryScope scope) {
-		final var detached = new UserPassword( 1L, "updated_hash", new PasswordPolicy( 1L, "default" ) );
+	public void testMergeCascadeLoads(SessionFactoryScope scope) {
+		final var detached = new Root( 1L, new Parent( 1L, "cascadeParent" ), new Parent( 2L, "noCascadeParent" ) );
 		scope.inTransaction( session -> {
-			var stats = session.getSessionFactory().getStatistics();
-			stats.clear();
+			final var merged = session.merge( detached );
 
-			var merged = session.merge( detached );
+			// cascadeParent.children should be initialized because the entire
+			// path Root -> cascadeParent (cascade=ALL) -> children (cascade=ALL) is cascade-reachable
+			assertThat( Hibernate.isInitialized( merged.getCascadeParent().getChildren() ) )
+					.as( "cascadeParent.children should be initialized "
+						+ "because the entire path has cascade=ALL" )
+					.isTrue();
 
-			assertThat( merged.getHash() ).isEqualTo( "updated_hash" );
-
-			// The policy should be loaded (it's an eager ManyToOne),
-			// but its auditLogs collection should NOT be initialized:
-			// there is no cascade path from UserPassword to PasswordPolicy
-			var managedPolicy = merged.getPolicy();
-			assertThat( managedPolicy ).isNotNull();
-			assertThat( Hibernate.isInitialized( managedPolicy.getAuditLogs() ) )
-					.as( "PasswordPolicy.auditLogs should not be initialized during merge "
-							+ "because UserPassword.policy has no cascade" )
+			// noCascadeParent is loaded (eager ManyToOne), but its children
+			// should NOT be initialized: no cascade path from Root
+			assertThat( Hibernate.isInitialized( merged.getNoCascadeParent().getChildren() ) )
+					.as( "noCascadeParent.children should not be initialized "
+						+ "because Root.noCascadeParent has no cascade" )
 					.isFalse();
-		} );
-	}
 
-	@Test
-	public void testMergeDoesNotCascadeThroughNonCascadeAssociation(SessionFactoryScope scope) {
-		// Build a detached UserPassword whose policy has a modified auditLogs collection
-		var detachedPolicy = new PasswordPolicy( 1L, "default" );
-		var newLog = new PolicyAuditLog( 99L, detachedPolicy, "new_event" );
-		detachedPolicy.getAuditLogs().add( newLog );
-		var detached = new UserPassword( 1L, "updated_hash", detachedPolicy );
-
-		scope.inTransaction( session -> session.merge( detached ) );
-
-		// The new audit log should NOT have been persisted,
-		// because UserPassword.policy has no cascade
-		scope.inTransaction( session -> {
-			var log = session.find( PolicyAuditLog.class, 99L );
-			assertThat( log )
-					.as( "PolicyAuditLog added to detached policy should not be persisted "
-							+ "because UserPassword.policy has no cascade" )
-					.isNull();
-			// Original 10 audit logs should still be there, unchanged
-			var count = session.createQuery(
-					"select count(l) from PolicyAuditLog l", Long.class
-			).getSingleResult();
-			assertThat( count ).isEqualTo( 10L );
-		} );
-	}
-
-	@Test
-	public void testMergePersistenceContextSize(SessionFactoryScope scope) {
-		final var detached = new UserPassword( 1L, "updated_hash", new PasswordPolicy( 1L, "default" ) );
-		scope.inTransaction( session -> {
-			session.merge( detached );
-
-			// Only UserPassword and PasswordPolicy should be in the persistence context,
-			// not the 10 PolicyAuditLog entities
-			var entityCount = ( (SessionImplementor) session )
+			// Root + cascadeParent + 5 cascade children + noCascadeParent = 8
+			var entityCount = session
 					.getPersistenceContextInternal()
 					.getNumberOfManagedEntities();
 			assertThat( entityCount )
-					.as( "Only UserPassword and PasswordPolicy should be managed, "
-							+ "not the PolicyAuditLog entities from the non-cascade-reachable collection" )
-					.isEqualTo( 2 );
+					.as( "Only Root, both Parents, and the cascade-reachable children should be managed" )
+					.isEqualTo( 8 );
 		} );
 	}
 
-	@Entity( name = "UserPassword" )
-	public static class UserPassword {
+	@Test
+	public void testMergeCascadeChanges(SessionFactoryScope scope) {
+		// Build a detached Root with a modified child on the cascade-reachable parent,
+		// and a sneaky new child on the non-cascade parent
+		var detachedCascade = new Parent( 1L, "cascadeParent" );
+		detachedCascade.getChildren().add( new Child( 1L, detachedCascade, "modified_label" ) );
+		var detachedNoCascade = new Parent( 2L, "noCascadeParent" );
+		detachedNoCascade.getChildren().add( new Child( 99L, detachedNoCascade, "sneaky" ) );
+		final var detached = new Root( 1L, detachedCascade, detachedNoCascade );
+
+		var inspector = scope.getCollectingStatementInspector();
+		inspector.clear();
+
+		scope.inTransaction( session -> session.merge( detached ) );
+
+		// 1 SELECT for the initial load + 1 UPDATE for the modified child, no additional lazy-loading queries
+		inspector.assertExecutedCount( 2 );
+		inspector.assertIsSelect( 0 );
+		inspector.assertIsUpdate( 1 );
+
+		scope.inSession( session -> {
+			// Verify the modified label was actually persisted through the cascade path
+			assertThat( session.find( Child.class, 1L ).getLabel() ).isEqualTo( "modified_label" );
+			// Verify the sneaky child was NOT persisted through the non-cascade path
+			assertThat( session.find( Child.class, 99L ) ).isNull();
+		} );
+	}
+
+	@Entity(name = "MergeRoot")
+	public static class Root {
 		@Id
 		private Long id;
 
-		private String hash;
+		@ManyToOne(cascade = CascadeType.ALL)
+		private Parent cascadeParent;
 
 		@ManyToOne
-		@JoinColumn( name = "policy_id" )
-		private PasswordPolicy policy;
+		private Parent noCascadeParent;
 
-		public UserPassword() {
+		public Root() {
 		}
 
-		public UserPassword(Long id, String hash, PasswordPolicy policy) {
+		public Root(Long id, Parent cascadeParent, Parent noCascadeParent) {
 			this.id = id;
-			this.hash = hash;
-			this.policy = policy;
+			this.cascadeParent = cascadeParent;
+			this.noCascadeParent = noCascadeParent;
 		}
 
-		public Long getId() {
-			return id;
+		public Parent getCascadeParent() {
+			return cascadeParent;
 		}
 
-		public String getHash() {
-			return hash;
-		}
-
-		public PasswordPolicy getPolicy() {
-			return policy;
+		public Parent getNoCascadeParent() {
+			return noCascadeParent;
 		}
 	}
 
-	@Entity( name = "PasswordPolicy" )
-	public static class PasswordPolicy {
+	@Entity(name = "MergeParent")
+	public static class Parent {
 		@Id
 		private Long id;
 
 		private String name;
 
-		@OneToMany( mappedBy = "policy", cascade = CascadeType.ALL )
-		private List<PolicyAuditLog> auditLogs = new ArrayList<>();
+		@OneToMany(mappedBy = "parent", cascade = {CascadeType.PERSIST, CascadeType.MERGE}, fetch = FetchType.LAZY)
+		private List<Child> children = new ArrayList<>();
 
-		public PasswordPolicy() {
+		public Parent() {
 		}
 
-		public PasswordPolicy(Long id, String name) {
+		public Parent(Long id, String name) {
 			this.id = id;
 			this.name = name;
 		}
 
-		public Long getId() {
-			return id;
-		}
-
-		public String getName() {
-			return name;
-		}
-
-		public List<PolicyAuditLog> getAuditLogs() {
-			return auditLogs;
+		public List<Child> getChildren() {
+			return children;
 		}
 	}
 
-	@Entity( name = "PolicyAuditLog" )
-	public static class PolicyAuditLog {
+	@Entity(name = "MergeChild")
+	public static class Child {
 		@Id
 		private Long id;
 
 		@ManyToOne
-		@JoinColumn( name = "policy_id" )
-		private PasswordPolicy policy;
+		private Parent parent;
 
-		private String event;
+		private String label;
 
-		public PolicyAuditLog() {
+		public Child() {
 		}
 
-		public PolicyAuditLog(Long id, PasswordPolicy policy, String event) {
+		public Child(Long id, Parent parent, String label) {
 			this.id = id;
-			this.policy = policy;
-			this.event = event;
+			this.parent = parent;
+			this.label = label;
 		}
 
-		public Long getId() {
-			return id;
+		public String getLabel() {
+			return label;
 		}
 	}
 }

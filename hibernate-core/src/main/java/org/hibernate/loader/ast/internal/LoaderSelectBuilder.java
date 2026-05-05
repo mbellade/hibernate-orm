@@ -5,7 +5,7 @@
 package org.hibernate.loader.ast.internal;
 
 import java.util.ArrayList;
-import java.util.HashSet;
+
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
@@ -356,7 +356,6 @@ public class LoaderSelectBuilder {
 	private int fetchDepth;
 	private RowCardinality rowCardinality = RowCardinality.SINGLE;
 	private final SqlAliasBaseGenerator sqlAliasBasGenerator;
-	private final HashSet<NavigablePath> cascadeReachablePaths;
 
 	private LoaderSelectBuilder(
 			SqlAstCreationContext creationContext,
@@ -383,9 +382,6 @@ public class LoaderSelectBuilder {
 		this.forceIdentifierSelection = forceIdentifierSelection;
 		this.jdbcParameterConsumer = jdbcParameterConsumer;
 		this.sqlAliasBasGenerator = sqlAliasBasGenerator;
-		this.cascadeReachablePaths = loadQueryInfluencers.getEnabledCascadingFetchProfile() != null
-				? new HashSet<>()
-				: null;
 		if ( loadable instanceof PluralAttributeMapping pluralAttributeMapping ) {
 			if ( pluralAttributeMapping.getMappedType().getCollectionSemantics()
 						.getCollectionClassification() == CollectionClassification.BAG ) {
@@ -824,6 +820,7 @@ public class LoaderSelectBuilder {
 
 			final boolean isFetchablePluralAttributeMapping = isABag || isPluralAttributeMapping( fetchable );
 			final Integer maximumFetchDepth = creationContext.getMaximumFetchDepth();
+			boolean cascadeReachable = false;
 
 			if ( !( fetchable instanceof CollectionPart ) ) {
 				// 'entity graph' takes precedence over 'fetch profile'
@@ -851,8 +848,7 @@ public class LoaderSelectBuilder {
 						}
 					}
 				}
-				else if ( cascadeReachablePaths != null
-						&& isCascadeReachable( fetchParent.getNavigablePath() ) ) {
+				else if ( loadQueryInfluencers.getEnabledCascadingFetchProfile() != null ) {
 					final var attributeMapping = fetchable.asAttributeMapping();
 					final var cascadeStyle =
 							attributeMapping != null
@@ -864,7 +860,7 @@ public class LoaderSelectBuilder {
 						fetchTiming = FetchTiming.IMMEDIATE;
 						// In 5.x the CascadeEntityJoinWalker only join fetched the first collection fetch
 						joined = !isFetchablePluralAttributeMapping || rowCardinality == RowCardinality.SINGLE;
-						cascadeReachablePaths.add( fetchablePath );
+						cascadeReachable = true;
 					}
 				}
 			}
@@ -877,9 +873,16 @@ public class LoaderSelectBuilder {
 				};
 			}
 
+			// Disable the cascade profile for non-cascaded fetchables so sub-fetches aren't eagerly loaded
+			final var originalCascadingFetchProfile = !cascadeReachable
+					? loadQueryInfluencers.getEnabledCascadingFetchProfile()
+					: null;
 			try {
 				if ( fetchable.incrementFetchDepth() ) {
 					fetchDepth++;
+				}
+				if ( originalCascadingFetchProfile != null ) {
+					loadQueryInfluencers.setEnabledCascadingFetchProfile( null );
 				}
 
 				// There is no need to check for circular fetches if this is an explicit fetch
@@ -932,12 +935,11 @@ public class LoaderSelectBuilder {
 				if ( entityGraphTraversalState != null && traversalResult != null ) {
 					entityGraphTraversalState.backtrack( traversalResult );
 				}
+				if ( originalCascadingFetchProfile != null ) {
+					loadQueryInfluencers.setEnabledCascadingFetchProfile( originalCascadingFetchProfile );
+				}
 			}
 		};
-	}
-
-	private boolean isCascadeReachable(NavigablePath path) {
-		return path.getParent() == null || cascadeReachablePaths.contains( path );
 	}
 
 	private static NavigablePath getFetchablePath(FetchParent fetchParent, Fetchable fetchable, boolean isKeyFetchable) {
