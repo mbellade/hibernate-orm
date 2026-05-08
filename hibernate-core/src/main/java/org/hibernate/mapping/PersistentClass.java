@@ -261,7 +261,7 @@ public abstract sealed class PersistentClass
 	public List<PersistentClass> getSubclassClosure() {
 		final ArrayList<List<PersistentClass>> lists = new ArrayList<>();
 		lists.add( List.of( this ) );
-		for ( var subclass : getSubclasses() ) {
+		for ( var subclass : subclasses ) {
 			lists.add( subclass.getSubclassClosure() );
 		}
 		return new JoinedList<>( lists );
@@ -394,6 +394,8 @@ public abstract sealed class PersistentClass
 
 	public abstract List<KeyValue> getKeyClosure();
 
+	public abstract List<PersistentClass> getEntityClosure();
+
 	protected void addSubclassProperty(Property prop) {
 		subclassProperties.add( prop );
 	}
@@ -422,6 +424,15 @@ public abstract sealed class PersistentClass
 
 	public List<Table> getSubclassTableClosure() {
 		return new JoinedList<>( getTableClosure(), subclassTables );
+	}
+
+	public List<PersistentClass> getSubclassEntityClosure() {
+		final ArrayList<List<PersistentClass>> lists = new ArrayList<>();
+		lists.add( getEntityClosure() );
+		for ( var subclass : subclasses ) {
+			lists.add( subclass.getSubclassClosure() );
+		}
+		return new JoinedList<>( lists );
 	}
 
 	public boolean isClassOrSuperclassJoin(Join join) {
@@ -460,8 +471,9 @@ public abstract sealed class PersistentClass
 
 	public void createPrimaryKey() {
 		final var table = getTable();
-		final var primaryKey = makePrimaryKey( table );
-		table.setPrimaryKey( primaryKey );
+		if ( table.getPrimaryKey() == null ) {
+			table.setPrimaryKey( makePrimaryKey( table ) );
+		}
 	}
 
 	PrimaryKey makePrimaryKey(Table table) {

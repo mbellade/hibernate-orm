@@ -160,6 +160,14 @@ public sealed class Subclass extends PersistentClass
 	}
 
 	@Override
+	public List<PersistentClass> getEntityClosure() {
+		return new JoinedList<>(
+				getSuperclass().getEntityClosure(),
+				List.of( this )
+		);
+	}
+
+	@Override
 	protected void addSubclassProperty(Property p) {
 		super.addSubclassProperty(p);
 		getSuperclass().addSubclassProperty(p);

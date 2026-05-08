@@ -158,6 +158,11 @@ public final class RootClass extends PersistentClass implements TableOwner, Soft
 	}
 
 	@Override
+	public List<PersistentClass> getEntityClosure() {
+		return List.of( this );
+	}
+
+	@Override
 	public void addSubclass(Subclass subclass) throws MappingException {
 		super.addSubclass( subclass );
 		setPolymorphic( true );

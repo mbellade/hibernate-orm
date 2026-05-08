@@ -293,15 +293,15 @@ public class JoinedSubclassEntityPersister extends AbstractEntityPersister {
 		final ArrayList<Boolean> isNullables = new ArrayList<>();
 
 		final ArrayList<String[]> allKeyColumns = new ArrayList<>();
-		for ( var table : persistentClass.getSubclassTableClosure() ) {
+		for ( var pc : persistentClass.getSubclassEntityClosure() ) {
+			final var table = pc.getTable();
 			isConcretes.add( persistentClass.isClassOrSuperclassTable( table ) );
 			isNullables.add( false );
-			final String tableName = determineTableName( table );
-			subclassTableNames.add( tableName );
+			subclassTableNames.add( determineTableName( table ) );
 			final String[] key = new String[idColumnSpan];
-			final var columns = table.getPrimaryKey().getColumnsInOriginalOrder();
+			final var columns = pc.getKey().getColumns();
 			for ( int k = 0; k < idColumnSpan; k++ ) {
-				key[k] = columns.get(k).getQuotedName( dialect );
+				key[k] = columns.get( k ).getQuotedName( dialect );
 			}
 			allKeyColumns.add( key );
 		}
