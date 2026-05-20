@@ -4,11 +4,19 @@
  */
 package org.hibernate.persister.entity.mutation;
 
+import org.hibernate.audit.ModificationType;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.generator.values.GeneratedValues;
 import org.hibernate.persister.entity.EntityPersister;
 
 /**
  * Merge coordinator for audited entities.
+ * <p>
+ * Before the merge executes, the entity table is checked
+ * via {@link EntityPersister#getDatabaseSnapshot}: if the
+ * entity does not exist the upsert is an insert ({@code ADD}),
+ * otherwise it is an update ({@code MOD}).
  */
 public class MergeCoordinatorAudit extends UpdateCoordinatorAudit {
 	public MergeCoordinatorAudit(
@@ -16,5 +24,44 @@ public class MergeCoordinatorAudit extends UpdateCoordinatorAudit {
 			SessionFactoryImplementor factory,
 			UpdateCoordinator currentUpdateCoordinator) {
 		super( entityPersister, factory, currentUpdateCoordinator );
+	}
+
+	@Override
+	public GeneratedValues update(
+			Object entity,
+			Object id,
+			Object rowId,
+			Object[] values,
+			Object oldVersion,
+			Object[] incomingOldValues,
+			int[] dirtyAttributeIndexes,
+			boolean hasDirtyCollection,
+			SharedSessionContractImplementor session) {
+		final boolean entityExists;
+		try (var nonTemporalSession = session.statelessWithOptions().connection().openStatelessSession()) {
+			entityExists = entityPersister().getDatabaseSnapshot( id,
+					(SharedSessionContractImplementor) nonTemporalSession ) != null;
+		}
+		final var generatedValues = currentUpdateCoordinator.update(
+				entity,
+				id,
+				rowId,
+				values,
+				oldVersion,
+				incomingOldValues,
+				dirtyAttributeIndexes,
+				hasDirtyCollection,
+				session
+		);
+		if ( shouldAuditUpdate( dirtyAttributeIndexes, hasDirtyCollection ) ) {
+			enqueueAuditEntry(
+					resolveEntityKey( entity, id, session ),
+					entity,
+					values,
+					entityExists ? ModificationType.MOD : ModificationType.ADD,
+					session
+			);
+		}
+		return generatedValues;
 	}
 }
