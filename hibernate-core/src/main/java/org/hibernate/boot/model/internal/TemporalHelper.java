@@ -292,27 +292,21 @@ public class TemporalHelper {
 		// Defer changeset ID type resolution to BasicValue resolution time,
 		// so that @Changelog entities are fully bound first
 		basicValue.setImplicitJavaTypeAccess( typeConfiguration -> getChangesetIdType( context ) );
-		basicValue.setExplicitJdbcTypeAccess( typeConfiguration -> {
-			final var changesetIdJavaType = getChangesetIdType( context );
-			if ( Instant.class.equals( changesetIdJavaType ) ) {
-				final int temporalColumnType =
-						database.getDialect().getTemporalTableSupport().getTemporalColumnType();
-				return typeConfiguration.getJdbcTypeRegistry().findDescriptor( temporalColumnType );
-			}
-			return null;
-		} );
 		final var column = new Column();
 		column.setNullable( nullable );
 		column.setValue( basicValue );
 		basicValue.addColumn( column );
 		setTemporalColumnName( columnName, column, database,
 				context.getBuildingOptions().getPhysicalNamingStrategy() );
-		// Defer column type metadata to a second pass so the changeset ID
-		// type is resolved after all entities are bound, including any
-		// @Changelog contributed by mapping contributors
-		context.getMetadataCollector().addSecondPass( (OptionalDeterminationSecondPass) ignored ->
-				setTemporalColumnType( temporalPrecision, column, database, getChangesetIdType( context ) )
-		);
+		context.getMetadataCollector().addSecondPass( (OptionalDeterminationSecondPass) ignored -> {
+			final var changesetIdJavaType = getChangesetIdType( context );
+			setTemporalColumnType( temporalPrecision, column, database, changesetIdJavaType );
+			if ( Instant.class.equals( changesetIdJavaType ) ) {
+				final int temporalColumnType = database.getDialect().getTemporalTableSupport().getTemporalColumnType();
+				basicValue.setExplicitJdbcTypeAccess( typeConfiguration ->
+						typeConfiguration.getJdbcTypeRegistry().findDescriptor( temporalColumnType ) );
+			}
+		} );
 		return column;
 	}
 
