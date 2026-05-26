@@ -28,7 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 		TemporalAndAuditedWithChangelogTest.AuditedOrder.class,
 		DefaultChangelog.class
 })
-@Jira("https://hibernate.atlassian.net/browse/HHH-20467")
+@Jira("https://hibernate.atlassian.net/browse/HHH-20453")
 class TemporalAndAuditedWithChangelogTest {
 
 	@Temporal
@@ -64,10 +64,34 @@ class TemporalAndAuditedWithChangelogTest {
 		} );
 
 		scope.getSessionFactory().inTransaction( session -> {
+			var product = session.find( TemporalProduct.class, 1L );
+			product.price = 20.0;
+		} );
+
+		scope.getSessionFactory().inTransaction( session -> {
 			var order = session.find( AuditedOrder.class, 1L );
 			order.description = "Updated order";
 		} );
 
+		// Verify current state
+		scope.getSessionFactory().inTransaction( session -> {
+			var product = session.find( TemporalProduct.class, 1L );
+			assertEquals( 20.0, product.price );
+
+			var order = session.find( AuditedOrder.class, 1L );
+			assertEquals( "Updated order", order.description );
+		} );
+
+		// Verify temporal time-travel read at first changeset
+		try (var session = scope.getSessionFactory().withOptions()
+				.atChangeset( 1L ).open()) {
+			var product = session.find( TemporalProduct.class, 1L );
+			assertNotNull( product );
+			assertEquals( "Widget", product.name );
+			assertEquals( 10.0, product.price );
+		}
+
+		// Verify audit log for the audited order
 		scope.getSessionFactory().inTransaction( session -> {
 			var auditLog = AuditLogFactory.create( session );
 			var changesetIds = auditLog.getChangesets( AuditedOrder.class, 1L );
