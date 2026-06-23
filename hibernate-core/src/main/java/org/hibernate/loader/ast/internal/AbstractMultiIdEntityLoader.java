@@ -220,7 +220,8 @@ public abstract class AbstractMultiIdEntityLoader<T> implements MultiIdEntityLoa
 			LockOptions lockOptions,
 			List<Object> results, int i,
 			SharedSessionContractImplementor session) {
-		if ( loadOptions.getSessionCheckMode() == FindMultipleOption.SessionCheckMode.ENABLED ) {
+		if ( loadOptions.getSessionCheckMode() == FindMultipleOption.SessionCheckMode.ENABLED
+			&& !loadOptions.isRefreshSession() ) {
 			final var removalsMode = loadOptions.getRemovalsMode();
 			if ( removalsMode == FindMultipleOption.RemovalsMode.EXCLUDE ) {
 				// note, this method is only called from orderedMultiLoad()
