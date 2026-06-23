@@ -123,7 +123,8 @@ public class FindMultipleDocTests {
 					Person.class,
 					List.of(1,2,3,4,5),
 					FindMultipleOption.RemovalsMode.REPLACE,
-					FindMultipleOption.OrderingMode.UNORDERED
+					FindMultipleOption.OrderingMode.UNORDERED,
+					FindMultipleOption.SessionCheckMode.DISABLED
 			);
 			assertThat( persons ).hasSize( 5 );
 			assertThat( persons ).containsNull();
