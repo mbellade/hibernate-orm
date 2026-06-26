@@ -1155,7 +1155,13 @@ public class EntityInitializerImpl
 				// Resolve and potentially create the entity instance
 				final Object proxy = data.entityHolder.getProxy();
 				if ( proxy == instance ) {
-					data.entityInstanceForNotify = resolveEntityInstance( data );
+					if ( data.entityHolder.getEntity() != null ) {
+						data.entityInstanceForNotify = data.entityHolder.getEntity();
+						data.setState( initializedOrResolved( data, data.entityHolder.isInitialized() ) );
+					}
+					else {
+						data.entityInstanceForNotify = resolveEntityInstance( data );
+					}
 					lazyInitializer.setImplementation( data.entityInstanceForNotify );
 				}
 				else {
