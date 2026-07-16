@@ -1658,7 +1658,6 @@ public abstract class CollectionBinder {
 			final var audited = extract( Audited.class, property, buildingContext );
 			if ( audited != null && !property.hasDirectAnnotationUsage( Audited.Excluded.class ) ) {
 				AuditHelper.bindOneToManyAuditTable(
-						extract( Audited.Table.class, property, buildingContext ),
 						collection,
 						oneToMany.getReferencedEntityName(),
 						extract( Audited.CollectionTable.class, property, buildingContext ),
@@ -2550,8 +2549,8 @@ public abstract class CollectionBinder {
 		final var audited = extract( Audited.class, property, buildingContext );
 		if ( audited != null && !property.hasDirectAnnotationUsage( Audited.Excluded.class ) ) {
 			AuditHelper.bindAuditTable(
-					extract( Audited.Table.class, property, buildingContext ),
 					collection,
+					extract( Audited.CollectionTable.class, property, buildingContext ),
 					buildingContext
 			);
 		}

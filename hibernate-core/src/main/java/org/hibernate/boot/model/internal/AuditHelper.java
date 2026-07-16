@@ -74,21 +74,22 @@ public final class AuditHelper {
 			RootClass rootClass,
 			ClassDetails classDetails,
 			MetadataBuildingContext context) {
-		bindAuditTable( auditTable, rootClass, context );
+		bindAuditTable( auditTable, (Stateful) rootClass, null, context );
 		bindSecondaryAuditTables( auditTable, rootClass, classDetails, context );
 		bindSubclassAuditTables( auditTable, rootClass, context );
 	}
 
 	static void bindAuditTable(
-			@Nullable Audited.Table auditTable,
 			Collection collection,
+			@Nullable Audited.CollectionTable collectionAuditTable,
 			MetadataBuildingContext context) {
-		bindAuditTable( auditTable, (Stateful) collection, context );
+		bindAuditTable( null, (Stateful) collection, collectionAuditTable, context );
 	}
 
 	private static void bindAuditTable(
 			@Nullable Audited.Table auditTable,
 			Stateful auditable,
+			@Nullable Audited.CollectionTable collectionAuditTable,
 			MetadataBuildingContext context) {
 		final var collector = context.getMetadataCollector();
 		final var table = auditable.getMainTable();
@@ -97,7 +98,14 @@ public final class AuditHelper {
 		final String auditCatalog;
 		final String csIdColumnName;
 		final String modTypeColumnName;
-		if ( auditTable != null ) {
+		if ( collectionAuditTable != null ) {
+			explicitAuditTableName = collectionAuditTable.name();
+			auditSchema = collectionAuditTable.schema();
+			auditCatalog = collectionAuditTable.catalog();
+			csIdColumnName = DEFAULT_CHANGESET_ID_COLUMN_NAME;
+			modTypeColumnName = DEFAULT_MODIFICATION_TYPE_COLUMN_NAME;
+		}
+		else if ( auditTable != null ) {
 			explicitAuditTableName = auditTable.name();
 			auditSchema = auditTable.schema();
 			auditCatalog = auditTable.catalog();
@@ -303,7 +311,6 @@ public final class AuditHelper {
 	 * perspective the collection is part of the parent entity's state.
 	 */
 	static void bindOneToManyAuditTable(
-			@Nullable Audited.Table auditTable,
 			Collection collection,
 			String referencedEntityName,
 			@Nullable Audited.CollectionTable collectionAuditTable,
@@ -316,30 +323,14 @@ public final class AuditHelper {
 		final String auditTableName =
 				auditTableName( collection, collectionAuditTable, referencedEntity );
 
-		final String auditSchema;
-		final String auditCatalog;
-		final String csIdColumnName;
-		final String modTypeColumnName;
-		if ( auditTable != null ) {
-			auditSchema = auditTable.schema();
-			auditCatalog = auditTable.catalog();
-			csIdColumnName = auditTable.changesetIdColumn();
-			modTypeColumnName = auditTable.modificationTypeColumn();
-		}
-		else {
-			auditSchema = "";
-			auditCatalog = "";
-			csIdColumnName = DEFAULT_CHANGESET_ID_COLUMN_NAME;
-			modTypeColumnName = DEFAULT_MODIFICATION_TYPE_COLUMN_NAME;
-		}
 		final String schema =
 				collectionAuditTable != null && !isBlank( collectionAuditTable.schema() )
 						? collectionAuditTable.schema()
-						: !isBlank( auditSchema ) ? auditSchema : ownerTable.getSchema();
+						: ownerTable.getSchema();
 		final String catalog =
 				collectionAuditTable != null && !isBlank( collectionAuditTable.catalog() )
 						? collectionAuditTable.catalog()
-						: !isBlank( auditCatalog ) ? auditCatalog : ownerTable.getCatalog();
+						: ownerTable.getCatalog();
 		final var middleAuditTable = collector.addTable(
 				schema,
 				catalog,
@@ -361,13 +352,13 @@ public final class AuditHelper {
 			}
 			// Audit columns
 			final var changesetIdColumn = createAuditColumn(
-					csIdColumnName,
+					DEFAULT_CHANGESET_ID_COLUMN_NAME,
 					getChangesetIdType( context ),
 					middleAuditTable,
 					context
 			);
 			final var modificationTypeColumn = createAuditColumn(
-					modTypeColumnName,
+					DEFAULT_MODIFICATION_TYPE_COLUMN_NAME,
 					Byte.class,
 					middleAuditTable,
 					context
@@ -377,7 +368,7 @@ public final class AuditHelper {
 			createAuditPrimaryKey( middleAuditTable, changesetIdColumn, keyColumns );
 			createChangesetForeignKey( middleAuditTable, changesetIdColumn, context );
 			enableAudit( collection, middleAuditTable, changesetIdColumn, modificationTypeColumn );
-			addTransactionEndColumns( auditTable, collection, middleAuditTable, context );
+			addTransactionEndColumns( null, collection, middleAuditTable, context );
 		} );
 	}
 
