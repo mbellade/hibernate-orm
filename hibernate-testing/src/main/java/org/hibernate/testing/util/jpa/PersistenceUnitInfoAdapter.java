@@ -78,15 +78,34 @@ public class PersistenceUnitInfoAdapter implements PersistenceUnitInfo {
 	public URL getPersistenceUnitRootUrl() {
 		return null;
 	}
-
 	@Override
 	public List<String> getManagedClassNames() {
 		return Collections.emptyList();
 	}
 
 	@Override
+	public List<String> getManagedPackageDescriptors() {
+		return Collections.emptyList();
+	}
+
+	@Override
+	public List<String> getManagedModuleDescriptors() {
+		return Collections.emptyList();
+	}
+
+	@Override
 	public List<String> getAllClassNames() {
 		return getManagedClassNames();
+	}
+
+	@Override
+	public List<String> getAllPackageDescriptors() {
+		return Collections.emptyList();
+	}
+
+	@Override
+	public List<String> getAllModuleDescriptors() {
+		return Collections.emptyList();
 	}
 
 	@Override

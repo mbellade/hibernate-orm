@@ -687,8 +687,28 @@ public class BootstrapTest {
 		}
 
 		@Override
+		public List<String> getManagedPackageDescriptors() {
+			return List.of();
+		}
+
+		@Override
+		public List<String> getManagedModuleDescriptors() {
+			return List.of();
+		}
+
+		@Override
 		public List<String> getAllClassNames() {
 			return managedClassNames;
+		}
+
+		@Override
+		public List<String> getAllPackageDescriptors() {
+			return List.of();
+		}
+
+		@Override
+		public List<String> getAllModuleDescriptors() {
+			return List.of();
 		}
 
 		@Override
