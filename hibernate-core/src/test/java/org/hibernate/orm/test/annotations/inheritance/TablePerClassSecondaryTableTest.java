@@ -79,6 +79,26 @@ public class TablePerClassSecondaryTableTest {
 	}
 
 	@Test
+	public void persistsAndUpdatesInheritedPrimaryTableAttribute(SessionFactoryScope scope) {
+		scope.inTransaction( session -> {
+			final var sub = new Sub();
+			sub.id = 40L;
+			sub.inheritedValue = "inherited";
+			session.persist( sub );
+		} );
+
+		final String value = scope.fromTransaction( session -> session.find( Sub.class, 40L ).inheritedValue );
+		assertThat( value ).isEqualTo( "inherited" );
+
+		scope.inTransaction( session -> session.find( Sub.class, 40L ).inheritedValue = "updated" );
+
+		final String updatedValue = scope.fromTransaction(
+				session -> session.find( Sub.class, 40L ).inheritedValue
+		);
+		assertThat( updatedValue ).isEqualTo( "updated" );
+	}
+
+	@Test
 	public void updatesSecondaryTableAttributeAfterLoading(SessionFactoryScope scope) {
 		scope.inTransaction( session -> {
 			final var sub = new Sub();
@@ -197,6 +217,9 @@ public class TablePerClassSecondaryTableTest {
 	static class Base {
 		@Id
 		long id;
+
+		@Column(name = "inherited_value")
+		String inheritedValue;
 
 		@Audited.Excluded
 		@Column(name = "str1", table = "secondary_table")

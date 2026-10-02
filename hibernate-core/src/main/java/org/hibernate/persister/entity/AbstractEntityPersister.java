@@ -3954,7 +3954,7 @@ public abstract class AbstractEntityPersister
 			@Nonnull LinkedHashMap<String, TableDescriptorBuilder> tableBuilderMap,
 			@Nonnull AttributeMapping attribute) {
 		if ( applyAttribute( attribute ) ) {
-			final var tableName = attribute.getContainingTableExpression();
+			final var tableName = getAttributeTableName( attribute );
 			final var builder = tableBuilderMap.get( tableName );
 			if ( builder != null && !builder.isInverse ) {
 				builder.addAttribute( attribute );
@@ -3962,6 +3962,11 @@ public abstract class AbstractEntityPersister
 						-> builder.addColumn( attribute, ColumnDescriptor.from( selectable ) ) );
 			}
 		}
+	}
+
+	@Nonnull
+	protected String getAttributeTableName(@Nonnull AttributeMapping attribute) {
+		return attribute.getContainingTableExpression();
 	}
 
 	private boolean applyAttribute(@Nonnull AttributeMapping attribute) {

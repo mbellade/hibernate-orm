@@ -345,6 +345,7 @@ import org.hibernate.sql.ast.spi.query.from.StandardTableGroup;
 import org.hibernate.sql.ast.spi.query.from.TableGroup;
 import org.hibernate.sql.ast.spi.query.from.TableGroupJoin;
 import org.hibernate.sql.ast.spi.query.from.TableGroupJoinProducer;
+import org.hibernate.sql.ast.spi.query.from.UnionTableReference;
 import org.hibernate.sql.ast.spi.query.insert.ConflictClause;
 import org.hibernate.sql.ast.spi.query.insert.InsertSelectStatement;
 import org.hibernate.sql.ast.spi.query.insert.InsertStatement;
@@ -3457,7 +3458,8 @@ public abstract class BaseSqmToSqlAstConverter<T extends Statement> extends Base
 						// Where and having clauses are handled specially with EntityNameUse.FILTER and pruning
 						registerEntityNameUsage( tableGroup, EntityNameUse.PROJECTION, persister.getEntityName(), true );
 					}
-					else {
+					else if ( !( tableGroup.getPrimaryTableReference() instanceof UnionTableReference ) ) {
+						// Union table discriminators are projected by the union query itself.
 						final int subclassTableSpan = persister.getSubclassTableSpan();
 						for ( int i = 0; i < subclassTableSpan; i++ ) {
 							tableGroup.resolveTableReference( null, persister.getSubclassTableName( i ) );

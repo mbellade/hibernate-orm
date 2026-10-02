@@ -7,11 +7,13 @@ package org.hibernate.sql.ast.spi.query.from;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
-import java.util.function.Function;
-import java.util.function.Predicate;
+
+import jakarta.annotation.Nullable;
 
 import org.hibernate.persister.entity.UnionSubclassEntityPersister;
 import org.hibernate.spi.NavigablePath;
+import org.hibernate.sql.ast.spi.creation.SqlAliasBase;
+import org.hibernate.sql.ast.spi.creation.SqlAstCreationState;
 
 import static java.util.Collections.emptyList;
 
@@ -20,8 +22,11 @@ import static java.util.Collections.emptyList;
  */
 public class UnionTableGroup extends AbstractTableGroup {
 	private final UnionTableReference tableReference;
-	private final Predicate<String> tableReferenceJoinNameChecker;
-	private final Function<String, TableReferenceJoin> tableReferenceJoinCreator;
+	private final UnionSubclassEntityPersister modelPart;
+	@Nullable
+	private final SqlAliasBase sqlAliasBase;
+	@Nullable
+	private final SqlAstCreationState creationState;
 	private List<TableReferenceJoin> tableReferenceJoins;
 
 	public UnionTableGroup(
@@ -30,15 +35,7 @@ public class UnionTableGroup extends AbstractTableGroup {
 			UnionTableReference tableReference,
 			UnionSubclassEntityPersister modelPart,
 			String sourceAlias) {
-		this(
-				canUseInnerJoins,
-				navigablePath,
-				tableReference,
-				modelPart,
-				sourceAlias,
-				tableExpression -> false,
-				tableExpression -> null
-		);
+		this( canUseInnerJoins, navigablePath, tableReference, modelPart, sourceAlias, null, null );
 	}
 
 	public UnionTableGroup(
@@ -47,12 +44,13 @@ public class UnionTableGroup extends AbstractTableGroup {
 			UnionTableReference tableReference,
 			UnionSubclassEntityPersister modelPart,
 			String sourceAlias,
-			Predicate<String> tableReferenceJoinNameChecker,
-			Function<String, TableReferenceJoin> tableReferenceJoinCreator) {
+			@Nullable SqlAliasBase sqlAliasBase,
+			@Nullable SqlAstCreationState creationState) {
 		super( canUseInnerJoins, navigablePath, modelPart, sourceAlias, null, null );
 		this.tableReference = tableReference;
-		this.tableReferenceJoinNameChecker = tableReferenceJoinNameChecker;
-		this.tableReferenceJoinCreator = tableReferenceJoinCreator;
+		this.modelPart = modelPart;
+		this.sqlAliasBase = sqlAliasBase;
+		this.creationState = creationState;
 	}
 
 	@Override
@@ -82,7 +80,7 @@ public class UnionTableGroup extends AbstractTableGroup {
 		if ( tableReference.getTableReference( navigablePath, tableExpression, resolve ) != null ) {
 			return tableReference;
 		}
-		if ( tableReferenceJoinNameChecker.test( tableExpression ) ) {
+		if ( modelPart.containsTableReference( tableExpression ) ) {
 			if ( tableReferenceJoins != null ) {
 				for ( TableReferenceJoin join : tableReferenceJoins ) {
 					final var tableReference = join.getJoinedTableReference()
@@ -92,8 +90,13 @@ public class UnionTableGroup extends AbstractTableGroup {
 					}
 				}
 			}
-			if ( resolve ) {
-				final var join = tableReferenceJoinCreator.apply( tableExpression );
+			if ( resolve && sqlAliasBase != null && creationState != null ) {
+				final var join = modelPart.createTableReferenceJoin(
+						tableExpression,
+						sqlAliasBase,
+						tableReference,
+						creationState
+				);
 				if ( join != null ) {
 					if ( tableReferenceJoins == null ) {
 						tableReferenceJoins = new ArrayList<>();
