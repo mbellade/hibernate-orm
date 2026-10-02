@@ -15,6 +15,7 @@ import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.hibernate.internal.util.MutableObject;
 import org.hibernate.metamodel.mapping.EntityMappingType;
 import org.hibernate.metamodel.mapping.PluralAttributeMapping;
+import org.hibernate.persister.entity.UnionSubclassEntityPersister;
 import org.hibernate.query.spi.DomainQueryExecutionContext;
 import org.hibernate.query.sqm.internal.DomainParameterXref;
 import org.hibernate.query.sqm.mutation.internal.DeleteHandler;
@@ -168,10 +169,15 @@ public class CteDeleteHandler extends AbstractCteMutationHandler implements Dele
 							tableExpression,
 							true
 					);
-					final NamedTableReference dmlTableReference = resolveUnionTableReference(
-							updatingTableReference,
-							tableExpression
-					);
+					final NamedTableReference dmlTableReference;
+					if ( updatingTableReference == null
+							&& getEntityDescriptor() instanceof UnionSubclassEntityPersister unionPersister
+							&& unionPersister.isDescendantSecondaryTable( tableExpression ) ) {
+						dmlTableReference = new NamedTableReference( tableExpression, DeleteStatement.DEFAULT_ALIAS );
+					}
+					else {
+						dmlTableReference = resolveUnionTableReference( updatingTableReference, tableExpression );
+					}
 					final List<ColumnReference> columnReferences = new ArrayList<>( idSelectCte.getCteTable().getCteColumns().size() );
 					tableColumnsVisitationSupplier.get().accept(
 							(index, selectable) -> columnReferences.add(

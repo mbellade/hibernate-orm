@@ -147,6 +147,12 @@ when calling the superclass implementation.
 
 This section describes changes in behavior that applications should be aware of.
 
+[[table-per-class-secondary-tables]]
+=== Secondary tables with table-per-class inheritance
+
+When persisting a `TABLE_PER_CLASS` entity, values of attributes mapped to `@SecondaryTable` are now written to the secondary table instead of being included in the concrete entity-table `INSERT`. Previously, those values were included in that `INSERT`. Values mapped to the entity table continue to be written there. This corrects https://hibernate.atlassian.net/browse/HHH-20956[HHH-20956].
+
+
 [[filtered-to-one-associations]]
 === Filters and SQL restrictions on to-one associations
 

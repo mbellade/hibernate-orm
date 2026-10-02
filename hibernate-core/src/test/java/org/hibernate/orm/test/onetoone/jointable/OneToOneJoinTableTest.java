@@ -6,7 +6,6 @@ package org.hibernate.orm.test.onetoone.jointable;
 
 import org.hibernate.testing.orm.junit.JiraKey;
 import org.hibernate.testing.orm.junit.DomainModel;
-import org.hibernate.testing.orm.junit.FailureExpected;
 import org.hibernate.testing.orm.junit.SessionFactory;
 import org.hibernate.testing.orm.junit.SessionFactoryScope;
 import org.junit.jupiter.api.Test;
@@ -25,7 +24,6 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 		}
 )
 @SessionFactory
-@FailureExpected(jiraKey = "HHH-9188")
 public class OneToOneJoinTableTest {
 
 	@Test

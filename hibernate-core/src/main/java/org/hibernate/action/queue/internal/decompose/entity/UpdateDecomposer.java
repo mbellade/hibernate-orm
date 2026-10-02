@@ -1159,7 +1159,7 @@ public class UpdateDecomposer extends AbstractDecomposer<EntityUpdateAction>
 			boolean needsDynamicUpdate,
 			GeneratedValuesCollector generatedValuesCollector) {
 		return new EntityUpdateBindPlan(
-				entityPersister instanceof UnionSubclassEntityPersister
+				entityPersister instanceof UnionSubclassEntityPersister && tableDescriptor.isIdentifierTable()
 						? entityPersister.getIdentifierTableDescriptor()
 						: tableDescriptor,
 				entityPersister,

@@ -3950,7 +3950,9 @@ public abstract class AbstractEntityPersister
 				-> applyAttribute( tableBuilderMap, attribute ) );
 	}
 
-	protected void applyAttribute(@Nonnull LinkedHashMap<String, TableDescriptorBuilder> tableBuilderMap, @Nonnull AttributeMapping attribute) {
+	protected void applyAttribute(
+			@Nonnull LinkedHashMap<String, TableDescriptorBuilder> tableBuilderMap,
+			@Nonnull AttributeMapping attribute) {
 		if ( applyAttribute( attribute ) ) {
 			final var tableName = attribute.getContainingTableExpression();
 			final var builder = tableBuilderMap.get( tableName );

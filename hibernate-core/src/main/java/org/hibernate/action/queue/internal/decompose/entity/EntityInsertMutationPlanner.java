@@ -149,9 +149,10 @@ class EntityInsertMutationPlanner {
 			AbstractEntityInsertAction action,
 			GeneratedValuesCollector generatedValuesCollector,
 			DecompositionContext decompositionContext) {
-		final EntityTableDescriptor tableDescriptorToUse = entityPersister instanceof UnionSubclassEntityPersister
-				? entityPersister.getIdentifierTableDescriptor()
-				: tableDescriptor;
+		final EntityTableDescriptor tableDescriptorToUse =
+				entityPersister instanceof UnionSubclassEntityPersister && tableDescriptor.isIdentifierTable()
+						? entityPersister.getIdentifierTableDescriptor()
+						: tableDescriptor;
 
 		return new EntityInsertBindPlan(
 				tableDescriptorToUse,

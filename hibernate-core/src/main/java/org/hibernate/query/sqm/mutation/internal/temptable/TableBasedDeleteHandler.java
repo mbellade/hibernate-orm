@@ -647,17 +647,23 @@ public class TableBasedDeleteHandler
 				);
 			}
 
-			if ( getEntityDescriptor() instanceof UnionSubclassEntityPersister ) {
+			if ( getEntityDescriptor() instanceof UnionSubclassEntityPersister unionPersister ) {
 				int rows = 0;
-				for ( var delete : deletes ) {
-					rows += jdbcMutationExecutor.execute(
-							delete,
+				// Constraint ordering visits secondary tables before concrete entity tables.
+				final int entityTableDeleteStart =
+						deletes.size() - unionPersister.getConstraintOrderedTableNameClosure().length;
+				for ( int i = 0; i < deletes.size(); i++ ) {
+					final int affectedRows = jdbcMutationExecutor.execute(
+							deletes.get( i ),
 							jdbcParameterBindings,
 							sql -> executionContext.getSession().getJdbcCoordinator()
 									.getStatementPreparer().prepareStatement( sql ),
 							(integer, preparedStatement) -> {},
 							executionContext
 					);
+					if ( i >= entityTableDeleteStart ) {
+						rows += affectedRows;
+					}
 				}
 				return rows;
 			}

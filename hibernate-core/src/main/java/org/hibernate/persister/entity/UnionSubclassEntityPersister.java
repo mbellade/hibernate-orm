@@ -27,8 +27,6 @@ import org.hibernate.HibernateException;
 
 import org.hibernate.Internal;
 import org.hibernate.MappingException;
-import org.hibernate.action.queue.spi.meta.ColumnDescriptor;
-import org.hibernate.action.queue.spi.meta.EntityTableDescriptor;
 import org.hibernate.cache.spi.access.EntityDataAccess;
 import org.hibernate.cache.spi.access.NaturalIdDataAccess;
 import org.hibernate.dialect.Dialect;
@@ -55,6 +53,8 @@ import org.hibernate.sql.ast.spi.creation.SqlAliasBase;
 import org.hibernate.sql.ast.spi.creation.SqlAstCreationState;
 import org.hibernate.sql.ast.spi.query.from.NamedTableReference;
 import org.hibernate.sql.ast.spi.query.from.TableGroup;
+import org.hibernate.sql.ast.spi.query.from.TableReference;
+import org.hibernate.sql.ast.spi.query.from.TableReferenceJoin;
 import org.hibernate.sql.ast.spi.query.from.UnionTableGroup;
 import org.hibernate.sql.ast.spi.query.from.UnionTableReference;
 import org.hibernate.sql.ast.spi.query.from.UnknownTableReferenceException;
@@ -96,6 +96,16 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 
 	private final String[] constraintOrderedTableNames;
 	private final String[][] constraintOrderedKeyColumnNames;
+	private final String[] descendantSecondaryTableNames;
+	private final String[][] descendantSecondaryKeyColumnNames;
+
+
+	private final String[] qualifiedTableNames;
+	private final String[][] keyColumnNames;
+	private final boolean[] inverseTables;
+	private final boolean[] nullableTables;
+	private final boolean[] cascadeDeleteEnabled;
+	private final int[] propertyTableNumbers;
 
 	public UnionSubclassEntityPersister(
 			@Nonnull final PersistentClass persistentClass,
@@ -124,6 +134,56 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 		tableName = determineTableName( persistentClass.getTable() );
 		subclassTableNames = new String[]{tableName};
 
+		final var joinClosure = persistentClass.getJoinClosure();
+		qualifiedTableNames = new String[joinClosure.size() + 1];
+		keyColumnNames = new String[qualifiedTableNames.length][];
+		inverseTables = new boolean[qualifiedTableNames.length];
+		nullableTables = new boolean[qualifiedTableNames.length];
+		cascadeDeleteEnabled = new boolean[qualifiedTableNames.length];
+		qualifiedTableNames[0] = tableName;
+		keyColumnNames[0] = getIdentifierColumnNames();
+		for ( int i = 1; i < qualifiedTableNames.length; i++ ) {
+			final var join = joinClosure.get( i - 1 );
+			qualifiedTableNames[i] = determineTableName( join.getTable() );
+			inverseTables[i] = join.isInverse();
+			nullableTables[i] = join.isOptional();
+			cascadeDeleteEnabled[i] = join.getKey().isCascadeDeleteEnabled()
+					&& dialect.getForeignKeySupport().supportsOnDeleteAction( org.hibernate.annotations.OnDeleteAction.CASCADE );
+
+			keyColumnNames[i] = new String[join.getKey().getColumnSpan()];
+			final var columns = join.getKey().getColumns();
+			for ( int j = 0; j < columns.size(); j++ ) {
+				keyColumnNames[i][j] = columns.get( j ).getQuotedName( dialect );
+			}
+		}
+
+		final var subclassJoinClosure = persistentClass.getSubclassJoinClosure();
+		final var knownTableNames = new HashSet<>( Arrays.asList( qualifiedTableNames ) );
+		final var descendantSecondaryTableNames = new ArrayList<String>();
+		final var descendantSecondaryKeyColumnNames = new ArrayList<String[]>();
+		for ( int i = joinClosure.size(); i < subclassJoinClosure.size(); i++ ) {
+			final var join = subclassJoinClosure.get( i );
+			final String secondaryTableName = determineTableName( join.getTable() );
+			if ( !knownTableNames.add( secondaryTableName ) ) {
+				continue;
+			}
+			final var columns = join.getKey().getColumns();
+			final String[] keyColumns = new String[columns.size()];
+			for ( int j = 0; j < columns.size(); j++ ) {
+				keyColumns[j] = columns.get( j ).getQuotedName( dialect );
+			}
+			descendantSecondaryTableNames.add( secondaryTableName );
+			descendantSecondaryKeyColumnNames.add( keyColumns );
+		}
+		this.descendantSecondaryTableNames = toStringArray( descendantSecondaryTableNames );
+		this.descendantSecondaryKeyColumnNames = to2DStringArray( descendantSecondaryKeyColumnNames );
+
+		propertyTableNumbers = new int[getPropertySpan()];
+		final var propertyClosure = persistentClass.getPropertyClosure();
+		for ( int i = 0; i < propertyClosure.size(); i++ ) {
+			propertyTableNumbers[i] = persistentClass.getJoinNumber( propertyClosure.get( i ) );
+		}
+
 		discriminatorValue = new DiscriminatorValue.Literal( persistentClass.getSubclassId() );
 		discriminatorSQLValue = String.valueOf( persistentClass.getSubclassId() );
 		discriminatorType = creationContext.getTypeConfiguration().getBasicTypeRegistry().resolve( StandardBasicTypes.INTEGER );
@@ -142,11 +202,11 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 		//TODO: I'm not sure, but perhaps we should exclude
 		//      abstract denormalized tables?
 
-		final int spacesSize = 1 + persistentClass.getSynchronizedTables().size();
+		final int spacesSize = qualifiedTableNames.length + persistentClass.getSynchronizedTables().size();
 		spaces = new String[spacesSize];
-		spaces[0] = tableName;
+		System.arraycopy( qualifiedTableNames, 0, spaces, 0, qualifiedTableNames.length );
 		final var iter = persistentClass.getSynchronizedTables().iterator();
-		for ( int i = 1; i < spacesSize; i++ ) {
+		for ( int i = qualifiedTableNames.length; i < spacesSize; i++ ) {
 			spaces[i] = iter.next();
 		}
 
@@ -198,27 +258,6 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 		}
 	}
 
-	@Nonnull
-	protected EntityTableDescriptor[] buildTableDescriptors() {
-		var builder = createTableDescriptorBuilder(
-				tableName,
-				0,
-				() -> columnConsumer -> columnConsumer.accept(
-						getIdentifierMapping(),
-						tableName,
-						getIdentifierColumnNames()
-				)
-		);
-
-		visitAttributeMappings( (attribute) -> {
-			builder.addAttribute( attribute );
-			attribute.forEachSelectable( (selectableIndex, selectable)
-					-> builder.addColumn( attribute, ColumnDescriptor.from( selectable ) ) );
-		} );
-
-		// Union subclass has only one table, so entity-wide flag equals table flag
-		return new EntityTableDescriptor[] { builder.build( builder.isSelfReferential ) };
-	}
 
 	protected void validateGenerator() {
 		if ( getGenerator() instanceof IdentityGenerator ) {
@@ -233,7 +272,8 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 				return true;
 			}
 		}
-		return false;
+		return findSecondaryTableIndex( tableExpression ) >= 0
+				|| findDescendantSecondaryTableIndex( tableExpression ) >= 0;
 	}
 
 
@@ -286,12 +326,27 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 			@Nullable SqlAliasBase sqlAliasBase,
 			@Nullable Supplier<Consumer<Predicate>> additionalPredicateCollectorAccess,
 			@Nonnull SqlAstCreationState creationState) {
+		final var tableReferenceAliasBase = SqlAliasBase.from(
+				sqlAliasBase,
+				null,
+				this,
+				creationState.getSqlAliasBaseGenerator()
+		);
+		final var primaryTableReference = createPrimaryTableReference( tableReferenceAliasBase, creationState );
 		final var tableGroup = new UnionTableGroup(
 				canUseInnerJoins,
 				navigablePath,
-				createPrimaryTableReference( sqlAliasBase, creationState ),
+				primaryTableReference,
 				this,
-				explicitSourceAlias
+				explicitSourceAlias,
+				tableExpression -> findSecondaryTableIndex( tableExpression ) >= 0
+						|| findDescendantSecondaryTableIndex( tableExpression ) >= 0,
+				tableExpression -> createTableReferenceJoin(
+						tableExpression,
+						tableReferenceAliasBase,
+						primaryTableReference,
+						creationState
+				)
 		);
 		if ( additionalPredicateCollectorAccess != null ) {
 			final var auxMapping = getAuxiliaryMapping();
@@ -308,6 +363,60 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 		return tableGroup;
 	}
 
+	@Nullable
+	@Override
+	public TableReferenceJoin createTableReferenceJoin(
+			@Nonnull String joinTableExpression,
+			@Nonnull SqlAliasBase sqlAliasBase,
+			@Nonnull TableReference lhs,
+			@Nonnull SqlAstCreationState creationState) {
+		final int tablePosition = findSecondaryTableIndex( joinTableExpression );
+		if ( tablePosition >= 0 ) {
+			return generateTableReferenceJoin(
+					lhs,
+					joinTableExpression,
+					sqlAliasBase,
+					!nullableTables[tablePosition],
+					keyColumnNames[tablePosition],
+					creationState
+			);
+		}
+
+		final int descendantTablePosition = findDescendantSecondaryTableIndex( joinTableExpression );
+		return descendantTablePosition < 0
+				? null
+				: generateTableReferenceJoin(
+						lhs,
+						joinTableExpression,
+						sqlAliasBase,
+						false,
+						descendantSecondaryKeyColumnNames[descendantTablePosition],
+						creationState
+				);
+	}
+
+	private int findSecondaryTableIndex(String tableExpression) {
+		for ( int i = 1; i < qualifiedTableNames.length; i++ ) {
+			if ( qualifiedTableNames[i].equals( tableExpression ) ) {
+				return i;
+			}
+		}
+		return -1;
+	}
+
+	private int findDescendantSecondaryTableIndex(String tableExpression) {
+		for ( int i = 0; i < descendantSecondaryTableNames.length; i++ ) {
+			if ( descendantSecondaryTableNames[i].equals( tableExpression ) ) {
+				return i;
+			}
+		}
+		return -1;
+	}
+
+	public boolean isDescendantSecondaryTable(@Nonnull String tableExpression) {
+		return findDescendantSecondaryTableIndex( tableExpression ) >= 0;
+	}
+
 	@Override
 	public boolean needsDiscriminator() {
 		return false;
@@ -319,11 +428,6 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 		return subclassSpaces;
 	}
 
-	@Nonnull
-	@Override
-	public String getRootTableName() {
-		return tableName;
-	}
 
 	@Nonnull
 	@Override
@@ -386,29 +490,41 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 	@Nonnull
 	@Override
 	public String getTableName(int j) {
-		return tableName;
+		return qualifiedTableNames[j];
 	}
 
 	@Nonnull
 	@Override
 	public String[] getKeyColumns(int j) {
-		return getIdentifierColumnNames();
+		return keyColumnNames[j];
 	}
 
 	@Override
 	public boolean isTableCascadeDeleteEnabled(int j) {
-		return false;
+		return cascadeDeleteEnabled[j];
+	}
+
+	@Override
+	public boolean isInverseTable(int j) {
+		return inverseTables[j];
+	}
+
+	@Override
+	public boolean isNullableTable(int j) {
+		return nullableTables[j];
 	}
 
 	@Nonnull
 	@Override
 	protected TableMutationDetails createTableMutationDetails(@Nonnull PersistentClass bootEntityDescriptor, int relativePosition) {
-		return createTableMutationDetails( bootEntityDescriptor );
+		return relativePosition == 0
+				? createTableMutationDetails( bootEntityDescriptor )
+				: createTableMutationDetails( bootEntityDescriptor.getJoinClosure().get( relativePosition - 1 ) );
 	}
 
 	@Override
 	public boolean isPropertyOfTable(int property, int j) {
-		return true;
+		return propertyTableNumbers[property] == j;
 	}
 
 	// Execute the SQL:
@@ -416,13 +532,19 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 	@Nonnull
 	@Override
 	public String getAttributeMutationTableName(int i) {
-		return getTableName();//ie. the subquery! yuck!
+		return qualifiedTableNames[propertyTableNumbers[i]];
 	}
 
 	@Nonnull
 	@Override
 	public String physicalTableNameForMutation(@Nonnull SelectableMapping selectableMapping) {
 		assert !selectableMapping.isFormula();
+		final String containingTableExpression = selectableMapping.getContainingTableExpression();
+		for ( int i = 1; i < qualifiedTableNames.length; i++ ) {
+			if ( qualifiedTableNames[i].equals( containingTableExpression ) ) {
+				return qualifiedTableNames[i];
+			}
+		}
 		return tableName;
 	}
 
@@ -432,9 +554,13 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 	}
 
 	@Override
+	protected boolean isSecondaryTable(@Nonnull String tableExpression, int relativePosition) {
+		return relativePosition > 0;
+	}
+
+	@Override
 	public boolean hasMultipleTables() {
-		// This could also just be true all the time...
-		return isAbstract() || hasSubclasses();
+		return isAbstract() || hasSubclasses() || getTableSpan() > 1;
 	}
 
 	@Override
@@ -451,6 +577,31 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 
 	@Override
 	public void visitConstraintOrderedTables(@Nonnull ConstraintOrderedTableConsumer consumer) {
+		for ( int i = descendantSecondaryTableNames.length - 1; i >= 0; i-- ) {
+			final String tableName = descendantSecondaryTableNames[i];
+			final int tablePosition = i;
+			consumer.consume(
+					tableName,
+					() -> columnConsumer -> columnConsumer.accept(
+							tableName,
+							descendantSecondaryKeyColumnNames[tablePosition],
+							getIdentifierMapping()::getJdbcMapping
+					)
+			);
+		}
+
+		for ( int i = qualifiedTableNames.length - 1; i > 0; i-- ) {
+			final String tableName = qualifiedTableNames[i];
+			final int tablePosition = i;
+			consumer.consume(
+					tableName,
+					() -> columnConsumer -> columnConsumer.accept(
+							tableName,
+							keyColumnNames[tablePosition],
+							getIdentifierMapping()::getJdbcMapping
+					)
+			);
+		}
 		for ( int i = 0; i < constraintOrderedTableNames.length; i++ ) {
 			final String tableName = constraintOrderedTableNames[i];
 			final int tablePosition = i;
@@ -467,15 +618,19 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 
 	@Override
 	protected void visitMutabilityOrderedTables(@Nonnull MutabilityOrderedTableConsumer consumer) {
-		consumer.consume(
-				tableName,
-				0,
-				() -> columnConsumer -> columnConsumer.accept(
-						getIdentifierMapping(),
-						tableName,
-						getIdentifierColumnNames()
-				)
-		);
+		for ( int i = 0; i < qualifiedTableNames.length; i++ ) {
+			final int tablePosition = i;
+			final String qualifiedTableName = qualifiedTableNames[tablePosition];
+			consumer.consume(
+					qualifiedTableName,
+					tablePosition,
+					() -> columnConsumer -> columnConsumer.accept(
+							getIdentifierMapping(),
+							qualifiedTableName,
+							keyColumnNames[tablePosition]
+					)
+			);
+		}
 	}
 
 	@Override
@@ -491,15 +646,15 @@ public class UnionSubclassEntityPersister extends AbstractEntityPersister {
 
 	@Override
 	public int getTableSpan() {
-		return 1;
+		return qualifiedTableNames.length;
 	}
-
 
 	@Nonnull
 	@Override
 	protected int[] getPropertyTableNumbers() {
-		return new int[getPropertySpan()];
+		return propertyTableNumbers;
 	}
+
 
 	@Nonnull
 	protected String generateSubquery(@Nonnull PersistentClass model) {
