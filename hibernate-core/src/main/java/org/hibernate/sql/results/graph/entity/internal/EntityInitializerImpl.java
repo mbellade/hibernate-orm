@@ -437,9 +437,6 @@ public class EntityInitializerImpl
 			}
 		}
 
-		// todo marco : constructor masking is the balanced approach: a plan-time flag and
-		//  precomputed per-subtype views. The flag is session-derived state on the graph;
-		//  revisit if audit load plans ever become cached/shared with current-state plans.
 		if ( resultDescriptor.isAuditRead() ) {
 			applyAuditExclusionMasks(
 					rootEntityDescriptor,
@@ -528,32 +525,24 @@ public class EntityInitializerImpl
 			Initializer<?>[][] collectionContainingSubInitializers,
 			BitSet[] lazySets,
 			BitSet[] maybeLazySets) {
-		if ( concreteType.isAbstract()
-				|| !concreteType.isTypeOrSuperType( entityDescriptor )
-				|| concreteType.getAuditMapping() == null ) {
+		if ( concreteType.isAbstract() || !concreteType.isTypeOrSuperType( entityDescriptor ) ) {
 			return;
 		}
 		final int subclassId = concreteType.getSubclassId();
+		final var persister = concreteType.getEntityPersister();
 		// The fetch plan uses the hierarchy union; each concrete type keeps its own audit mask.
+		// Attributes excluded by every concrete type have no fetch, so masking them is a no-op.
 		for ( int position = 0; position < concreteType.getNumberOfAttributeMappings(); position++ ) {
-			if ( concreteType.getEntityPersister().isPropertyAuditedExcluded( position ) ) {
-				final var attribute = concreteType.getAttributeMapping( position );
-				final var loadedAttribute = entityDescriptor.findAttributeMapping( attribute.getAttributeName() );
-				final var planAttribute = loadedAttribute != null ? loadedAttribute : attribute;
-				final var planPersister = loadedAttribute != null
-						? entityDescriptor.getEntityPersister()
-						: attribute.getDeclaringType().asEntityMappingType().getEntityPersister();
-				if ( !planPersister.isPropertyPolymorphicallyAuditedExcluded( planAttribute.getStateArrayPosition() ) ) {
-					assemblers[subclassId][position] = unfetchedAttributeAssembler( attribute );
-					if ( subInitializers[subclassId] != null ) {
-						subInitializers[subclassId][position] = null;
-						eagerSubInitializers[subclassId][position] = null;
-						collectionContainingSubInitializers[subclassId][position] = null;
-					}
-					if ( lazySets[subclassId] != null ) {
-						lazySets[subclassId].clear( position );
-						maybeLazySets[subclassId].clear( position );
-					}
+			if ( persister.isPropertyAuditedExcluded( position ) ) {
+				assemblers[subclassId][position] = unfetchedAttributeAssembler( concreteType.getAttributeMapping( position ) );
+				if ( subInitializers[subclassId] != null ) {
+					subInitializers[subclassId][position] = null;
+					eagerSubInitializers[subclassId][position] = null;
+					collectionContainingSubInitializers[subclassId][position] = null;
+				}
+				if ( lazySets[subclassId] != null ) {
+					lazySets[subclassId].clear( position );
+					maybeLazySets[subclassId].clear( position );
 				}
 			}
 		}

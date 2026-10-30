@@ -208,11 +208,6 @@ public class EntityFetchJoinedImpl implements EntityFetch, FetchParent, Initiali
 	}
 
 	@Override
-	public boolean isAuditRead() {
-		return entityResult.isAuditRead();
-	}
-
-	@Override
 	public void collectValueIndexesToCache(BitSet valueIndexes) {
 		entityResult.collectValueIndexesToCache( valueIndexes );
 		if ( keyResult != null ) {
@@ -241,4 +236,9 @@ public class EntityFetchJoinedImpl implements EntityFetch, FetchParent, Initiali
 	/*
 	 * END: Hibernate Reactive: make sure values are accessible from subclass
 	 */
+
+	@Override
+	public boolean isAuditRead() {
+		return entityResult.isAuditRead();
+	}
 }

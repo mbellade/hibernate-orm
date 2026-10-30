@@ -146,10 +146,8 @@ Additional design decisions made during implementation (all verified with the ma
   already-resolved per-class masks of the linked subclass persisters. Attributes are matched
   by name, not by the loaded persister's state-array position. This avoids re-resolving boot
   annotations and keeps the result independent of persister construction order. Polymorphic reads surface
-  subclass-audited values; per-row hiding enforced via concrete-type masks during assembly
-  (`EntityInitializerImpl` post-pass on mixed-exclusion attributes, guarded by `isAuditRead()`
-  on `EntityResultGraphNode`, default false, set from influencers, delegated in
-  `EntityFetchJoinedImpl`).
+  subclass-audited values; concrete-type hiding happens once at initializer construction
+  (see "Package 2" below for the settled read-masking design).
 - Implicit to-one fetches with mixed concrete-type exclusion use select fetching during audit
   point loads. This preserves rows whose audit FK is null despite a mandatory current-state
   association, without changing regular loads or uniformly audited associations.
@@ -223,16 +221,35 @@ classes, non-equivalent eager-initializer suppression, unresolved lazy-metadata 
 (c) deleting read masking entirely (rejected: collections materialize empty instead of null,
 which is behavior, not optimization). The settled design, per user decision:
 
-- `EntityResultGraphNode.isAuditRead()` graph flag is RESTORED (default false, set in
-  `afterInitialize` from `getAuditMapping() != null && temporalIdentifier != null`,
-  delegated by `EntityFetchJoinedImpl`), with contract javadoc: session-derived state on a
-  cacheable graph, sound only because audit and current-state plans are never shared;
-  any future audit-plan caching must keep the partition. A `todo marco` note at the
-  masking block marks this for revisit.
+- `EntityResultGraphNode.isAuditRead()` graph flag (default false, delegated by
+  `EntityFetchJoinedImpl`), set at the end of `afterInitialize` from
+  `auditMapping.useAuxiliaryTable( influencers )`: the same decision that makes the paired
+  SQL select from the audit tables. Javadoc: the graph reads from audit tables, which omit
+  the columns of audit-excluded attributes.
+- The flag is plan state, not session state: influencers are plan-build inputs, and upstream
+  already makes audit graphs structurally different (audit table references,
+  `auditChangesetIdResult` on the same node, fetch existence via `isFetchableAuditExcluded`).
+  The flag adds no caching hazard the SQL does not already have. Resolved; no revisit note.
 - `EntityInitializerImpl` applies per-subtype masking ONCE at construction
   (`applyAuditExclusionMasks(...)`, after descendant propagation, before empty-row
-  normalization): excluded positions get unfetched assemblers, nulled dispatch entries,
-  cleared lazy bits, per concrete type, only for attributes the polymorphic plan includes.
+  normalization): for each concrete descendant of the loaded type, every position its
+  persister excludes gets an unfetched assembler, nulled dispatch entries and cleared lazy
+  bits. No polymorphic check: attributes excluded by every concrete type have no fetch,
+  so masking them again is a no-op. `isPropertyPolymorphicallyAuditedExcluded` remains
+  plan-side only (fetch existence, mandatory to-one select fetching).
+- Alternatives evaluated after settling, all rejected:
+  - Influencers via `AssemblerCreationState`: assembler resolution is memoized per plan in
+    `StandardJdbcValuesMapping`, so the value would come from whichever session first
+    executes the plan; also requires changing `JdbcValuesMapping.resolveAssemblers` (SPI).
+  - Graph exposing per-subtype unfetched attributes instead of a flag ("A2"): implemented
+    and tested, then reverted. Same information source as the flag, larger SPI (extra
+    `EntityPersister.getPropertyAuditExclusions()`), and `EntityInitializerImpl` is already
+    audit-aware upstream, so making one method audit-agnostic gains little.
+  - Execution-time choice of masked/unmasked dispatch arrays in `EntityInitializerData`:
+    removes session state from the plan entirely, but doubles the dispatch arrays and
+    reroutes ~70 field accesses in the hottest constructor/row path.
+  - Not storing (instead of masking) per excluded subtype inside the per-attribute loop:
+    requires rewriting upstream's "write declaring type, copy to subtypes" propagation.
 - Per-row machinery (`isAuditExcluded`, `auditExcludedValue`, `EntityInitializerData.auditRead`)
   is deleted; the nine call sites are back to their natural shape.
 - Both previously-untested corners are pinned: mixed-exclusion primitives
@@ -248,7 +265,7 @@ which is behavior, not optimization). The settled design, per user decision:
   initializer construction, guarded by the restored `isAuditRead` graph flag; per-row audit
   checks are gone.
 - **Package 3 (embeddable sub-property overrides, dotted paths)**: as specified in the
-  "Embeddables" design section above. Pre-PR.
+  "Embeddables" design section above. ON HOLD (user decision); do not start without asking.
 - **Final step (after all packages)**: consolidation pass on the auditoverrides test suite -
   merge overlapping fixtures/classes where clean, keeping all pinned behaviors; rerun full
   suite after. Deliberately last, so consolidation does not churn while packages 2/3 add cases.

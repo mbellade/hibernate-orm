@@ -814,8 +814,7 @@ public final class AuditHelper {
 	static @Nullable Audited.Override findAuditOverride(
 			String propertyName,
 			ClassDetails classDetails,
-			ModelsContext modelsContext
-	) {
+			ModelsContext modelsContext) {
 		for ( var current = classDetails; current != null; current = current.getSuperClass() ) {
 			final var override = current.getNamedAnnotationUsage(
 					Audited.Override.class,
@@ -831,14 +830,19 @@ public final class AuditHelper {
 	}
 
 	public static boolean isEffectivelyExcluded(PersistentClass persistentClass, Property property) {
-		final var modelsContext = property.getValue().getBuildingContext().getBootstrapContext().getModelsContext();
 		final var className = persistentClass.getClassName();
-		final var override = className == null ? null : findAuditOverride(
-				property.getName(),
-				modelsContext.getClassDetailsRegistry().getClassDetails( className ),
-				modelsContext
-		);
-		return override == null ? property.isAuditedExcluded() : !override.isAudited();
+		if ( className != null ) {
+			final var modelsContext = property.getValue().getBuildingContext().getBootstrapContext().getModelsContext();
+			// Entities mapped without annotations (e.g. hbm.xml) have no class details
+			final var classDetails = modelsContext.getClassDetailsRegistry().findClassDetails( className );
+			if ( classDetails != null ) {
+				final var override = findAuditOverride( property.getName(), classDetails, modelsContext );
+				if ( override != null ) {
+					return !override.isAudited();
+				}
+			}
+		}
+		return property.isAuditedExcluded();
 	}
 
 	// todo marco : really? why do we need to do this on a second pass?? can't we just... validate once, when we read the overrides?
@@ -846,8 +850,7 @@ public final class AuditHelper {
 	static void validateAuditOverrides(
 			PersistentClass persistentClass,
 			ClassDetails classDetails,
-			MetadataBuildingContext context
-	) {
+			MetadataBuildingContext context) {
 		final var modelsContext = context.getBootstrapContext().getModelsContext();
 		for ( var current = classDetails; current != null; current = current.getSuperClass() ) {
 			final var declaringClass = current;
@@ -896,8 +899,7 @@ public final class AuditHelper {
 	private static void collectPropertyColumns(
 			PersistentClass persistentClass,
 			Table table,
-			Set<String> auditedColumns
-	) {
+			Set<String> auditedColumns) {
 		for ( var property : persistentClass.getPropertyClosure() ) {
 			if ( mapsTable( persistentClass, property, table )
 					&& !( property instanceof Backref )
@@ -918,8 +920,7 @@ public final class AuditHelper {
 	private static void relaxExcludedColumnNullability(
 			PersistentClass owner,
 			Table sourceTable,
-			Table auditTable
-	) {
+			Table auditTable) {
 		relaxExcludedColumns( owner, sourceTable, auditTable );
 		if ( !( owner instanceof UnionSubclass ) ) {
 			for ( var subclass : owner.getSubclasses() ) {
@@ -933,8 +934,7 @@ public final class AuditHelper {
 	private static void relaxExcludedColumns(
 			PersistentClass persistentClass,
 			Table sourceTable,
-			Table auditTable
-	) {
+			Table auditTable) {
 		for ( var property : persistentClass.getPropertyClosure() ) {
 			if ( mapsTable( persistentClass, property, sourceTable )
 					&& isEffectivelyExcluded( persistentClass, property ) ) {
@@ -958,8 +958,7 @@ public final class AuditHelper {
 	public static boolean isFetchableAuditExcluded(
 			Fetchable fetchable,
 			FetchParent fetchParent,
-			LoadQueryInfluencers influencers
-	) {
+			LoadQueryInfluencers influencers) {
 		if ( influencers.getTemporalIdentifier() == null ) {
 			return false;
 		}
@@ -977,8 +976,7 @@ public final class AuditHelper {
 	public static boolean isFetchableAuditPartiallyExcluded(
 			Fetchable fetchable,
 			FetchParent fetchParent,
-			LoadQueryInfluencers influencers
-	) {
+			LoadQueryInfluencers influencers) {
 		if ( influencers.getTemporalIdentifier() == null ) {
 			return false;
 		}

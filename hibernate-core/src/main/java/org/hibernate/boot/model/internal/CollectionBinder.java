@@ -1,5 +1,6 @@
 package org.hibernate.boot.model.internal;
 
+import jakarta.annotation.Nullable;
 import jakarta.persistence.AttributeOverride;
 import jakarta.persistence.AttributeOverrides;
 import jakarta.persistence.CascadeType;
@@ -2554,11 +2555,11 @@ public abstract class CollectionBinder {
 		// Collection second passes run after the entire entity hierarchy has been registered.
 		final var owner = collection.getOwner();
 		final var modelsContext = buildingContext.getBootstrapContext().getModelsContext();
-		final var rootDetails = modelsContext.getClassDetailsRegistry()
-				.getClassDetails( owner.getRootClass().getClassName() );
+		final var rootDetails = findClassDetails( owner.getRootClass().getClassName(), modelsContext );
 		if ( extract( Audited.class, property, buildingContext ) == null
-				&& rootDetails.getAnnotationUsage( Audited.class, modelsContext ) == null
-				&& extractFromPackage( Audited.class, rootDetails, buildingContext ) == null ) {
+				&& ( rootDetails == null
+						|| rootDetails.getAnnotationUsage( Audited.class, modelsContext ) == null
+								&& extractFromPackage( Audited.class, rootDetails, buildingContext ) == null ) ) {
 			return false;
 		}
 		if ( propertyHolder instanceof ComponentPropertyHolder componentHolder ) {
@@ -2586,6 +2587,14 @@ public abstract class CollectionBinder {
 			}
 		}
 		return false;
+	}
+
+	/**
+	 * Dynamic-map entities have no class name, and entities mapped without annotations
+	 * have no class details.
+	 */
+	private static @Nullable ClassDetails findClassDetails(@Nullable String className, ModelsContext modelsContext) {
+		return className == null ? null : modelsContext.getClassDetailsRegistry().findClassDetails( className );
 	}
 
 	private static boolean isComponentAudited(PersistentClass owner, Component target) {
@@ -2621,9 +2630,10 @@ public abstract class CollectionBinder {
 			return property.getDirectAnnotationUsage( Audited.CollectionTable.class );
 		}
 		final var modelsContext = buildingContext.getBootstrapContext().getModelsContext();
-		final var ownerDetails = modelsContext.getClassDetailsRegistry()
-				.getClassDetails( collection.getOwner().getClassName() );
-		final var override = AuditHelper.findAuditOverride( propertyName, ownerDetails, modelsContext );
+		final var ownerDetails = findClassDetails( collection.getOwner().getClassName(), modelsContext );
+		final var override = ownerDetails == null
+				? null
+				: AuditHelper.findAuditOverride( propertyName, ownerDetails, modelsContext );
 		if ( override != null && override.isAudited() ) {
 			final var table = override.collectionTable();
 			if ( !isBlank( table.name() ) || !isBlank( table.schema() ) || !isBlank( table.catalog() ) ) {
