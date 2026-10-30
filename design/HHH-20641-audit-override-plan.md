@@ -183,40 +183,50 @@ for the user at commit time).
   `AuditEmbeddedCollectionOverrideTest`.
 - Unknown override names are validated only for audit state management, not temporal history.
 
-### Known limitations (deferred to package 2, ELI5)
+### Package 2: concrete collection owners and row-time masking
 
-Both stem from the collection *write* path resolving the declaring owner instead of the actual
-runtime subclass. The collection write machinery is shared per collection mapping with no
-per-concrete-owner exclusion check, and exists twice (legacy `AuditWorkQueue` path and graph
-`AuditCollectionMutationPlanContributor` path).
+Both collection write queues and bulk-removal audit handling use the shared
+`ResultsHelper.getCollectionOwner` pattern: look up the collection key in the
+persistence context first; on null, extract the wrapper owner's identifier without
+initializing proxies and re-resolve through the persistence context. The resolved
+entry's persister supplies the concrete audit mask. Only ownerless work falls back
+to the declaring persister. Component collections consult their top-level owning
+property's mask.
 
-1. **Ghost middle rows (write side)**: with `Base.tags` audited and
-   `@Audited.Override(name="tags", isAudited=false)` on `Sub`, modifying a `Sub`'s tags still
-   writes rows into the shared `Base_tags_AUD` middle table. Reads correctly hide them, but the
-   rows persist as invisible garbage (data hygiene wart, not a wrong query result).
-2. **Collection-only revisions on re-audited subclasses**: with `Base.tags` excluded at
-   declaration and re-audited on `Sub`, a tags-only change on a `Sub` may not create the
-   expected audit revision, because the "does this collection change deserve a revision" check
-   consults the declaring owner's (`Base`'s) audit support. A co-occurring scalar change makes
-   it land correctly (per-class path respects the override). Tests currently co-update a scalar
-   and carry an explanatory comment; they must be revisited when this is fixed.
+The legacy queue filters excluded collections before callback registration and change
+recording. The graph contributor applies the same filter before recording either
+collection rows or the owner's MOD change. Both queues build owner audit changes
+using the concrete persister, so re-audited subclass collections create revisions
+without a scalar co-update. Collection change keys include the role and owner id;
+skipping one collection does not discard another collection's snapshot.
+
+Owner entity changes use the resolved owner's actual entity key, not a potentially
+non-PK property-ref collection key. Entity coordinators and contributors construct
+their own final audit support. Only `CollectionAuditSupport` caches arbitrary
+concrete-owner support in a private concurrent map; this support is session-independent.
+Property-ref regressions cover null-primary fallback and opposite concrete-owner
+masks with both audit strategies and both queues. Wrong-non-null-owner collisions
+remain outside this package, pending a separate Jira for `getCollectionOwner` lookup ordering.
+
+The former limitations were ghost middle rows for subclass-excluded collections and
+missing collection-only revisions for subclass-restored collections. The collection
+override regressions now pin both directions, including legacy queue coverage.
+Legacy entity update handling still treats a dirty collection as sufficient for an
+owner revision, even when that collection is audit-excluded. This existing revision
+policy is unchanged; excluded middle rows are suppressed in both queues.
+
+After the write-path regressions passed, the result-graph audit-read flag and the
+initializer constructor post-pass were removed. Row-processing data carries the
+audit context; per-row concrete masks skip excluded subinitializers and supply null
+or primitive defaults during state assembly. No per-concrete-type static masking
+fallback remains. Generic absent-fetch assemblers and hierarchy-union fetch planning
+are unchanged.
 
 ### Remaining work packages
 
-- **Package 2 (collection write-path owner resolution)**: per-concrete-owner exclusion checks in
-  both write queues (`CollectionAuditWriter` legacy path, graph contributor), fix
-  `resolveOwnerAuditChange` to resolve the actual subclass owner, and the reverse direction
-  (re-audited collections on subclasses must write rows even when the declaring class excludes).
-  Revisit the co-update test fixtures.
-  **Additional goal**: once writes resolve the actual concrete owner, excluded owners produce no
-  middle rows / null FKs and per-concrete-type read masking stops being a correctness mechanism -
-  it degrades to an optimization. Package 2 must therefore also REMOVE the need for
-  `EntityResultGraphNode.isAuditRead()`: drop the flag from the result graph (session-derived
-  state does not belong there) and move the remaining initializer logic to row-processing time,
-  where the session (and thus audit context) is directly available. Between packages the flag
-  stays as-is, with its caching-partition contract documented on the interface; do not remove
-  the `EntityInitializerImpl` post-pass before the write path is owner-correct (it is what keeps
-  ghost rows invisible on reads until then). Pre-PR.
+- **Package 2 (implemented)**: collection writes resolve concrete owners in both queues;
+  collection-only revision fixtures no longer co-update scalars. The result graph no
+  longer stores audit-read session state; initializer masking runs at row time.
 - **Package 3 (embeddable sub-property overrides, dotted paths)**: as specified in the
   "Embeddables" design section above. Pre-PR.
 - **Final step (after all packages)**: consolidation pass on the auditoverrides test suite -

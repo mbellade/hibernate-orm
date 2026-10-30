@@ -267,7 +267,13 @@ public class ResultsHelper {
 		return true;
 	}
 
-	private static Object getCollectionOwner(
+	/**
+	 * Resolve the owner from the persistence context using the collection key first.
+	 * If that lookup returns null for a property-ref collection, use the wrapper
+	 * owner's identifier to resolve the managed owner. Identifier extraction via
+	 * the owner persister does not initialize an owner proxy.
+	 */
+	public static Object getCollectionOwner(
 			PersistenceContext context,
 			CollectionPersister collectionDescriptor,
 			PersistentCollection<?> collection,

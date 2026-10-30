@@ -14,7 +14,9 @@ import org.hibernate.engine.spi.EntityKey;
 import org.hibernate.engine.spi.SharedSessionContractImplementor;
 import org.hibernate.engine.spi.TransactionCompletionCallbacks;
 import org.hibernate.persister.collection.CollectionPersister;
+import org.hibernate.persister.collection.mutation.CollectionAuditSupport;
 import org.hibernate.persister.entity.mutation.AuditMutationWriter;
+import org.hibernate.sql.results.internal.ResultsHelper;
 
 import static org.hibernate.internal.util.NullnessUtil.castNonNull;
 
@@ -92,6 +94,17 @@ public class AuditWorkQueue implements TransactionCompletionCallbacks.BeforeComp
 			Object originalSnapshot,
 			CollectionAuditWriter writer,
 			SharedSessionContractImplementor session) {
+		final var owner = ResultsHelper.getCollectionOwner(
+				session.getPersistenceContextInternal(),
+				collectionPersister,
+				collection,
+				ownerId,
+				session
+		);
+		final var ownerPersister = CollectionAuditSupport.resolveOwnerPersister( collectionPersister, owner, session );
+		if ( !CollectionAuditSupport.isCollectionAudited( collectionPersister, ownerPersister ) ) {
+			return;
+		}
 		if ( !registered ) {
 			session.getTransactionCompletionCallbacks().registerCallback( this );
 			registered = true;
@@ -100,19 +113,12 @@ public class AuditWorkQueue implements TransactionCompletionCallbacks.BeforeComp
 		// the diff at completion will use original vs final state
 		changeSet.addCollectionChange( collectionPersister, collection, ownerId, originalSnapshot, writer );
 
-		final var ownerPersister = collectionPersister.getOwnerEntityPersister();
 		if ( ownerPersister.getAuditMapping() != null ) {
-			final var ownerEntityKey = session.generateEntityKey( ownerId, ownerPersister );
 			if ( trackingListener == null ) {
 				trackingListener = resolveTrackingListener( session );
 			}
-			final var persistenceContextOwner =
-					session.getPersistenceContextInternal().getCollectionOwner( ownerId, collectionPersister );
-			final var collectionOwner = persistenceContextOwner != null ? persistenceContextOwner : collection.getOwner();
-			final var owner = collectionOwner != null
-					? collectionOwner
-					: session.getPersistenceContextInternal().getEntity( ownerEntityKey );
 			if ( owner != null ) {
+				final var ownerEntityKey = CollectionAuditSupport.resolveOwnerEntityKey( owner, ownerPersister, session );
 				changeSet.addEntityChange(
 						ownerEntityKey,
 						owner,
