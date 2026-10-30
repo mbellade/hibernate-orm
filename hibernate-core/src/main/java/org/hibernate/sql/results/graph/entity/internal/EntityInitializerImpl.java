@@ -43,6 +43,7 @@ import org.hibernate.loader.ast.spi.CascadingFetchProfile;
 import org.hibernate.metamodel.mapping.AttributeMapping;
 import org.hibernate.metamodel.mapping.AttributeMetadata;
 import org.hibernate.metamodel.mapping.CompositeIdentifierMapping;
+import org.hibernate.metamodel.mapping.EntityMappingType;
 import org.hibernate.metamodel.mapping.EntityValuedModelPart;
 import org.hibernate.metamodel.mapping.ModelPart;
 import org.hibernate.metamodel.mapping.internal.EntityCollectionPart;
@@ -152,7 +153,6 @@ public class EntityInitializerImpl
 		protected final boolean hasCallbackActions;
 		protected final @Nullable EntityPersister defaultConcreteDescriptor;
 		protected final boolean allRevisions;
-		protected final boolean auditRead;
 
 		// per-row state
 		protected @Nullable EntityPersister concreteDescriptor;
@@ -181,7 +181,6 @@ public class EntityInitializerImpl
 				canUseEmbeddedIdentifierInstanceAsEntity = false;
 			}
 			hasCallbackActions = rowProcessingState.hasCallbackActions();
-			auditRead = rowProcessingState.getLoadQueryInfluencers().getTemporalIdentifier() != null;
 			allRevisions = initializer.auditChangesetIdAssembler != null
 					&& rowProcessingState.getSession().getLoadQueryInfluencers().isAllRevisions();
 			defaultConcreteDescriptor =
@@ -202,7 +201,6 @@ public class EntityInitializerImpl
 			this.canUseEmbeddedIdentifierInstanceAsEntity = original.canUseEmbeddedIdentifierInstanceAsEntity;
 			this.hasCallbackActions = original.hasCallbackActions;
 			this.allRevisions = original.allRevisions;
-			this.auditRead = original.auditRead;
 			this.defaultConcreteDescriptor = original.defaultConcreteDescriptor;
 			this.concreteDescriptor = original.concreteDescriptor;
 			this.entityKey = original.entityKey;
@@ -439,6 +437,32 @@ public class EntityInitializerImpl
 			}
 		}
 
+		// todo marco : constructor masking is the balanced approach: a plan-time flag and
+		//  precomputed per-subtype views. The flag is session-derived state on the graph;
+		//  revisit if audit load plans ever become cached/shared with current-state plans.
+		if ( resultDescriptor.isAuditRead() ) {
+			applyAuditExclusionMasks(
+					rootEntityDescriptor,
+					assemblers,
+					subInitializers,
+					eagerSubInitializers,
+					collectionContainingSubInitializers,
+					lazySets,
+					maybeLazySets
+			);
+			for ( var subMappingType : subMappingTypes ) {
+				applyAuditExclusionMasks(
+						subMappingType,
+						assemblers,
+						subInitializers,
+						eagerSubInitializers,
+						collectionContainingSubInitializers,
+						lazySets,
+						maybeLazySets
+				);
+			}
+		}
+
 		for ( int i = 0; i < subInitializers.length; i++ ) {
 			boolean emptySubInitializers = true;
 			if ( subInitializers[i] != null ) {
@@ -496,6 +520,45 @@ public class EntityInitializerImpl
 		this.affectedByFilter = affectedByFilter;
 	}
 
+	private void applyAuditExclusionMasks(
+			EntityMappingType concreteType,
+			DomainResultAssembler<?>[][] assemblers,
+			Initializer<?>[][] subInitializers,
+			Initializer<?>[][] eagerSubInitializers,
+			Initializer<?>[][] collectionContainingSubInitializers,
+			BitSet[] lazySets,
+			BitSet[] maybeLazySets) {
+		if ( concreteType.isAbstract()
+				|| !concreteType.isTypeOrSuperType( entityDescriptor )
+				|| concreteType.getAuditMapping() == null ) {
+			return;
+		}
+		final int subclassId = concreteType.getSubclassId();
+		// The fetch plan uses the hierarchy union; each concrete type keeps its own audit mask.
+		for ( int position = 0; position < concreteType.getNumberOfAttributeMappings(); position++ ) {
+			if ( concreteType.getEntityPersister().isPropertyAuditedExcluded( position ) ) {
+				final var attribute = concreteType.getAttributeMapping( position );
+				final var loadedAttribute = entityDescriptor.findAttributeMapping( attribute.getAttributeName() );
+				final var planAttribute = loadedAttribute != null ? loadedAttribute : attribute;
+				final var planPersister = loadedAttribute != null
+						? entityDescriptor.getEntityPersister()
+						: attribute.getDeclaringType().asEntityMappingType().getEntityPersister();
+				if ( !planPersister.isPropertyPolymorphicallyAuditedExcluded( planAttribute.getStateArrayPosition() ) ) {
+					assemblers[subclassId][position] = unfetchedAttributeAssembler( attribute );
+					if ( subInitializers[subclassId] != null ) {
+						subInitializers[subclassId][position] = null;
+						eagerSubInitializers[subclassId][position] = null;
+						collectionContainingSubInitializers[subclassId][position] = null;
+					}
+					if ( lazySets[subclassId] != null ) {
+						lazySets[subclassId].clear( position );
+						maybeLazySets[subclassId].clear( position );
+					}
+				}
+			}
+		}
+	}
+
 	private static DomainResultAssembler<?> unfetchedAttributeAssembler(AttributeMapping attributeMapping) {
 		final var javaType = attributeMapping.getMappedType().getMappedJavaType();
 		final var propertyAccess = attributeMapping.getPropertyAccess();
@@ -506,20 +569,6 @@ public class EntityInitializerImpl
 		return propertyAccess.getGetter().getReturnTypeClass().isPrimitive()
 				? new DefaultValueAssembler<>( javaType )
 				: new NullValueAssembler<>( javaType );
-	}
-
-	private static boolean isAuditExcluded(EntityInitializerData data, int position) {
-		return data.auditRead
-				&& data.concreteDescriptor.getAuditMapping() != null
-				&& data.concreteDescriptor.isPropertyAuditedExcluded( position );
-	}
-
-	private static Object auditExcludedValue(AttributeMapping attribute) {
-		final var propertyAccess = attribute.getPropertyAccess();
-		assert propertyAccess != null;
-		return propertyAccess.getGetter().getReturnTypeClass().isPrimitive()
-				? attribute.getMappedType().getMappedJavaType().getDefaultValue()
-				: null;
 	}
 
 	private static boolean hasCascadeRefresh(EntityValuedModelPart referencedModelPart) {
@@ -804,8 +853,7 @@ public class EntityInitializerImpl
 				for ( int i = 0; i < state.length; i++ ) {
 					final Object subInstance = state[i];
 					final var assembler = subAssemblers[i];
-					if ( !isAuditExcluded( data, i )
-						&& subInstance == UNFETCHED_PROPERTY
+					if ( subInstance == UNFETCHED_PROPERTY
 						&& !(assembler instanceof UnfetchedResultAssembler<?>)
 						&& !(assembler instanceof UnfetchedCollectionAssembler) ) {
 						// This assembler will produce a value when the underlying entity property is still lazy
@@ -819,7 +867,7 @@ public class EntityInitializerImpl
 			var eagerInitializers = eagerSubInitializers[subclassId];
 			for ( int i = 0; i < state.length; i++ ) {
 				final var initializer = initializers[i];
-				if ( !isAuditExcluded( data, i ) && ( maybeLazySet == null || maybeLazySet.get( i ) ) ) {
+				if ( maybeLazySet == null || maybeLazySet.get( i ) ) {
 					final Object subInstance = state[i];
 					if ( initializer != null ) {
 						if ( subInstance == UNFETCHED_PROPERTY ) {
@@ -877,7 +925,6 @@ public class EntityInitializerImpl
 			// It is vital to only resolveFromPreviousRow only for the initializers where the state is maybe lazy,
 			// as the initialization process for the previous row also only called those initializers
 			if ( initializer != null
-					&& !isAuditExcluded( data, i )
 					&& ( maybeLazySet == null || maybeLazySet.get( i ) ) ) {
 				initializer.resolveFromPreviousRow( rowProcessingState );
 			}
@@ -886,10 +933,8 @@ public class EntityInitializerImpl
 
 	protected void resolveKeySubInitializers(EntityInitializerData data) {
 		final var rowProcessingState = data.getRowProcessingState();
-		final var initializers = subInitializers[data.concreteDescriptor.getSubclassId()];
-		for ( int i = 0; i < initializers.length; i++ ) {
-			final var initializer = initializers[i];
-			if ( initializer != null && !isAuditExcluded( data, i ) ) {
+		for ( var initializer : subInitializers[data.concreteDescriptor.getSubclassId()] ) {
+			if ( initializer != null ) {
 				initializer.resolveKey( rowProcessingState );
 			}
 		}
@@ -1713,9 +1758,7 @@ public class EntityInitializerImpl
 				&& assembler != null
 				&& !(assembler instanceof UnfetchedResultAssembler<?>)
 				&& !(assembler instanceof UnfetchedCollectionAssembler) ) {
-				final var value = isAuditExcluded( data, i )
-						? auditExcludedValue( data.concreteDescriptor.getAttributeMapping( i ) )
-						: assembler.assemble( rowProcessingState );
+				final var value = assembler.assemble( rowProcessingState );
 				if ( value != UNFETCHED_PROPERTY ) {
 					state[i] = value;
 					data.concreteDescriptor.setValue( data.entityInstanceForNotify, i, value );
@@ -2145,9 +2188,7 @@ public class EntityInitializerImpl
 		final var concreteAssemblers = assemblers[data.concreteDescriptor.getSubclassId()];
 		for ( int i = 0; i < values.length; i++ ) {
 			final var assembler = concreteAssemblers[i];
-			values[i] = isAuditExcluded( data, i )
-					? auditExcludedValue( data.concreteDescriptor.getAttributeMapping( i ) )
-					: assembler == null ? UNFETCHED_PROPERTY : assembler.assemble( rowProcessingState );
+			values[i] = assembler == null ? UNFETCHED_PROPERTY : assembler.assemble( rowProcessingState );
 		}
 		return values;
 	}
@@ -2192,10 +2233,8 @@ public class EntityInitializerImpl
 	protected void resolveEntityState(EntityInitializerData data) {
 		assert data.concreteDescriptor != null;
 		final var rowProcessingState = data.getRowProcessingState();
-		final var concreteAssemblers = assemblers[data.concreteDescriptor.getSubclassId()];
-		for ( int i = 0; i < concreteAssemblers.length; i++ ) {
-			final var assembler = concreteAssemblers[i];
-			if ( assembler != null && !isAuditExcluded( data, i ) ) {
+		for ( var assembler : assemblers[data.concreteDescriptor.getSubclassId()] ) {
+			if ( assembler != null ) {
 				assembler.resolveState( rowProcessingState );
 			}
 		}
@@ -2306,10 +2345,8 @@ public class EntityInitializerImpl
 
 	protected void initializeSubInstancesFromParent(EntityInitializerData data) {
 		if ( data.entityInstanceForNotify != null ) {
-			final var initializers = subInitializers[data.concreteDescriptor.getSubclassId()];
-			for ( int i = 0; i < initializers.length; i++ ) {
-				final var initializer = initializers[i];
-				if ( initializer != null && !isAuditExcluded( data, i ) ) {
+			for ( var initializer : subInitializers[data.concreteDescriptor.getSubclassId()] ) {
+				if ( initializer != null ) {
 					initializer.initializeInstanceFromParent( data.entityInstanceForNotify, data.getRowProcessingState() );
 				}
 			}
@@ -2340,10 +2377,8 @@ public class EntityInitializerImpl
 			}
 		}
 		else {
-			final var initializers = subInitializers[entityInitializerData.concreteDescriptor.getSubclassId()];
-			for ( int i = 0; i < initializers.length; i++ ) {
-				final var initializer = initializers[i];
-				if ( initializer != null && !isAuditExcluded( entityInitializerData, i ) ) {
+			for ( var initializer : subInitializers[entityInitializerData.concreteDescriptor.getSubclassId()] ) {
+				if ( initializer != null ) {
 					consumer.accept( initializer, rowProcessingState );
 				}
 			}

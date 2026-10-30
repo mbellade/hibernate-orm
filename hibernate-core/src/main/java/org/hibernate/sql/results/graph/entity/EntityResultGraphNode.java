@@ -42,6 +42,18 @@ public interface EntityResultGraphNode extends DomainResultGraphNode, FetchParen
 		return getEntityValuedModelPart().getEntityMappingType();
 	}
 
+	/**
+	 * Whether this graph was built for an audit read instead of a current-state load.
+	 * <p>
+	 * This is session-derived state on a cacheable graph. It is sound only because
+	 * audit and current-state plans are never shared: loaders bypass plan caching
+	 * when {@code temporalIdentifier != null}, and the SQM plan cache keys on the
+	 * temporal context. Any future audit-plan caching must preserve this partition.
+	 */
+	default boolean isAuditRead() {
+		return false;
+	}
+
 	@Override
 	default boolean appliesTo(GraphImplementor<?> graphImplementor, JpaMetamodel metamodel) {
 		final String entityName = getEntityValuedModelPart().getEntityMappingType().getEntityName();

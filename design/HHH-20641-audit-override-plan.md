@@ -183,7 +183,7 @@ for the user at commit time).
   `AuditEmbeddedCollectionOverrideTest`.
 - Unknown override names are validated only for audit state management, not temporal history.
 
-### Package 2: concrete collection owners and row-time masking
+### Package 2: concrete collection owners and per-subtype constructor masking
 
 Both collection write queues and bulk-removal audit handling use the shared
 `ResultsHelper.getCollectionOwner` pattern: look up the collection key in the
@@ -215,18 +215,38 @@ Legacy entity update handling still treats a dirty collection as sufficient for 
 owner revision, even when that collection is audit-excluded. This existing revision
 policy is unchanged; excluded middle rows are suppressed in both queues.
 
-After the write-path regressions passed, the result-graph audit-read flag and the
-initializer constructor post-pass were removed. Row-processing data carries the
-audit context; per-row concrete masks skip excluded subinitializers and supply null
-or primitive defaults during state assembly. No per-concrete-type static masking
-fallback remains. Generic absent-fetch assemblers and hierarchy-union fetch planning
-are unchanged.
+After the write-path regressions passed, per-concrete-type read masking went through three
+rejected redesigns before settling: (a) a `historical` boolean threaded through the loader
+SPI pipeline (rejected: too many shared interfaces touched), (b) unconditional per-attribute
+assembler/initializer wrappers consulting audit context per row (rejected: four wrapper
+classes, non-equivalent eager-initializer suppression, unresolved lazy-metadata corners),
+(c) deleting read masking entirely (rejected: collections materialize empty instead of null,
+which is behavior, not optimization). The settled design, per user decision:
+
+- `EntityResultGraphNode.isAuditRead()` graph flag is RESTORED (default false, set in
+  `afterInitialize` from `getAuditMapping() != null && temporalIdentifier != null`,
+  delegated by `EntityFetchJoinedImpl`), with contract javadoc: session-derived state on a
+  cacheable graph, sound only because audit and current-state plans are never shared;
+  any future audit-plan caching must keep the partition. A `todo marco` note at the
+  masking block marks this for revisit.
+- `EntityInitializerImpl` applies per-subtype masking ONCE at construction
+  (`applyAuditExclusionMasks(...)`, after descendant propagation, before empty-row
+  normalization): excluded positions get unfetched assemblers, nulled dispatch entries,
+  cleared lazy bits, per concrete type, only for attributes the polymorphic plan includes.
+- Per-row machinery (`isAuditExcluded`, `auditExcludedValue`, `EntityInitializerData.auditRead`)
+  is deleted; the nine call sites are back to their natural shape.
+- Both previously-untested corners are pinned: mixed-exclusion primitives
+  (`AuditExcludedDefaultValueTest`: base reads Java default, restoring subclass keeps its
+  value) and components containing collections (`AuditExcludedComponentCollectionTest`:
+  base address null, restoring subclass reads collection values, joined-fetch path
+  included).
 
 ### Remaining work packages
 
 - **Package 2 (implemented)**: collection writes resolve concrete owners in both queues;
-  collection-only revision fixtures no longer co-update scalars. The result graph no
-  longer stores audit-read session state; initializer masking runs at row time.
+  collection-only revision fixtures no longer co-update scalars. Read masking runs once at
+  initializer construction, guarded by the restored `isAuditRead` graph flag; per-row audit
+  checks are gone.
 - **Package 3 (embeddable sub-property overrides, dotted paths)**: as specified in the
   "Embeddables" design section above. Pre-PR.
 - **Final step (after all packages)**: consolidation pass on the auditoverrides test suite -

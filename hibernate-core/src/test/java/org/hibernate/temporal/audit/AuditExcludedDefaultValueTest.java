@@ -1,3 +1,6 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ */
 package org.hibernate.temporal.audit;
 
 import jakarta.persistence.Access;
@@ -14,6 +17,7 @@ import org.hibernate.temporal.spi.ChangesetIdentifierSupplier;
 import org.hibernate.type.YesNoConverter;
 import org.hibernate.testing.orm.junit.AuditedTest;
 import org.hibernate.testing.orm.junit.DomainModel;
+import org.hibernate.testing.orm.junit.Jira;
 import org.hibernate.testing.orm.junit.ServiceRegistry;
 import org.hibernate.testing.orm.junit.SessionFactory;
 import org.hibernate.testing.orm.junit.SessionFactoryScope;
@@ -34,10 +38,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @DomainModel(annotatedClasses = {
 		AuditExcludedDefaultValueTest.BoxedEntity.class,
 		AuditExcludedDefaultValueTest.PrimitiveEntity.class,
+		AuditExcludedDefaultValueTest.RestoredPrimitiveEntity.class,
 		AuditExcludedDefaultValueTest.PropertyEntity.class
 })
 @ServiceRegistry(settings = @Setting(name = StateManagementSettings.CHANGESET_ID_SUPPLIER,
 		value = "org.hibernate.temporal.audit.AuditExcludedDefaultValueTest$TxIdSupplier"))
+@Jira("https://hibernate.atlassian.net/browse/HHH-20641")
 class AuditExcludedDefaultValueTest {
 	private static int currentTxId;
 
@@ -68,6 +74,11 @@ class AuditExcludedDefaultValueTest {
 			primitive.enabled = true;
 			primitive.marker = 'X';
 			session.persist( primitive );
+
+			final var restored = new RestoredPrimitiveEntity();
+			restored.id = 4;
+			restored.counter = 13;
+			session.persist( restored );
 
 			final var property = new PropertyEntity();
 			property.setId( 3 );
@@ -113,6 +124,24 @@ class AuditExcludedDefaultValueTest {
 					() -> assertFalse( entity.enabled ),
 					() -> assertEquals( '\0', entity.marker )
 			);
+		}
+	}
+
+	@Test
+	void mixedPrimitiveExclusionsUseConcreteDefaults(SessionFactoryScope scope) {
+		try (var session = scope.getSessionFactory().withOptions().atChangeset( 1 ).openSession()) {
+			final var entities = session.createSelectionQuery(
+					"from AuditPrimitiveDefaults order by id",
+					PrimitiveEntity.class
+			).getResultList();
+			assertEquals( 2, entities.size() );
+			assertEquals( 0, entities.get( 0 ).counter );
+			assertTrue( entities.get( 1 ) instanceof RestoredPrimitiveEntity );
+			assertEquals( 13, entities.get( 1 ).counter );
+		}
+		try (var session = scope.getSessionFactory().withOptions().atChangeset( 1 ).openSession()) {
+			assertEquals( 0, session.find( PrimitiveEntity.class, 2 ).counter );
+			assertEquals( 13, session.find( RestoredPrimitiveEntity.class, 4 ).counter );
 		}
 	}
 
@@ -186,6 +215,11 @@ class AuditExcludedDefaultValueTest {
 		boolean enabled = true;
 		@Audited.Excluded
 		char marker = 'Y';
+	}
+
+	@Entity(name = "AuditRestoredPrimitiveDefaults")
+	@Audited.Override(name = "counter")
+	static class RestoredPrimitiveEntity extends PrimitiveEntity {
 	}
 
 	@Audited

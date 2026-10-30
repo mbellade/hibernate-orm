@@ -29,6 +29,7 @@ public abstract class AbstractEntityResultGraphNode extends AbstractFetchParent 
 	private BasicFetch<?> discriminatorFetch;
 	private DomainResult<Object> rowIdResult;
 	private @Nullable DomainResult<?> auditChangesetIdResult;
+	private boolean auditRead;
 	private final EntityValuedModelPart fetchContainer;
 
 	@org.hibernate.SPI(org.hibernate.SPI.Role.IMPLEMENT)
@@ -39,6 +40,8 @@ public abstract class AbstractEntityResultGraphNode extends AbstractFetchParent 
 
 	@Override
 	public void afterInitialize(FetchParent fetchParent, DomainResultCreationState creationState) {
+		auditRead = getReferencedMappingContainer().getAuditMapping() != null
+				&& creationState.getSqlAstCreationState().getLoadQueryInfluencers().getTemporalIdentifier() != null;
 		final var navigablePath = getNavigablePath();
 		final var entityTableGroup =
 				creationState.getSqlAstCreationState().getFromClauseAccess()
@@ -125,6 +128,11 @@ public abstract class AbstractEntityResultGraphNode extends AbstractFetchParent 
 	@Override
 	public EntityMappingType getReferencedMappingContainer() {
 		return getEntityValuedModelPart().getEntityMappingType();
+	}
+
+	@Override
+	public boolean isAuditRead() {
+		return auditRead;
 	}
 
 	@Override
