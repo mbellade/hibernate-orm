@@ -241,7 +241,7 @@ public class AuditStateManagement implements StateManagement, StateManagementLeg
 		}
 
 		// Secondary table entries (@SecondaryTable joins)
-		for ( var join : rootClass.getJoins() ) {
+		for ( var join : rootClass.getSubclassJoinClosure() ) {
 			if ( join.getAuxiliaryTable() != null ) {
 				addTableAuditInfo(
 						map,

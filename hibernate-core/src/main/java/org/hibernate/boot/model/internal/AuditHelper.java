@@ -34,12 +34,16 @@ import org.hibernate.mapping.Stateful;
 import org.hibernate.mapping.Table;
 import org.hibernate.mapping.TableOwner;
 import org.hibernate.mapping.UnionSubclass;
+import org.hibernate.metamodel.mapping.AttributeMapping;
 import org.hibernate.metamodel.mapping.EntityMappingType;
 import org.hibernate.models.spi.ClassDetails;
 import org.hibernate.models.spi.MemberDetails;
+import org.hibernate.models.spi.ModelsContext;
 import org.hibernate.persister.state.internal.AuditStateManagement;
 import org.hibernate.resource.beans.spi.ManagedBeanRegistry;
+import org.hibernate.sql.results.graph.FetchParent;
 import org.hibernate.sql.results.graph.Fetchable;
+import org.hibernate.sql.results.graph.entity.EntityResultGraphNode;
 import org.hibernate.temporal.spi.ChangesetCoordinator;
 
 import jakarta.annotation.Nullable;
@@ -70,27 +74,31 @@ public final class AuditHelper {
 			RootClass rootClass,
 			ClassDetails classDetails,
 			MetadataBuildingContext context) {
-		bindAuditTable( auditTable, rootClass, context );
-		bindSecondaryAuditTables( auditTable, rootClass, classDetails, context );
+		bindAuditTable( auditTable, (Stateful) rootClass, null, context );
 		bindSubclassAuditTables( auditTable, rootClass, context );
+		bindSecondaryAuditTables( auditTable, rootClass, classDetails, context );
 	}
 
 	static void bindAuditTable(
 			@Nullable Audited.Table auditTable,
 			Collection collection,
-			MetadataBuildingContext context) {
-		bindAuditTable( auditTable, (Stateful) collection, context );
+			@Nullable Audited.CollectionTable collectionAuditTable,
+			MetadataBuildingContext context
+	) {
+		bindAuditTable( auditTable, (Stateful) collection, collectionAuditTable, context );
 	}
 
 	private static void bindAuditTable(
 			@Nullable Audited.Table auditTable,
 			Stateful auditable,
-			MetadataBuildingContext context) {
+			@Nullable Audited.CollectionTable collectionAuditTable,
+			MetadataBuildingContext context
+	) {
 		final var collector = context.getMetadataCollector();
 		final var table = auditable.getMainTable();
-		final String explicitAuditTableName;
-		final String auditSchema;
-		final String auditCatalog;
+		String explicitAuditTableName;
+		String auditSchema;
+		String auditCatalog;
 		final String csIdColumnName;
 		final String modTypeColumnName;
 		if ( auditTable != null ) {
@@ -106,6 +114,17 @@ public final class AuditHelper {
 			auditCatalog = "";
 			csIdColumnName = DEFAULT_CHANGESET_ID_COLUMN_NAME;
 			modTypeColumnName = DEFAULT_MODIFICATION_TYPE_COLUMN_NAME;
+		}
+		if ( collectionAuditTable != null ) {
+			if ( !isBlank( collectionAuditTable.name() ) ) {
+				explicitAuditTableName = collectionAuditTable.name();
+			}
+			if ( !isBlank( collectionAuditTable.schema() ) ) {
+				auditSchema = collectionAuditTable.schema();
+			}
+			if ( !isBlank( collectionAuditTable.catalog() ) ) {
+				auditCatalog = collectionAuditTable.catalog();
+			}
 		}
 		final boolean hasExplicitAuditTableName = !isBlank( explicitAuditTableName );
 		final var auditLogTable = collector.addTable(
@@ -134,9 +153,12 @@ public final class AuditHelper {
 			// Resolve exclusions at second-pass time so collection-managed FK columns
 			// (added during collection binding) are detected
 			final var excludedColumns = auditable instanceof RootClass rootClass
-					? resolveExcludedColumns( rootClass )
+					? resolveExcludedColumns( rootClass, table )
 					: Set.<String>of();
 			copyTableColumns( table, auditLogTable, excludedColumns );
+			if ( auditable instanceof RootClass rootClass ) {
+				relaxExcludedColumnNullability( rootClass, table, auditLogTable );
+			}
 			final var changesetIdColumn =
 					createAuditColumn( csIdColumnName,
 							getChangesetIdType( context ), auditLogTable, context );
@@ -184,19 +206,33 @@ public final class AuditHelper {
 				sat -> secondaryAuditTableNames.put( sat.secondaryTableName(), sat.secondaryAuditTableName() )
 		);
 		context.getMetadataCollector().addSecondPass( (OptionalDeterminationSecondPass) ignored -> {
-			for ( var join : rootClass.getJoins() ) {
+			for ( var join : rootClass.getSubclassJoinClosure() ) {
+				final var owner = join.getPersistentClass();
+				final var ownerDetails = context.getBootstrapContext().getModelsContext()
+						.getClassDetailsRegistry().getClassDetails( owner.getClassName() );
+				final Map<String, String> ownerTableNames = new HashMap<>( secondaryAuditTableNames );
+				ownerDetails.forEachAnnotationUsage(
+						Audited.SecondaryTable.class,
+						context.getBootstrapContext().getModelsContext(),
+						sat -> ownerTableNames.put( sat.secondaryTableName(), sat.secondaryAuditTableName() )
+				);
 				final var sourceTable = join.getTable();
-				final String customName = secondaryAuditTableNames.get( sourceTable.getName() );
+				final String customName = ownerTableNames.get( sourceTable.getName() );
 				final var secondaryAuditTable = createAuditTable(
 						sourceTable,
 						csIdColumnName,
-						resolveExcludedColumns( join.getProperties() ),
+						resolveExcludedColumns( owner, sourceTable ),
 						nullIfBlank( auditSchema ),
 						nullIfBlank( auditCatalog ),
 						customName,
 						context
 				);
-				createAuditTableForeignKey( secondaryAuditTable, rootClass.getEntityName(), rootClass.getAuxiliaryTable() );
+				relaxExcludedColumnNullability( owner, sourceTable, secondaryAuditTable );
+				createAuditTableForeignKey(
+						secondaryAuditTable,
+						owner.getEntityName(),
+						owner.getAuxiliaryTable() != null ? owner.getAuxiliaryTable() : rootClass.getAuxiliaryTable()
+				);
 				// Secondary tables only get tx-id (no mod type, no REVEND)
 				join.setAuxiliaryTable( secondaryAuditTable );
 				join.addAuxiliaryColumn( CHANGESET_ID, secondaryAuditTable.getPrimaryKey().getColumn( 0 ) );
@@ -251,12 +287,13 @@ public final class AuditHelper {
 				final var subclassAuditTable = createAuditTable(
 						subclass.getTable(),
 						csIdColumnName,
-						resolveExcludedColumns( subclass.getPropertyClosure() ),
+						resolveExcludedColumns( subclass, subclass.getTable() ),
 						effective != null ? nullIfBlank( effective.schema() ) : null,
 						effective != null ? nullIfBlank( effective.catalog() ) : null,
 						effective != null ? nullIfBlank( effective.name() ) : null,
 						context
 				);
+				relaxExcludedColumnNullability( subclass, subclass.getTable(), subclassAuditTable );
 				subclass.addAuxiliaryColumn( CHANGESET_ID, subclassAuditTable.getPrimaryKey().getColumn( 0 ) );
 				if ( subclass instanceof UnionSubclass ) {
 					// TABLE_PER_CLASS: each table is self-contained, needs its own REVTYPE and REVEND
@@ -774,39 +811,82 @@ public final class AuditHelper {
 		return supplier != null ? supplier.getChangelogClass().getName() : null;
 	}
 
-	private static Set<String> resolveExcludedColumns(Iterable<Property> properties) {
-		final Set<String> excluded = new HashSet<>();
-		for ( var property : properties ) {
-			if ( property.isAuditedExcluded() || property instanceof Backref ) {
-				for ( var column : property.getColumns() ) {
-					excluded.add( column.getCanonicalName() );
+	static @Nullable Audited.Override findAuditOverride(
+			String propertyName,
+			ClassDetails classDetails,
+			ModelsContext modelsContext
+	) {
+		for ( var current = classDetails; current != null; current = current.getSuperClass() ) {
+			final var override = current.getNamedAnnotationUsage(
+					Audited.Override.class,
+					propertyName,
+					"name",
+					modelsContext
+			);
+			if ( override != null ) {
+				return override;
+			}
+		}
+		return null;
+	}
+
+	public static boolean isEffectivelyExcluded(PersistentClass persistentClass, Property property) {
+		final var modelsContext = property.getValue().getBuildingContext().getBootstrapContext().getModelsContext();
+		final var className = persistentClass.getClassName();
+		final var override = className == null ? null : findAuditOverride(
+				property.getName(),
+				modelsContext.getClassDetailsRegistry().getClassDetails( className ),
+				modelsContext
+		);
+		return override == null ? property.isAuditedExcluded() : !override.isAudited();
+	}
+
+	// todo marco : really? why do we need to do this on a second pass?? can't we just... validate once, when we read the overrides?
+	//  or validate directly, without second passes?
+	static void validateAuditOverrides(
+			PersistentClass persistentClass,
+			ClassDetails classDetails,
+			MetadataBuildingContext context
+	) {
+		final var modelsContext = context.getBootstrapContext().getModelsContext();
+		for ( var current = classDetails; current != null; current = current.getSuperClass() ) {
+			final var declaringClass = current;
+			current.forEachAnnotationUsage( Audited.Override.class, modelsContext, override -> {
+				if ( isBlank( override.name() ) ) {
+					throw new MappingException( "Blank @Audited.Override property name '" + override.name()
+							+ "' on class '" + declaringClass.getName() + "'" );
+				}
+				if ( persistentClass.getRootClass().getStateManagementType() == AuditStateManagement.class
+						&& !persistentClass.hasProperty( override.name() ) ) {
+					throw new MappingException( "Unknown @Audited.Override property '" + override.name()
+							+ "' on class '" + declaringClass.getName() + "'" );
+				}
+			} );
+		}
+	}
+
+	private static Set<String> resolveExcludedColumns(PersistentClass owner, Table table) {
+		final Set<String> auditedColumns = new HashSet<>();
+		collectPropertyColumns( owner, table, auditedColumns );
+		if ( !( owner instanceof UnionSubclass ) ) {
+			for ( var subclass : owner.getSubclasses() ) {
+				if ( !( subclass instanceof UnionSubclass ) ) {
+					collectPropertyColumns( subclass, table, auditedColumns );
 				}
 			}
 		}
-		return excluded;
-	}
-
-	private static Set<String> resolveExcludedColumns(RootClass rootClass) {
-		final Set<String> excluded = new HashSet<>();
-		final Set<String> mappedColumns = new HashSet<>();
-		// Identifier columns
-		for ( var column : rootClass.getIdentifier().getColumns() ) {
-			mappedColumns.add( column.getCanonicalName() );
+		for ( var column : table.getPrimaryKey().getColumns() ) {
+			auditedColumns.add( column.getCanonicalName() );
 		}
-		// Discriminator column
-		if ( rootClass.getDiscriminator() != null ) {
+		final var rootClass = owner.getRootClass();
+		if ( table == rootClass.getTable() && rootClass.getDiscriminator() != null ) {
 			for ( var column : rootClass.getDiscriminator().getColumns() ) {
-				mappedColumns.add( column.getCanonicalName() );
+				auditedColumns.add( column.getCanonicalName() );
 			}
 		}
-		// All properties in the hierarchy (root + subclasses for SINGLE_TABLE)
-		collectPropertyColumns( rootClass, mappedColumns, excluded );
-		for ( var subclass : rootClass.getSubclasses() ) {
-			collectPropertyColumns( subclass, mappedColumns, excluded );
-		}
-		// Exclude unmapped columns (e.g. FK from unidirectional @OneToMany @JoinColumn)
-		for ( var column : rootClass.getMainTable().getColumns() ) {
-			if ( !mappedColumns.contains( column.getCanonicalName() ) ) {
+		final Set<String> excluded = new HashSet<>();
+		for ( var column : table.getColumns() ) {
+			if ( !auditedColumns.contains( column.getCanonicalName() ) ) {
 				excluded.add( column.getCanonicalName() );
 			}
 		}
@@ -815,17 +895,54 @@ public final class AuditHelper {
 
 	private static void collectPropertyColumns(
 			PersistentClass persistentClass,
-			Set<String> mappedColumns,
-			Set<String> excluded) {
-		for ( var property : persistentClass.getProperties() ) {
-			if ( property.isAuditedExcluded() || property instanceof Backref ) {
+			Table table,
+			Set<String> auditedColumns
+	) {
+		for ( var property : persistentClass.getPropertyClosure() ) {
+			if ( mapsTable( persistentClass, property, table )
+					&& !( property instanceof Backref )
+					&& !isEffectivelyExcluded( persistentClass, property ) ) {
 				for ( var column : property.getColumns() ) {
-					excluded.add( column.getCanonicalName() );
+					auditedColumns.add( column.getCanonicalName() );
 				}
 			}
-			else {
+		}
+	}
+
+	private static boolean mapsTable(PersistentClass persistentClass, Property property, Table table) {
+		return property.getValue().getTable() == table
+				|| persistentClass instanceof UnionSubclass && persistentClass.getTable() == table
+						&& property.getValue().getTable() == property.getPersistentClass().getTable();
+	}
+
+	private static void relaxExcludedColumnNullability(
+			PersistentClass owner,
+			Table sourceTable,
+			Table auditTable
+	) {
+		relaxExcludedColumns( owner, sourceTable, auditTable );
+		if ( !( owner instanceof UnionSubclass ) ) {
+			for ( var subclass : owner.getSubclasses() ) {
+				if ( !( subclass instanceof UnionSubclass ) ) {
+					relaxExcludedColumns( subclass, sourceTable, auditTable );
+				}
+			}
+		}
+	}
+
+	private static void relaxExcludedColumns(
+			PersistentClass persistentClass,
+			Table sourceTable,
+			Table auditTable
+	) {
+		for ( var property : persistentClass.getPropertyClosure() ) {
+			if ( mapsTable( persistentClass, property, sourceTable )
+					&& isEffectivelyExcluded( persistentClass, property ) ) {
 				for ( var column : property.getColumns() ) {
-					mappedColumns.add( column.getCanonicalName() );
+					final var auditColumn = auditTable.getColumn( column );
+					if ( auditColumn != null && !sourceTable.getPrimaryKey().containsColumn( column ) ) {
+						auditColumn.setNullable( true );
+					}
 				}
 			}
 		}
@@ -834,24 +951,71 @@ public final class AuditHelper {
 	// --- Runtime helpers ---
 
 	/**
-	 * Whether the given fetchable is excluded from auditing and the
-	 * current context is loading from an audit table. Returns
-	 * {@code false} immediately when there is no temporal identifier
-	 * (the common case for non-audit queries).
+	 * Whether every concrete type in the loaded hierarchy excludes this
+	 * fetchable from auditing. Returns {@code false} immediately when there
+	 * is no temporal identifier (the common case for non-audit queries).
 	 */
-	public static boolean isFetchableAuditExcluded(Fetchable fetchable, LoadQueryInfluencers influencers) {
+	public static boolean isFetchableAuditExcluded(
+			Fetchable fetchable,
+			FetchParent fetchParent,
+			LoadQueryInfluencers influencers
+	) {
 		if ( influencers.getTemporalIdentifier() == null ) {
 			return false;
 		}
-		final var attr = fetchable.asAttributeMapping();
-		if ( attr != null
-				&& attr.getStateArrayPosition() >= 0
-				&& attr.getDeclaringType() instanceof EntityMappingType entityMappingType ) {
-			final var persister = entityMappingType.getEntityPersister();
-			return persister.getAuditMapping() != null
-					&& persister.isPropertyAuditedExcluded( attr.getStateArrayPosition() );
+		final var type = getAuditFetchType( fetchable, fetchParent );
+		if ( type != null ) {
+			final var attribute = type.findAttributeMapping( fetchable.asAttributeMapping().getAttributeName() );
+			return attribute.getStateArrayPosition() >= 0
+					&& type.getEntityPersister().getAuditMapping() != null
+					&& type.getEntityPersister()
+							.isPropertyPolymorphicallyAuditedExcluded( attribute.getStateArrayPosition() );
 		}
 		return false;
+	}
+
+	public static boolean isFetchableAuditPartiallyExcluded(
+			Fetchable fetchable,
+			FetchParent fetchParent,
+			LoadQueryInfluencers influencers
+	) {
+		if ( influencers.getTemporalIdentifier() == null ) {
+			return false;
+		}
+		final var type = getAuditFetchType( fetchable, fetchParent );
+		if ( type == null || type.getEntityPersister().getAuditMapping() == null ) {
+			return false;
+		}
+		final var attribute = type.findAttributeMapping( fetchable.asAttributeMapping().getAttributeName() );
+		final int position = attribute.getStateArrayPosition();
+		if ( position < 0 || type.getEntityPersister().isPropertyPolymorphicallyAuditedExcluded( position ) ) {
+			return false;
+		}
+		if ( !type.isAbstract() && type.getEntityPersister().isPropertyAuditedExcluded( position ) ) {
+			return true;
+		}
+		for ( var subtype : type.getSubMappingTypes() ) {
+			if ( !subtype.isAbstract() ) {
+				final var concreteAttribute = subtype.findAttributeMapping( attribute.getAttributeName() );
+				if ( subtype.getEntityPersister()
+						.isPropertyAuditedExcluded( concreteAttribute.getStateArrayPosition() ) ) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	private static @Nullable EntityMappingType getAuditFetchType(Fetchable fetchable, FetchParent fetchParent) {
+		final AttributeMapping attribute = fetchable.asAttributeMapping();
+		if ( attribute != null && attribute.getStateArrayPosition() >= 0
+				&& attribute.getDeclaringType() instanceof EntityMappingType declaringType ) {
+			final var loadedType = fetchParent instanceof EntityResultGraphNode entityResult
+					? entityResult.getReferencedMappingContainer()
+					: declaringType;
+			return loadedType.findAttributeMapping( attribute.getAttributeName() ) != null ? loadedType : declaringType;
+		}
+		return null;
 	}
 
 	public static AuditStrategy determineAuditStrategy(Map<String, Object> configurationSettings) {

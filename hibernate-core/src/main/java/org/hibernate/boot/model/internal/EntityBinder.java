@@ -268,6 +268,8 @@ public class EntityBinder {
 		}
 
 		collector.addEntityBinding( persistentClass );
+		collector.addSecondPass( (OptionalDeterminationSecondPass) ignored ->
+				AuditHelper.validateAuditOverrides( persistentClass, clazzToProcess, context ) );
 		// process secondary tables and complementary definitions (ie o.h.a.Table)
 		collector.addSecondPass( new SecondaryTableFromAnnotationSecondPass( entityBinder, holder ) );
 		collector.addSecondPass( new SecondaryTableSecondPass( entityBinder, holder ) );

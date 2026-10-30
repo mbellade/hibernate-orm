@@ -857,6 +857,14 @@ public interface EntityPersister extends EntityMappingType, EntityMutationTarget
 	}
 
 	/**
+	 * Is the property excluded from audit logging by every concrete type
+	 * in this entity's polymorphic closure.
+	 */
+	default boolean isPropertyPolymorphicallyAuditedExcluded(int attributeIndex) {
+		return isPropertyAuditedExcluded( attributeIndex );
+	}
+
+	/**
 	 * Get the "checkability" of the properties of this class
 	 * (is the property dirty checked, does the cache need
 	 * to be updated)

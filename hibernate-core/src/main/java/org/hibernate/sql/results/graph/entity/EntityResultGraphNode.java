@@ -42,6 +42,28 @@ public interface EntityResultGraphNode extends DomainResultGraphNode, FetchParen
 		return getEntityValuedModelPart().getEntityMappingType();
 	}
 
+	/**
+	 * Whether this domain-result graph was produced for an audit/historical
+	 * read, rather than a regular load of current state.
+	 * <p>
+	 * This is a session-derived fact stored on a nominally session-independent
+	 * graph node, which is only sound because plans built under an audit context
+	 * are never cached and reused for ordinary loads (and vice versa): the loader
+	 * refuses to cache load plans in audit context, and the SQM plan cache is
+	 * keyed on the temporal identifier. Any new plan/result-graph caching site
+	 * MUST uphold this partition.
+	 * <p>
+	 * The flag exists to carry audit-context information to assembler creation,
+	 * which has no other route to session state. It is expected to be removed
+	 * once audit collection writes resolve the actual concrete owner: at that
+	 * point per-concrete-type masking during assembly is only an optimization
+	 * and can be performed at row-processing time, where the session is
+	 * directly available.
+	 */
+	default boolean isAuditRead() {
+		return false;
+	}
+
 	@Override
 	default boolean appliesTo(GraphImplementor<?> graphImplementor, JpaMetamodel metamodel) {
 		final String entityName = getEntityValuedModelPart().getEntityMappingType().getEntityName();

@@ -24,6 +24,7 @@ import org.hibernate.action.queue.spi.meta.ColumnDescriptor;
 import org.hibernate.action.queue.spi.meta.EntityTableDescriptor;
 import org.hibernate.action.queue.spi.meta.TableKeyDescriptor;
 import org.hibernate.annotations.CacheLayout;
+import org.hibernate.boot.model.internal.AuditHelper;
 import org.hibernate.boot.model.relational.SqlStringGenerationContext;
 import org.hibernate.boot.spi.MetadataImplementor;
 import org.hibernate.boot.spi.SessionFactoryOptions;
@@ -387,6 +388,7 @@ public abstract class AbstractEntityPersister
 	private final Set<String> sharedColumnNames;
 	private final boolean[] propertyTemporalExcluded;
 	private final boolean[] propertyAuditedExcluded;
+	private boolean[] propertyPolymorphicallyAuditedExcluded;
 	private final boolean hasTemporalExcludedProperties;
 	private final int[] immutablePropertyIndexes;
 
@@ -691,7 +693,7 @@ public abstract class AbstractEntityPersister
 			final boolean temporalExcluded = property.isTemporalExcluded();
 			propertyTemporalExcluded[i] = temporalExcluded;
 			foundTemporalExcluded = foundTemporalExcluded || temporalExcluded;
-			propertyAuditedExcluded[i] = property.isAuditedExcluded();
+			propertyAuditedExcluded[i] = AuditHelper.isEffectivelyExcluded( persistentClass, property );
 			foundNonExcludedCollection = foundNonExcludedCollection
 					|| propertyValue instanceof org.hibernate.mapping.Collection
 							&& !temporalExcluded;
@@ -3815,6 +3817,32 @@ public abstract class AbstractEntityPersister
 
 		//select SQL
 		sqlVersionSelectString = generateSelectVersionString();
+
+		// All subclass persisters and their attribute mappings are available at this point.
+		propertyPolymorphicallyAuditedExcluded = initPropertyPolymorphicallyAuditedExcluded();
+	}
+
+	/**
+	 * A property is excluded from the perspective of this persister's polymorphic closure
+	 * only when it is excluded for this class and every concrete subclass. Derived from
+	 * the subclass persisters' own per-class masks, which are resolved in their constructors.
+	 */
+	private boolean[] initPropertyPolymorphicallyAuditedExcluded() {
+		final var masks = new boolean[propertyAuditedExcluded.length];
+		final var subMappingTypes = getSubMappingTypes();
+		for ( int i = 0; i < propertyAuditedExcluded.length; i++ ) {
+			boolean polymorphicallyExcluded = isAbstract() || propertyAuditedExcluded[i];
+			if ( polymorphicallyExcluded ) {
+				for ( var subtype : subMappingTypes ) {
+					if ( !subtype.isAbstract() && !subtype.getEntityPersister().isPropertyAuditedExcluded( i ) ) {
+						polymorphicallyExcluded = false;
+						break;
+					}
+				}
+			}
+			masks[i] = polymorphicallyExcluded;
+		}
+		return masks;
 	}
 
 	@Nonnull
@@ -4784,6 +4812,11 @@ public abstract class AbstractEntityPersister
 	@Override
 	public boolean isPropertyAuditedExcluded(int attributeIndex) {
 		return propertyAuditedExcluded[attributeIndex];
+	}
+
+	@Override
+	public boolean isPropertyPolymorphicallyAuditedExcluded(int attributeIndex) {
+		return propertyPolymorphicallyAuditedExcluded[attributeIndex];
 	}
 
 	@Override

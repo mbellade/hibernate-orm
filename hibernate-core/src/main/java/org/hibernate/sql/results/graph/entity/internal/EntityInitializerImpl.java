@@ -3,6 +3,7 @@ package org.hibernate.sql.results.graph.entity.internal;
 import java.util.Arrays;
 import java.util.BitSet;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.Collection;
 import java.util.function.BiConsumer;
 import java.util.function.Supplier;
 
@@ -42,6 +43,7 @@ import org.hibernate.internal.util.ImmutableBitSet;
 import org.hibernate.loader.ast.spi.CascadingFetchProfile;
 import org.hibernate.metamodel.mapping.AttributeMapping;
 import org.hibernate.metamodel.mapping.AttributeMetadata;
+import org.hibernate.metamodel.mapping.EntityMappingType;
 import org.hibernate.metamodel.mapping.CompositeIdentifierMapping;
 import org.hibernate.metamodel.mapping.EntityValuedModelPart;
 import org.hibernate.metamodel.mapping.ModelPart;
@@ -435,6 +437,43 @@ public class EntityInitializerImpl
 				}
 			}
 		}
+
+		// todo marco : this is quite complex, audited-specific logic, right in the middle of the general
+		//  initializer code path - why is this needed? can this be simplified / consolidated?
+		if ( resultDescriptor.isAuditRead() ) {
+			// The fetch plan uses the hierarchy union; each concrete row still uses its own audit mask.
+			for ( int typeIndex = 0; typeIndex < size; typeIndex++ ) {
+				final var concreteType = typeIndex == 0
+						? rootEntityDescriptor
+						: getConcreteType( subMappingTypes, typeIndex - 1 );
+				if ( concreteType.isAbstract() || !concreteType.isTypeOrSuperType( entityDescriptor ) ) {
+					continue;
+				}
+				final int subclassId = concreteType.getSubclassId();
+				for ( int position = 0; position < concreteType.getNumberOfAttributeMappings(); position++ ) {
+					if ( concreteType.getEntityPersister().isPropertyAuditedExcluded( position ) ) {
+						final var attribute = concreteType.getAttributeMapping( position );
+						final var loadedAttribute = entityDescriptor.findAttributeMapping( attribute.getAttributeName() );
+						final var planAttribute = loadedAttribute != null ? loadedAttribute : attribute;
+						final var planPersister = loadedAttribute != null
+								? entityDescriptor.getEntityPersister()
+								: attribute.getDeclaringType().asEntityMappingType().getEntityPersister();
+						if ( !planPersister.isPropertyPolymorphicallyAuditedExcluded( planAttribute.getStateArrayPosition() ) ) {
+							assemblers[subclassId][position] = unfetchedAttributeAssembler( attribute );
+							if ( subInitializers[subclassId] != null ) {
+								subInitializers[subclassId][position] = null;
+								eagerSubInitializers[subclassId][position] = null;
+								collectionContainingSubInitializers[subclassId][position] = null;
+							}
+							if ( lazySets[subclassId] != null ) {
+								lazySets[subclassId].clear( position );
+								maybeLazySets[subclassId].clear( position );
+							}
+						}
+					}
+				}
+			}
+		}
 		for ( int i = 0; i < subInitializers.length; i++ ) {
 			boolean emptySubInitializers = true;
 			if ( subInitializers[i] != null ) {
@@ -490,6 +529,18 @@ public class EntityInitializerImpl
 
 		this.keyAssembler = keyResult == null ? null : keyResult.createResultAssembler( this, creationState );
 		this.affectedByFilter = affectedByFilter;
+	}
+
+	// todo marco : what does "concrete type" even mean here? why do we need to do this?
+	//  and why an obscure helper, at the very top of this class, for just 1 call-site??
+	private static EntityMappingType getConcreteType(Collection<EntityMappingType> types, int index) {
+		int i = 0;
+		for ( var type : types ) {
+			if ( i++ == index ) {
+				return type;
+			}
+		}
+		throw new IllegalArgumentException( "Index out of bounds: " + index );
 	}
 
 	private static DomainResultAssembler<?> unfetchedAttributeAssembler(AttributeMapping attributeMapping) {

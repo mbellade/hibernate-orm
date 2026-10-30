@@ -208,6 +208,11 @@ public class EntityFetchJoinedImpl implements EntityFetch, FetchParent, Initiali
 	}
 
 	@Override
+	public boolean isAuditRead() {
+		return entityResult.isAuditRead();
+	}
+
+	@Override
 	public void collectValueIndexesToCache(BitSet valueIndexes) {
 		entityResult.collectValueIndexesToCache( valueIndexes );
 		if ( keyResult != null ) {

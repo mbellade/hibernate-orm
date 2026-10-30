@@ -78,6 +78,8 @@ import static java.lang.annotation.RetentionPolicy.RUNTIME;
  * Use the nested {@link Table @Audited.Table} annotation to
  * customize the audit log's table name, schema, catalog, or
  * column names for the audit log.
+ * Use {@link Override @Audited.Override} to change the audit
+ * behavior of properties inherited from a superclass.
  *
  * @see Changelog
  * @see org.hibernate.audit.AuditLog
@@ -97,13 +99,66 @@ public @interface Audited {
 	 * Excludes the annotated attribute from auditing.
 	 * Updates to an excluded attribute modify the current
 	 * row directly without creating a new revision of the
-	 * entity instance. The audit log table does not contain
-	 * columns mapped by excluded attributes.
+	 * entity instance. Unless a subclass {@linkplain Override overrides}
+	 * this exclusion, the audit log table does not contain columns mapped
+	 * by excluded attributes.
 	 */
 	@Documented
 	@Target({FIELD, METHOD})
 	@Retention(RUNTIME)
 	@interface Excluded {
+	}
+
+	/**
+	 * Overrides the audit behavior of a property inherited from a superclass.
+	 * May be declared on an entity or mapped superclass. The nearest override
+	 * in the superclass chain wins, falling back to the property's
+	 * {@link Excluded} annotation when there is no override.
+	 * <p>
+	 * Shared audit tables contain a property's columns if any entity mapping
+	 * that table audits the property. These columns are nullable and contain
+	 * null for instances of entities which exclude the property.
+	 * <p>
+	 * Overrides affect auditing only. In particular, re-auditing an
+	 * {@code @Audited.Excluded} property does not restore optimistic locking
+	 * for that property on the current-state table.
+	 *
+	 * @since 7.4
+	 */
+	@Documented
+	@Target(TYPE)
+	@Retention(RUNTIME)
+	@Repeatable(Overrides.class)
+	@interface Override {
+		/**
+		 * The nonblank name of the persistent property to override.
+		 */
+		String name();
+
+		/**
+		 * Whether the property is audited.
+		 */
+		boolean isAudited() default true;
+
+		/**
+		 * Customizes a collection's middle audit table. Ignored when
+		 * {@link #isAudited()} is false. Only an override on the declaring
+		 * entity or its mapped superclasses may rename the table; an
+		 * override on a subclass does not rename an inherited table.
+		 */
+		CollectionTable collectionTable() default @CollectionTable;
+	}
+
+	/**
+	 * Container for repeatable {@link Override} annotations.
+	 *
+	 * @since 7.4
+	 */
+	@Documented
+	@Target(TYPE)
+	@Retention(RUNTIME)
+	@interface Overrides {
+		Override[] value();
 	}
 
 	/**
@@ -231,9 +286,10 @@ public @interface Audited {
 	@Target({FIELD, METHOD})
 	@interface CollectionTable {
 		/**
-		 * The name of the collection audit table.
+		 * The name of the collection audit table. A blank name leaves the
+		 * default name unchanged.
 		 */
-		String name();
+		String name() default "";
 
 		/**
 		 * The schema of the collection audit table.

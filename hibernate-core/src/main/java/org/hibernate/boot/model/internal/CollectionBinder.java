@@ -94,6 +94,7 @@ import org.hibernate.jdbc.Expectation;
 import org.hibernate.mapping.Backref;
 import org.hibernate.mapping.CheckConstraint;
 import org.hibernate.mapping.Collection;
+import org.hibernate.mapping.Component;
 import org.hibernate.mapping.DependantValue;
 import org.hibernate.mapping.KeyValue;
 import org.hibernate.mapping.ManyToOne;
@@ -1676,13 +1677,12 @@ public abstract class CollectionBinder {
 		// For @OneToMany @JoinColumn on an @Audited entity, create a middle audit table
 		// to track collection membership changes (same approach as @ManyToMany / @JoinTable)
 		if ( !collection.isInverse() ) {
-			final var audited = extract( Audited.class, property, buildingContext );
-			if ( audited != null && !property.hasDirectAnnotationUsage( Audited.Excluded.class ) ) {
+			if ( isCollectionAudited() ) {
 				AuditHelper.bindOneToManyAuditTable(
 						extract( Audited.Table.class, property, buildingContext ),
 						collection,
 						oneToMany.getReferencedEntityName(),
-						extract( Audited.CollectionTable.class, property, buildingContext ),
+						collectionAuditTable(),
 						buildingContext
 				);
 			}
@@ -2540,14 +2540,97 @@ public abstract class CollectionBinder {
 		if ( collection.isInverse() ) {
 			return;
 		}
-		final var audited = extract( Audited.class, property, buildingContext );
-		if ( audited != null && !property.hasDirectAnnotationUsage( Audited.Excluded.class ) ) {
+		if ( isCollectionAudited() ) {
 			AuditHelper.bindAuditTable(
 					extract( Audited.Table.class, property, buildingContext ),
 					collection,
+					collectionAuditTable(),
 					buildingContext
 			);
 		}
+	}
+
+	private boolean isCollectionAudited() {
+		// Collection second passes run after the entire entity hierarchy has been registered.
+		final var owner = collection.getOwner();
+		final var modelsContext = buildingContext.getBootstrapContext().getModelsContext();
+		final var rootDetails = modelsContext.getClassDetailsRegistry()
+				.getClassDetails( owner.getRootClass().getClassName() );
+		if ( extract( Audited.class, property, buildingContext ) == null
+				&& rootDetails.getAnnotationUsage( Audited.class, modelsContext ) == null
+				&& extractFromPackage( Audited.class, rootDetails, buildingContext ) == null ) {
+			return false;
+		}
+		if ( propertyHolder instanceof ComponentPropertyHolder componentHolder ) {
+			if ( property.hasDirectAnnotationUsage( Audited.Excluded.class ) ) {
+				return false;
+			}
+			final var component = componentHolder.getComponent();
+			if ( isComponentAudited( owner, component ) ) {
+				return true;
+			}
+			for ( var subclass : owner.getSubclasses() ) {
+				if ( isComponentAudited( subclass, component ) ) {
+					return true;
+				}
+			}
+			return false;
+		}
+		final var mapping = owner.getProperty( propertyName );
+		if ( !AuditHelper.isEffectivelyExcluded( owner, mapping ) ) {
+			return true;
+		}
+		for ( var subclass : owner.getSubclasses() ) {
+			if ( !AuditHelper.isEffectivelyExcluded( subclass, mapping ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private static boolean isComponentAudited(PersistentClass owner, Component target) {
+		if ( Boolean.TRUE.equals( owner.isAbstract() ) ) {
+			return false;
+		}
+		for ( var property : owner.getPropertyClosure() ) {
+			if ( property.getValue() instanceof Component component
+					&& !AuditHelper.isEffectivelyExcluded( owner, property )
+					&& containsAuditedComponent( component, target ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private static boolean containsAuditedComponent(Component component, Component target) {
+		if ( component == target ) {
+			return true;
+		}
+		for ( var property : component.getProperties() ) {
+			if ( property.getValue() instanceof Component nested
+					&& !property.isAuditedExcluded()
+					&& containsAuditedComponent( nested, target ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private Audited.CollectionTable collectionAuditTable() {
+		if ( propertyHolder.isComponent() ) {
+			return property.getDirectAnnotationUsage( Audited.CollectionTable.class );
+		}
+		final var modelsContext = buildingContext.getBootstrapContext().getModelsContext();
+		final var ownerDetails = modelsContext.getClassDetailsRegistry()
+				.getClassDetails( collection.getOwner().getClassName() );
+		final var override = AuditHelper.findAuditOverride( propertyName, ownerDetails, modelsContext );
+		if ( override != null && override.isAudited() ) {
+			final var table = override.collectionTable();
+			if ( !isBlank( table.name() ) || !isBlank( table.schema() ) || !isBlank( table.catalog() ) ) {
+				return table;
+			}
+		}
+		return property.getDirectAnnotationUsage( Audited.CollectionTable.class );
 	}
 
 	private static <T extends Annotation> T extract(
