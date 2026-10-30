@@ -116,8 +116,7 @@ public class StandardJdbcValuesMapping implements JdbcValuesMapping {
 		}
 		else {
 			final var creationState =
-					new AssemblerCreationStateImpl( this,
-							sessionFactory.getSqlTranslationEngine() );
+					new AssemblerCreationStateImpl( this, sessionFactory.getSqlTranslationEngine() );
 			final var domainResultAssemblers = resolveAssemblers( creationState );
 			creationState.initializerMap.logInitializers();
 			resolution = new JdbcValuesMappingResolutionImpl(

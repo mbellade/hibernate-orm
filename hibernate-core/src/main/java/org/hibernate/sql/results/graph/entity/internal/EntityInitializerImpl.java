@@ -437,9 +437,6 @@ public class EntityInitializerImpl
 			}
 		}
 
-		// todo marco : constructor masking is the balanced approach: a plan-time flag and
-		//  precomputed per-subtype views. The flag is session-derived state on the graph;
-		//  revisit if audit load plans ever become cached/shared with current-state plans.
 		if ( resultDescriptor.isAuditRead() ) {
 			applyAuditExclusionMasks(
 					rootEntityDescriptor,
