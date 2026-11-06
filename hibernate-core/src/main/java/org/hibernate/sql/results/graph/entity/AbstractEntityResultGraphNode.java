@@ -30,7 +30,6 @@ public abstract class AbstractEntityResultGraphNode extends AbstractFetchParent 
 	private DomainResult<Object> rowIdResult;
 	private @Nullable DomainResult<?> auditChangesetIdResult;
 	private final EntityValuedModelPart fetchContainer;
-	private boolean auditRead;
 
 	@org.hibernate.SPI(org.hibernate.SPI.Role.IMPLEMENT)
 	public AbstractEntityResultGraphNode(EntityValuedModelPart referencedModelPart, NavigablePath navigablePath) {
@@ -55,9 +54,6 @@ public abstract class AbstractEntityResultGraphNode extends AbstractFetchParent 
 		}
 
 		super.afterInitialize( fetchParent, creationState );
-		final var auditMapping = getReferencedMappingContainer().getAuditMapping();
-		auditRead = auditMapping != null
-				&& auditMapping.useAuxiliaryTable( creationState.getSqlAstCreationState().getLoadQueryInfluencers() );
 	}
 
 	private DomainResult<Object> rowIdResult(
@@ -181,11 +177,6 @@ public abstract class AbstractEntityResultGraphNode extends AbstractFetchParent 
 					&& discriminatorFetch != null ) {
 			discriminatorFetch.collectValueIndexesToCache( valueIndexes );
 		}
-	}
-
-	@Override
-	public boolean isAuditRead() {
-		return auditRead;
 	}
 
 }

@@ -1,5 +1,8 @@
 package org.hibernate.temporal.audit.inheritance;
 
+import java.io.Serializable;
+
+import jakarta.persistence.Basic;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Inheritance;
@@ -14,6 +17,7 @@ import org.hibernate.testing.orm.junit.AfterClassTemplate;
 import org.hibernate.testing.orm.junit.AuditedTest;
 import org.hibernate.testing.orm.junit.BeforeClassTemplate;
 import org.hibernate.testing.orm.junit.DomainModel;
+import org.hibernate.testing.orm.junit.Jira;
 import org.hibernate.testing.orm.junit.ServiceRegistry;
 import org.hibernate.testing.orm.junit.SessionFactory;
 import org.hibernate.testing.orm.junit.SessionFactoryScope;
@@ -25,6 +29,7 @@ import org.junit.jupiter.api.TestInstance;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @AuditedTest
+@Jira("https://hibernate.atlassian.net/browse/HHH-20641")
 @DomainModel(annotatedClasses = {
 		AuditTablePerClassFindTest.Base.class,
 		AuditTablePerClassFindTest.Sub.class
@@ -53,6 +58,7 @@ class AuditTablePerClassFindTest {
 			sub.id = 1L;
 			sub.name = "original";
 			sub.detail = "detail";
+			sub.payload = "payload";
 			session.persist( sub );
 		} );
 		scope.inTransaction( session -> session.find( Sub.class, 1L ).name = "updated" );
@@ -70,6 +76,7 @@ class AuditTablePerClassFindTest {
 			assertThat( original ).isNotNull();
 			assertThat( original.name ).isEqualTo( "original" );
 			assertThat( original.detail ).isEqualTo( "detail" );
+			assertThat( original.payload ).isEqualTo( "payload" );
 			assertThat( auditLog.find( Base.class, 1L, 1 ) ).isInstanceOf( Sub.class );
 			assertThat( auditLog.find( Sub.class, 1L, 2 ).name ).isEqualTo( "updated" );
 		}
@@ -78,14 +85,16 @@ class AuditTablePerClassFindTest {
 	@Entity(name = "FindUnionBase")
 	@Inheritance(strategy = InheritanceType.TABLE_PER_CLASS)
 	@Audited
-	static class Base {
+	abstract static class Base<T extends Serializable> {
 		@Id
 		Long id;
 		String name;
+		@Basic
+		T payload;
 	}
 
 	@Entity(name = "FindUnionSub")
-	static class Sub extends Base {
+	static class Sub extends Base<String> {
 		String detail;
 	}
 }

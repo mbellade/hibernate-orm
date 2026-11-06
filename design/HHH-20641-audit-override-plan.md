@@ -122,6 +122,10 @@ Dropped from Envers, deliberately:
 
 ## Status (post package 1)
 
+> Superseded in part by "Scope decision: overrides only for properties the entity owns" below:
+> the per-subclass (kind 2) machinery described in this section and in package 2 was removed
+> from HHH-20641 and parked on branch `HHH-20641-subclass-overrides`.
+
 Package 1 (entity / MSC / inheritance / collection support) is implemented on branch
 `HHH-20641` (not yet compiled / tested / committed). Changed production files:
 `Audited.java`, `AuditHelper`, `EntityBinder`, `CollectionBinder`,
@@ -275,21 +279,84 @@ which is behavior, not optimization). The settled design, per user decision:
 
 ### Semantics decisions (agreed)
 
-- Overrides affect audit behavior only; they do not restore `optimisticLocked` on the base
-  table (that flag derives from the declaration-time `@Audited.Excluded`).
-- A property audited only by some entities of a hierarchy yields a nullable `_AUD` column for
-  entities that exclude it (no validation possible or sensible; documented + tested).
+- Excluding via override also sets `optimisticLocked=false`, like `@Audited.Excluded` (so a
+  collection-only change to an excluded collection creates no revision). Re-auditing does not
+  restore optimistic locking.
+- An audit table contains a column if any property mapping it into that table is audited
+  (sibling subclasses owning copies of one mapped-superclass property on a shared SINGLE_TABLE
+  column, where only one excludes it). No nullability relaxation: SINGLE_TABLE subclass
+  columns are already nullable.
+- Property-ref collection owner resolution in the audit write path is kept (bug on main).
 
-### Embeddables (follow-up change, not part of HHH-20641)
+### Scope decision: overrides only for properties the entity owns
+
+Decided after the final review. An override may change auditing only for a property that the
+annotated entity owns in the mapping: its own properties and those it inherits from
+`@MappedSuperclass` types (kind 1). An override naming a property owned by an entity superclass
+(kind 2) fails at boot. This matches Envers: `AuditedPropertiesReader` reads a subclass entity
+from `Subclass.getProperties()` (declared properties only), so an `@AuditOverride` on a subclass
+for an entity superclass property is silently ignored there; every `forClass` target in the
+Envers tests is a `@MappedSuperclass`.
+
+Kind 1 is a binding-time flag flip on the entity's own `Property`, like `@Audited.Excluded`.
+Kind 2 is what required union columns, relaxed nullability, per-persister and polymorphic masks,
+read masking in `EntityInitializerImpl`, the to-one join downgrade, concrete collection owners
+and per-type collection rows. Adding kind 2 later is additive (a boot error becomes a feature);
+removing it after release would break users.
+
+### Follow-up: per-subclass overrides (kind 2), Jira to be created
+
+- Let an entity subclass change auditing of a property owned by an entity superclass, i.e. one
+  column of a shared audit table (SINGLE_TABLE root table, JOINED base table, secondary tables)
+  audited for some concrete types and not others.
+- The package 2 implementation is parked on a branch (name TBD) as a starting point.
+- Known gaps to fix if revived (from the final review): HQL/criteria fetch graphs and JOIN fetch
+  profiles still inner-join a partially excluded mandatory to-one (`BaseSqmToSqlAstConverter`
+  lacks the `LoaderSelectBuilder` guard); a collection excluded by override still creates owner
+  revisions through `hasDirtyCollection` (fix: rerun `DirtyCollectionSearchVisitor` with the
+  persister's audited mask); `EntityPersister.isPropertyPolymorphicallyAuditedExcluded` should
+  move into `AuditHelper` instead of being SPI; the join downgrade should skip optional to-ones;
+  missing tests for TABLE_PER_CLASS collection overrides and three-level re-audit chains.
+
+### Follow-up: embeddables, Jira to be created
 
 - Out of scope here: `@Audited.Excluded` on embeddable members stays silently ignored (as on
   main), and `@Audited.Override` names only top-level properties (dotted names fail validation).
-- Planned shape, following Envers (`@AuditOverride` on the `@Embedded` member, simple member
-  names, one level at a time): the nested exclusion is a property of the embedding
-  declaration, identical for every subtype, so no per-subtype masks are needed. Dotted paths
-  and embeddable-local overrides are dropped.
+- Envers supports three forms (`integration/superclass/auditoverride/EmbeddableTest`):
+  `@NotAudited` on an embeddable's own fields; `@AuditOverride(name = "member")` on the
+  `@Embedded` field, excluding or re-auditing a member at that embedding site; and
+  `@AuditOverride(forClass = SomeMappedSuperclass.class)` on the `@Embedded` field or on the
+  `@Embeddable` class, for members the embeddable inherits from a mapped superclass. So it is not
+  limited to mapped-superclass to embeddable inheritance. Envers gets per-site exclusion cheaply
+  because it generates separate audit entity mappings; core reuses the entity persister, which
+  is why column-level masking is needed here.
+- Planned shape: the Envers member-level form (simple member names, one level at a time), so the
+  nested exclusion is a static property of the embedding declaration. Package 3a WIP is on the
+  local branch `HHH-20641-embeddables`.
 - Known pre-existing bug for the follow-up: an excluded collection nested in an embeddable is
   read from the current-state table on audit reads.
+
+### PR description notes
+
+Short paragraph to adapt for the PR:
+
+> `@Audited.Override` follows Envers' `@AuditOverride`: an entity can change whether a property
+> it inherits from a `@MappedSuperclass` is audited. Overriding a property owned by an entity
+> superclass fails at boot. Supporting it means one column of a shared audit table being audited
+> for some subtypes and not others, which needs per-subtype masking on both the write and read
+> paths; Envers never supported it either (it ignores such overrides). Rejecting it keeps this
+> change small and lets us add it later without breaking anyone. Overrides and exclusions on
+> embeddable members are also left for a follow-up; `@Audited.Excluded` inside an embeddable
+> stays ignored, as on main. The PR also fixes two existing bugs: (list the TPC find fix and
+> the collection audit table naming fix).
+
+### Last step after opening the PR (reminder)
+
+Comment on the original contribution, PR #13086 (niklas-enns, still open, last asked for review
+on 2026-09-24): apologize for the long delay in following up, link the new PR, explain the scope
+change (overrides limited to properties the entity owns, matching Envers; the generic
+per-subclass version is parked for a follow-up Jira, as are embeddables), and ask them to
+review it and share what they think of the approach.
 
 ## Implementation plan (original, superseded by the Status section)
 

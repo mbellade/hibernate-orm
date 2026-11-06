@@ -14,7 +14,6 @@ import org.hibernate.engine.spi.EntityKey;
 import org.hibernate.engine.spi.SharedSessionContractImplementor;
 import org.hibernate.engine.spi.TransactionCompletionCallbacks;
 import org.hibernate.persister.collection.CollectionPersister;
-import org.hibernate.persister.collection.mutation.CollectionAuditSupport;
 import org.hibernate.persister.entity.mutation.AuditMutationWriter;
 import org.hibernate.sql.results.internal.ResultsHelper;
 
@@ -94,17 +93,6 @@ public class AuditWorkQueue implements TransactionCompletionCallbacks.BeforeComp
 			Object originalSnapshot,
 			CollectionAuditWriter writer,
 			SharedSessionContractImplementor session) {
-		final var owner = ResultsHelper.getCollectionOwner(
-				session.getPersistenceContextInternal(),
-				collectionPersister,
-				collection,
-				ownerId,
-				session
-		);
-		final var ownerPersister = CollectionAuditSupport.resolveOwnerPersister( collectionPersister, owner, session );
-		if ( !CollectionAuditSupport.isCollectionAudited( collectionPersister, ownerPersister ) ) {
-			return;
-		}
 		if ( !registered ) {
 			session.getTransactionCompletionCallbacks().registerCallback( this );
 			registered = true;
@@ -113,14 +101,24 @@ public class AuditWorkQueue implements TransactionCompletionCallbacks.BeforeComp
 		// the diff at completion will use original vs final state
 		changeSet.addCollectionChange( collectionPersister, collection, ownerId, originalSnapshot, writer );
 
-		if ( ownerPersister.getAuditMapping() != null ) {
+		final var declaringPersister = collectionPersister.getOwnerEntityPersister();
+		if ( declaringPersister.getAuditMapping() != null ) {
 			if ( trackingListener == null ) {
 				trackingListener = resolveTrackingListener( session );
 			}
+			final var owner = ResultsHelper.getCollectionOwner(
+					session.getPersistenceContextInternal(),
+					collectionPersister,
+					collection,
+					ownerId,
+					session
+			);
 			if ( owner != null ) {
-				final var ownerEntityKey = CollectionAuditSupport.resolveOwnerEntityKey( owner, ownerPersister, session );
+				// The owner may be an instance of a subclass of the entity declaring the collection
+				final var ownerPersister = declaringPersister.getSubclassEntityPersister( owner, session.getFactory() );
 				changeSet.addEntityChange(
-						ownerEntityKey,
+						// A property-ref collection key is not the owner's identifier
+						session.generateEntityKey( ownerPersister.getIdentifier( owner, session ), ownerPersister ),
 						owner,
 						ownerPersister.getValues( owner ),
 						ModificationType.MOD,

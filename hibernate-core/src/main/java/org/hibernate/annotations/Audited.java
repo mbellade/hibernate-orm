@@ -79,7 +79,8 @@ import static java.lang.annotation.RetentionPolicy.RUNTIME;
  * customize the audit log's table name, schema, catalog, or
  * column names for the audit log.
  * Use {@link Override @Audited.Override} to change the audit
- * behavior of properties inherited from a superclass.
+ * behavior of the entity's own properties or of properties
+ * inherited from a mapped superclass.
  *
  * @see Changelog
  * @see org.hibernate.audit.AuditLog
@@ -99,9 +100,9 @@ public @interface Audited {
 	 * Excludes the annotated attribute from auditing.
 	 * Updates to an excluded attribute modify the current
 	 * row directly without creating a new revision of the
-	 * entity instance. Unless a subclass {@linkplain Override overrides}
-	 * this exclusion, the audit log table does not contain columns mapped
-	 * by excluded attributes.
+	 * entity instance. Unless an entity inheriting the attribute from a
+	 * mapped superclass {@linkplain Override overrides} this exclusion, the
+	 * audit log table does not contain columns mapped by excluded attributes.
 	 */
 	@Documented
 	@Target({FIELD, METHOD})
@@ -110,18 +111,26 @@ public @interface Audited {
 	}
 
 	/**
-	 * Overrides the audit behavior of a property inherited from a superclass.
-	 * May be declared on an entity or mapped superclass. The nearest override
-	 * in the superclass chain wins, falling back to the property's
-	 * {@link Excluded} annotation when there is no override.
+	 * Overrides the audit behavior of the named property for the annotated
+	 * entity and its subclasses. May be declared on an entity or mapped
+	 * superclass. The property must be declared by the entity or inherited
+	 * from a mapped superclass: overriding a property of an entity superclass,
+	 * the identifier, or the version fails at boot. The nearest override in
+	 * the superclass chain wins, falling back to the property's
+	 * {@link Excluded} annotation when there is no override. The search stops
+	 * at the nearest entity superclass. On an entity whose hierarchy is not
+	 * audited, an override of a collection decides whether the collection is
+	 * audited, taking precedence over its field-level {@link Audited}, while
+	 * overrides of other properties are ignored, except that a blank or
+	 * duplicate name fails.
 	 * <p>
-	 * Shared audit tables contain a property's columns if any entity mapping
-	 * that table audits the property. These columns are nullable and contain
-	 * null for instances of entities which exclude the property.
+	 * Refer to this annotation as {@code @Audited.Override} rather than
+	 * importing the nested type, since an import shadows
+	 * {@link java.lang.Override}.
 	 * <p>
-	 * Overrides affect auditing only. In particular, re-auditing an
-	 * {@code @Audited.Excluded} property does not restore optimistic locking
-	 * for that property on the current-state table.
+	 * Excluding a property via an override also disables optimistic locking
+	 * for it, like {@link Excluded}. Re-auditing an {@code @Audited.Excluded}
+	 * property does not restore optimistic locking.
 	 *
 	 * @since 7.4
 	 */
@@ -131,7 +140,9 @@ public @interface Audited {
 	@Repeatable(Overrides.class)
 	@interface Override {
 		/**
-		 * The nonblank name of the persistent property to override.
+		 * The nonblank name of the persistent property to override,
+		 * which may be inherited from a mapped superclass. A class may
+		 * declare at most one override of each property.
 		 */
 		String name();
 
@@ -141,10 +152,12 @@ public @interface Audited {
 		boolean isAudited() default true;
 
 		/**
-		 * Customizes a collection's middle audit table. Ignored when
-		 * {@link #isAudited()} is false. Only an override on the declaring
-		 * entity or its mapped superclasses may rename the table; an
-		 * override on a subclass does not rename an inherited table.
+		 * Customizes a collection's middle audit table. Each nonblank
+		 * member replaces the corresponding member of the property's
+		 * {@link CollectionTable @Audited.CollectionTable}. Has no effect
+		 * when {@link #isAudited()} is false. A nonblank collection table
+		 * fails at boot when the property is not a collection or is an
+		 * inverse ({@code mappedBy}) collection, which has no audit table.
 		 */
 		CollectionTable collectionTable() default @CollectionTable;
 	}
@@ -292,16 +305,18 @@ public @interface Audited {
 		String name() default "";
 
 		/**
-		 * The schema of the collection audit table.
-		 * Defaults to the schema of the owning entity's
-		 * audit table.
+		 * The schema of the collection audit table. Defaults to the
+		 * schema of the owning entity's {@link Table @Audited.Table},
+		 * otherwise to the schema of the collection table, or of the
+		 * owning entity's table for a {@code @OneToMany} join column.
 		 */
 		String schema() default "";
 
 		/**
-		 * The catalog of the collection audit table.
-		 * Defaults to the catalog of the owning entity's
-		 * audit table.
+		 * The catalog of the collection audit table. Defaults to the
+		 * catalog of the owning entity's {@link Table @Audited.Table},
+		 * otherwise to the catalog of the collection table, or of the
+		 * owning entity's table for a {@code @OneToMany} join column.
 		 */
 		String catalog() default "";
 	}

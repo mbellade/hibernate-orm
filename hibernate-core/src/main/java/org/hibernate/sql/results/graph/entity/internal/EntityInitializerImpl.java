@@ -43,7 +43,6 @@ import org.hibernate.loader.ast.spi.CascadingFetchProfile;
 import org.hibernate.metamodel.mapping.AttributeMapping;
 import org.hibernate.metamodel.mapping.AttributeMetadata;
 import org.hibernate.metamodel.mapping.CompositeIdentifierMapping;
-import org.hibernate.metamodel.mapping.EntityMappingType;
 import org.hibernate.metamodel.mapping.EntityValuedModelPart;
 import org.hibernate.metamodel.mapping.ModelPart;
 import org.hibernate.metamodel.mapping.internal.EntityCollectionPart;
@@ -436,30 +435,6 @@ public class EntityInitializerImpl
 				}
 			}
 		}
-
-		if ( resultDescriptor.isAuditRead() ) {
-			applyAuditExclusionMasks(
-					rootEntityDescriptor,
-					assemblers,
-					subInitializers,
-					eagerSubInitializers,
-					collectionContainingSubInitializers,
-					lazySets,
-					maybeLazySets
-			);
-			for ( var subMappingType : subMappingTypes ) {
-				applyAuditExclusionMasks(
-						subMappingType,
-						assemblers,
-						subInitializers,
-						eagerSubInitializers,
-						collectionContainingSubInitializers,
-						lazySets,
-						maybeLazySets
-				);
-			}
-		}
-
 		for ( int i = 0; i < subInitializers.length; i++ ) {
 			boolean emptySubInitializers = true;
 			if ( subInitializers[i] != null ) {
@@ -515,37 +490,6 @@ public class EntityInitializerImpl
 
 		this.keyAssembler = keyResult == null ? null : keyResult.createResultAssembler( this, creationState );
 		this.affectedByFilter = affectedByFilter;
-	}
-
-	private void applyAuditExclusionMasks(
-			EntityMappingType concreteType,
-			DomainResultAssembler<?>[][] assemblers,
-			Initializer<?>[][] subInitializers,
-			Initializer<?>[][] eagerSubInitializers,
-			Initializer<?>[][] collectionContainingSubInitializers,
-			BitSet[] lazySets,
-			BitSet[] maybeLazySets) {
-		if ( concreteType.isAbstract() || !concreteType.isTypeOrSuperType( entityDescriptor ) ) {
-			return;
-		}
-		final int subclassId = concreteType.getSubclassId();
-		final var persister = concreteType.getEntityPersister();
-		// The fetch plan uses the hierarchy union; each concrete type keeps its own audit mask.
-		// Attributes excluded by every concrete type have no fetch, so masking them is a no-op.
-		for ( int position = 0; position < concreteType.getNumberOfAttributeMappings(); position++ ) {
-			if ( persister.isPropertyAuditedExcluded( position ) ) {
-				assemblers[subclassId][position] = unfetchedAttributeAssembler( concreteType.getAttributeMapping( position ) );
-				if ( subInitializers[subclassId] != null ) {
-					subInitializers[subclassId][position] = null;
-					eagerSubInitializers[subclassId][position] = null;
-					collectionContainingSubInitializers[subclassId][position] = null;
-				}
-				if ( lazySets[subclassId] != null ) {
-					lazySets[subclassId].clear( position );
-					maybeLazySets[subclassId].clear( position );
-				}
-			}
-		}
 	}
 
 	private static DomainResultAssembler<?> unfetchedAttributeAssembler(AttributeMapping attributeMapping) {

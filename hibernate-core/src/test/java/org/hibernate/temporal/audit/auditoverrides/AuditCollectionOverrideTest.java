@@ -10,8 +10,6 @@ import jakarta.persistence.CollectionTable;
 import jakarta.persistence.ElementCollection;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
-import jakarta.persistence.Inheritance;
-import jakarta.persistence.InheritanceType;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.JoinTable;
 import jakarta.persistence.ManyToMany;
@@ -45,7 +43,6 @@ import static org.hibernate.temporal.audit.auditoverrides.AuditOverrideAssertion
 @AuditedTest
 @DomainModel(annotatedClasses = {
 		AuditCollectionOverrideTest.Owner.class,
-		AuditCollectionOverrideTest.SubOwner.class,
 		AuditCollectionOverrideTest.Child.class
 })
 @SessionFactory
@@ -69,37 +66,25 @@ class AuditCollectionOverrideTest {
 	void createData(SessionFactoryScope scope) {
 		currentTxId = 0;
 		scope.inTransaction( session -> {
-			var base = new Owner();
-			base.id = 1L;
-			base.reference = 101L;
-			base.name = "base";
-			base.restoredTags.add( "base hidden" );
-			base.renamedTags.add( "base visible" );
-			base.droppedTags.add( "base dropped" );
-			base.revokedTags.add( "base audited" );
-			session.persist( base );
 			var child = new Child();
 			child.id = 1L;
 			child.name = "child";
 			session.persist( child );
-			var sub = new SubOwner();
-			sub.id = 2L;
-			sub.reference = 102L;
-			sub.name = "sub";
-			sub.restoredTags.add( "restored" );
-			sub.renamedTags.add( "renamed" );
-			sub.droppedTags.add( "sub dropped" );
-			sub.revokedTags.add( "sub hidden" );
-			sub.children.add( child );
-			sub.links.add( child );
-			sub.mscTags.add( "mapped superclass" );
-			sub.memberOnlyTags.add( "member table" );
-			session.persist( sub );
+			var owner = new Owner();
+			owner.id = 1L;
+			owner.reference = 101L;
+			owner.name = "owner";
+			owner.restoredTags.add( "restored" );
+			owner.renamedTags.add( "renamed" );
+			owner.droppedTags.add( "dropped" );
+			owner.revokedTags.add( "hidden" );
+			owner.children.add( child );
+			owner.links.add( child );
+			owner.mscTags.add( "mapped superclass" );
+			owner.memberOnlyTags.add( "member table" );
+			session.persist( owner );
 		} );
-		scope.inTransaction( session -> {
-			var sub = session.find( SubOwner.class, 2L );
-			sub.restoredTags.add( "added" );
-		} );
+		scope.inTransaction( session -> session.find( Owner.class, 1L ).restoredTags.add( "added" ) );
 	}
 
 	@AfterClassTemplate
@@ -108,54 +93,38 @@ class AuditCollectionOverrideTest {
 	}
 
 	@Test
-	void existenceIsUnionButNamesBelongToOwner(DomainModelScope scope) {
+	void auditTableNamesBelongToOwner(DomainModelScope scope) {
 		assertTable( scope, "override_restored_tags_AUD" );
 		assertTable( scope, "owner_renamed_tags" );
-		assertTable( scope, "override_revoked_tags_AUD" );
 		assertTable( scope, "override_links_AUD" );
 		assertTable( scope, "OverrideCollectionOwner_OverrideCollectionChild_AUD" );
 		assertTable( scope, "msc_renamed_tags" );
 		assertTable( scope, "member_only_tags" );
+		assertNoTable( scope, "override_revoked_tags_AUD" );
 		assertNoTable( scope, "member_msc_tags" );
-		assertNoTable( scope, "subclass_msc_tags" );
 		assertNoTable( scope, "member_renamed_tags" );
-		assertNoTable( scope, "subclass_restored_tags" );
-		assertNoTable( scope, "subclass_renamed_tags" );
-		assertNoTable( scope, "subclass_children" );
-		assertNoTable( scope, "subclass_links" );
 		assertNoTable( scope, "override_dropped_tags_AUD" );
 		assertNoTable( scope, "ignored_dropped_tags" );
 	}
 
 	@Test
-	void auditReadsRespectOwnerType(SessionFactoryScope scope) {
+	void auditReadsRespectOverrides(SessionFactoryScope scope) {
 		try (var auditLog = AuditLogFactory.create( scope.getSessionFactory() )) {
-			final var base = auditLog.find( Owner.class, 1L, 1 );
-			assertThat( base.restoredTags ).isNull();
-			assertThat( base.renamedTags ).containsExactly( "base visible" );
-			assertThat( base.droppedTags ).isNull();
-			assertThat( base.revokedTags ).containsExactly( "base audited" );
-			final var sub = auditLog.find( SubOwner.class, 2L, 1 );
-			assertThat( sub.restoredTags ).containsExactly( "restored" );
-			assertThat( sub.renamedTags ).containsExactly( "renamed" );
-			assertThat( sub.droppedTags ).isNull();
-			assertThat( sub.revokedTags ).isNull();
-			assertThat( sub.children ).extracting( child -> child.name ).containsExactly( "child" );
-			assertThat( sub.links ).extracting( child -> child.name ).containsExactly( "child" );
-			assertThat( sub.mscTags ).containsExactly( "mapped superclass" );
-			assertThat( sub.memberOnlyTags ).containsExactly( "member table" );
+			final var owner = auditLog.find( Owner.class, 1L, 1 );
+			assertThat( owner.restoredTags ).containsExactly( "restored" );
+			assertThat( owner.renamedTags ).containsExactly( "renamed" );
+			assertThat( owner.droppedTags ).isNull();
+			assertThat( owner.revokedTags ).isNull();
+			assertThat( owner.children ).extracting( child -> child.name ).containsExactly( "child" );
+			assertThat( owner.links ).extracting( child -> child.name ).containsExactly( "child" );
+			assertThat( owner.mscTags ).containsExactly( "mapped superclass" );
+			assertThat( owner.memberOnlyTags ).containsExactly( "member table" );
 		}
 		try (var session = scope.getSessionFactory().withOptions().atChangeset( 1 ).openSession()) {
-			final var owners = session.createSelectionQuery(
-					"from OverrideCollectionOwner order by id",
-					Owner.class
-			).getResultList();
-			assertThat( owners ).hasSize( 2 );
-			assertThat( owners.get( 0 ).restoredTags ).isNull();
-			assertThat( owners.get( 0 ).revokedTags ).containsExactly( "base audited" );
-			assertThat( owners.get( 1 ) ).isInstanceOf( SubOwner.class );
-			assertThat( owners.get( 1 ).restoredTags ).containsExactly( "restored" );
-			assertThat( owners.get( 1 ).revokedTags ).isNull();
+			final var owner = session.createSelectionQuery( "from OverrideCollectionOwner where id = 1", Owner.class )
+					.getSingleResult();
+			assertThat( owner.restoredTags ).containsExactly( "restored" );
+			assertThat( owner.revokedTags ).isNull();
 		}
 	}
 
@@ -163,7 +132,7 @@ class AuditCollectionOverrideTest {
 	void restoredCollectionOnlyChangeCreatesOwnerRevision(SessionFactoryScope scope) {
 		scope.inSession( session -> {
 			assertThat( session.createNativeQuery(
-					"select count(*) from override_collection_owner_AUD where id = 2",
+					"select count(*) from override_collection_owner_AUD where id = 1",
 					Long.class
 			).getSingleResult() ).isEqualTo( 2L );
 			assertThat( session.createNativeQuery(
@@ -172,80 +141,62 @@ class AuditCollectionOverrideTest {
 			).getSingleResult() ).isEqualTo( 2L );
 		} );
 		try (var session = scope.getSessionFactory().withOptions().atChangeset( 2 ).openSession()) {
-			final var sub = session.find( SubOwner.class, 2L );
-			assertThat( sub.name ).isEqualTo( "sub" );
-			assertThat( sub.restoredTags ).containsExactlyInAnyOrder( "restored", "added" );
-			assertThat( sub.renamedTags ).containsExactly( "renamed" );
-			assertThat( sub.droppedTags ).isNull();
+			final var owner = session.find( Owner.class, 1L );
+			assertThat( owner.name ).isEqualTo( "owner" );
+			assertThat( owner.restoredTags ).containsExactlyInAnyOrder( "restored", "added" );
+			assertThat( owner.renamedTags ).containsExactly( "renamed" );
+			assertThat( owner.droppedTags ).isNull();
 		}
 	}
 
 	@Test
-	void excludedSubclassCollectionRowsAreNotWritten(SessionFactoryScope scope) {
-		// An excluded-collection-only update still creates an owner revision (hasDirtyCollection),
-		// so use a separate owner to keep the revision counts of owner 2 stable.
+	void excludedCollectionOnlyChangeCreatesNoOwnerRevision(SessionFactoryScope scope) {
 		scope.inTransaction( session -> {
-			var sub = new SubOwner();
-			sub.id = 3L;
-			sub.reference = 103L;
-			sub.name = "excluded collection change";
-			sub.revokedTags.add( "hidden" );
-			session.persist( sub );
+			var owner = new Owner();
+			owner.id = 3L;
+			owner.reference = 103L;
+			owner.revokedTags.add( "hidden" );
+			session.persist( owner );
 		} );
-		scope.inTransaction( session -> session.find( SubOwner.class, 3L ).revokedTags.add( "still hidden" ) );
+		// Excluding the collection also disables its optimistic locking, so the owner is not dirty
+		scope.inTransaction( session -> session.find( Owner.class, 3L ).revokedTags.add( "still hidden" ) );
 		scope.inSession( session -> assertThat( session.createNativeQuery(
-				"select count(*) from override_revoked_tags_AUD where owner_id in (2, 3)",
+				"select count(*) from override_collection_owner_AUD where id = 3",
 				Long.class
-		).getSingleResult() ).isZero() );
+		).getSingleResult() ).isEqualTo( 1L ) );
 	}
 
 	@Test
-	void propertyRefFallbackUsesConcreteOwnerMask(SessionFactoryScope scope) {
+	void propertyRefCollectionChangeMergesWithOwnerChange(SessionFactoryScope scope) {
+		persistPropertyRefOwner( scope, 4L );
+		// The collection key is not the owner id, the owner revision must still merge with the owner update
 		scope.inTransaction( session -> {
-			final var base = new Owner();
-			base.id = 4L;
-			base.reference = 104L;
-			base.propertyRefTags.add( "audited" );
-			final var sub = new SubOwner();
-			sub.id = 5L;
-			sub.reference = 105L;
-			sub.propertyRefTags.add( "excluded" );
-			session.persist( base );
-			session.persist( sub );
+			final var owner = session.find( Owner.class, 4L );
+			owner.name = "changed";
+			owner.propertyRefTags.add( "second" );
 		} );
+		scope.inSession( session -> assertThat( session.createNativeQuery(
+				"select count(*) from override_collection_owner_AUD where id = 4",
+				Long.class
+		).getSingleResult() ).isEqualTo( 2L ) );
+	}
+
+	static void persistPropertyRefOwner(SessionFactoryScope scope, long id) {
 		scope.inTransaction( session -> {
-			final var base = session.find( Owner.class, 4L );
-			final var sub = session.find( SubOwner.class, 5L );
-			final var descriptor = session.getFactory().getMappingMetamodel()
-					.getCollectionDescriptor( Owner.class.getName() + ".propertyRefTags" );
-			assertThat( session.getPersistenceContextInternal().getCollectionOwner( base.reference, descriptor ) ).isNull();
-			assertThat( session.getPersistenceContextInternal().getCollectionOwner( sub.reference, descriptor ) ).isNull();
-			base.propertyRefTags.add( "also audited" );
-			sub.propertyRefTags.add( "also excluded" );
-		} );
-		scope.inSession( session -> {
-			assertThat( session.createNativeQuery(
-					"select count(*) from override_property_ref_tags_AUD where owner_ref = 104",
-					Long.class
-			).getSingleResult() ).isEqualTo( 2L );
-			assertThat( session.createNativeQuery(
-					"select count(*) from override_property_ref_tags_AUD where owner_ref = 105",
-					Long.class
-			).getSingleResult() ).isZero();
-			assertThat( session.createNativeQuery(
-					"select count(*) from override_collection_owner_AUD where id = 4",
-					Long.class
-			).getSingleResult() ).isEqualTo( 2L );
+			final var owner = new Owner();
+			owner.id = id;
+			owner.reference = 100L + id;
+			owner.propertyRefTags.add( "first" );
+			session.persist( owner );
 		} );
 	}
 
 	@Test
 	void currentStateCollectionsIgnoreAuditExclusions(SessionFactoryScope scope) {
 		scope.inSession( session -> {
-			final var base = session.find( Owner.class, 1L );
-			assertThat( base.restoredTags ).containsExactly( "base hidden" );
-			final var sub = session.find( SubOwner.class, 2L );
-			assertThat( sub.revokedTags ).containsExactly( "sub hidden" );
+			final var owner = session.find( Owner.class, 1L );
+			assertThat( owner.revokedTags ).containsExactly( "hidden" );
+			assertThat( owner.droppedTags ).containsExactly( "dropped" );
 		} );
 	}
 
@@ -259,11 +210,25 @@ class AuditCollectionOverrideTest {
 		@CollectionTable(name = "override_msc_tags")
 		@Audited.CollectionTable(name = "member_msc_tags")
 		Set<String> mscTags = new HashSet<>();
+
+		@ElementCollection
+		@CollectionTable(name = "override_restored_tags")
+		@Audited.Excluded
+		Set<String> restoredTags = new HashSet<>();
+
+		@OneToMany
+		@JoinColumn(name = "owner_id")
+		@Audited.Excluded
+		List<Child> children = new ArrayList<>();
+
+		@ManyToMany
+		@JoinTable(name = "override_links")
+		@Audited.Excluded
+		Set<Child> links = new HashSet<>();
 	}
 
 	@Entity(name = "OverrideCollectionOwner")
 	@Table(name = "override_collection_owner")
-	@Inheritance(strategy = InheritanceType.SINGLE_TABLE)
 	@Audited
 	@Audited.Override(
 			name = "renamedTags",
@@ -275,6 +240,10 @@ class AuditCollectionOverrideTest {
 			collectionTable = @Audited.CollectionTable(name = "ignored_dropped_tags")
 	)
 	@Audited.Override(name = "memberOnlyTags")
+	@Audited.Override(name = "restoredTags")
+	@Audited.Override(name = "children")
+	@Audited.Override(name = "links")
+	@Audited.Override(name = "revokedTags", isAudited = false)
 	static class Owner extends CollectionBase {
 		@Id
 		long id;
@@ -300,11 +269,6 @@ class AuditCollectionOverrideTest {
 		Set<String> revokedTags = new HashSet<>();
 
 		@ElementCollection
-		@CollectionTable(name = "override_restored_tags")
-		@Audited.Excluded
-		Set<String> restoredTags = new HashSet<>();
-
-		@ElementCollection
 		@CollectionTable(name = "override_renamed_tags")
 		@Audited.CollectionTable(name = "member_renamed_tags")
 		Set<String> renamedTags = new HashSet<>();
@@ -312,42 +276,6 @@ class AuditCollectionOverrideTest {
 		@ElementCollection
 		@CollectionTable(name = "override_dropped_tags")
 		Set<String> droppedTags = new HashSet<>();
-
-		@OneToMany
-		@JoinColumn(name = "owner_id")
-		@Audited.Excluded
-		List<Child> children = new ArrayList<>();
-
-		@ManyToMany
-		@JoinTable(name = "override_links")
-		@Audited.Excluded
-		Set<Child> links = new HashSet<>();
-	}
-
-	@Audited.Override(
-			name = "mscTags",
-			collectionTable = @Audited.CollectionTable(name = "subclass_msc_tags")
-	)
-	@Entity(name = "OverrideCollectionSubOwner")
-	@Audited.Override(
-			name = "restoredTags",
-			collectionTable = @Audited.CollectionTable(name = "subclass_restored_tags")
-	)
-	@Audited.Override(
-			name = "renamedTags",
-			collectionTable = @Audited.CollectionTable(name = "subclass_renamed_tags")
-	)
-	@Audited.Override(
-			name = "children",
-			collectionTable = @Audited.CollectionTable(name = "subclass_children")
-	)
-	@Audited.Override(
-			name = "links",
-			collectionTable = @Audited.CollectionTable(name = "subclass_links")
-	)
-	@Audited.Override(name = "revokedTags", isAudited = false)
-	@Audited.Override(name = "propertyRefTags", isAudited = false)
-	static class SubOwner extends Owner {
 	}
 
 	@Entity(name = "OverrideCollectionChild")

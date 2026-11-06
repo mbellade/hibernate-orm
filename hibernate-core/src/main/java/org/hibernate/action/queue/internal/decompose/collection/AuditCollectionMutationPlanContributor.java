@@ -16,7 +16,6 @@ import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.hibernate.engine.spi.SessionImplementor;
 import org.hibernate.persister.collection.CollectionPersister;
 import org.hibernate.persister.collection.mutation.CollectionAuditSupport;
-import org.hibernate.sql.results.internal.ResultsHelper;
 
 /// Graph mutation plan contributor for audited basic collection mutations.
 ///
@@ -47,21 +46,10 @@ public class AuditCollectionMutationPlanContributor implements CollectionMutatio
 				context.tableDescriptor(),
 				context.ordinalBase() * 1_000 + 900,
 				session -> {
-					final var owner = ResultsHelper.getCollectionOwner(
-							session.getPersistenceContextInternal(),
-							persister,
-							context.collection(),
-							context.key(),
-							session
-					);
-					final var ownerPersister = CollectionAuditSupport.resolveOwnerPersister( persister, owner, session );
-					if ( !CollectionAuditSupport.isCollectionAudited( persister, ownerPersister ) ) {
-						return;
-					}
 					final var collector = resolveCollector( session ).getAuditMutationCollector();
 					final var ownerChange = auditMutationSupport.resolveOwnerAuditChange(
-							owner,
-							ownerPersister,
+							context.key(),
+							context.collection(),
 							session
 					);
 					if ( ownerChange != null ) {

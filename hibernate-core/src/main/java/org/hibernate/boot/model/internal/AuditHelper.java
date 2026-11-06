@@ -8,6 +8,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 
 import jakarta.annotation.Nonnull;
 import org.hibernate.MappingException;
@@ -34,16 +35,12 @@ import org.hibernate.mapping.Stateful;
 import org.hibernate.mapping.Table;
 import org.hibernate.mapping.TableOwner;
 import org.hibernate.mapping.UnionSubclass;
-import org.hibernate.metamodel.mapping.AttributeMapping;
 import org.hibernate.metamodel.mapping.EntityMappingType;
 import org.hibernate.models.spi.ClassDetails;
 import org.hibernate.models.spi.MemberDetails;
-import org.hibernate.models.spi.ModelsContext;
 import org.hibernate.persister.state.internal.AuditStateManagement;
 import org.hibernate.resource.beans.spi.ManagedBeanRegistry;
-import org.hibernate.sql.results.graph.FetchParent;
 import org.hibernate.sql.results.graph.Fetchable;
-import org.hibernate.sql.results.graph.entity.EntityResultGraphNode;
 import org.hibernate.temporal.spi.ChangesetCoordinator;
 
 import jakarta.annotation.Nullable;
@@ -74,59 +71,64 @@ public final class AuditHelper {
 			RootClass rootClass,
 			ClassDetails classDetails,
 			MetadataBuildingContext context) {
-		bindAuditTable( auditTable, (Stateful) rootClass, null, context );
+		bindAuditTable(
+				auditTable,
+				rootClass,
+				auditTable == null ? null : auditTable.name(),
+				auditTable == null ? null : auditTable.schema(),
+				auditTable == null ? null : auditTable.catalog(),
+				context
+		);
 		bindSubclassAuditTables( auditTable, rootClass, context );
 		bindSecondaryAuditTables( auditTable, rootClass, classDetails, context );
 	}
 
+	/**
+	 * Binds a collection audit table using the schema, catalog and column names of
+	 * the owning entity's audit table. The entity's audit table name never applies
+	 * to its collections. Each nonblank member of the {@code @Audited.Override}
+	 * collection table wins over the member of the property's collection table.
+	 */
 	static void bindAuditTable(
-			@Nullable Audited.Table auditTable,
 			Collection collection,
+			@Nullable Audited.CollectionTable overrideAuditTable,
 			@Nullable Audited.CollectionTable collectionAuditTable,
-			MetadataBuildingContext context
-	) {
-		bindAuditTable( auditTable, (Stateful) collection, collectionAuditTable, context );
+			MetadataBuildingContext context) {
+		final var auditTable = rootAuditTable( collection.getOwner(), context );
+		final var ownerAuditTable = entityAuditTable( collection.getOwner(), auditTable, context );
+		bindAuditTable(
+				auditTable,
+				collection,
+				collectionTableMember( Audited.CollectionTable::name, overrideAuditTable, collectionAuditTable, null ),
+				collectionTableMember(
+						Audited.CollectionTable::schema,
+						overrideAuditTable,
+						collectionAuditTable,
+						ownerAuditTable == null ? null : ownerAuditTable.schema()
+				),
+				collectionTableMember(
+						Audited.CollectionTable::catalog,
+						overrideAuditTable,
+						collectionAuditTable,
+						ownerAuditTable == null ? null : ownerAuditTable.catalog()
+				),
+				context
+		);
 	}
 
 	private static void bindAuditTable(
 			@Nullable Audited.Table auditTable,
 			Stateful auditable,
-			@Nullable Audited.CollectionTable collectionAuditTable,
-			MetadataBuildingContext context
-	) {
+			@Nullable String explicitAuditTableName,
+			@Nullable String auditSchema,
+			@Nullable String auditCatalog,
+			MetadataBuildingContext context) {
 		final var collector = context.getMetadataCollector();
 		final var table = auditable.getMainTable();
-		String explicitAuditTableName;
-		String auditSchema;
-		String auditCatalog;
-		final String csIdColumnName;
-		final String modTypeColumnName;
-		if ( auditTable != null ) {
-			// The entity's audit table name never applies to its collections
-			explicitAuditTableName = auditable instanceof Collection ? "" : auditTable.name();
-			auditSchema = auditTable.schema();
-			auditCatalog = auditTable.catalog();
-			csIdColumnName = auditTable.changesetIdColumn();
-			modTypeColumnName = auditTable.modificationTypeColumn();
-		}
-		else {
-			explicitAuditTableName = "";
-			auditSchema = "";
-			auditCatalog = "";
-			csIdColumnName = DEFAULT_CHANGESET_ID_COLUMN_NAME;
-			modTypeColumnName = DEFAULT_MODIFICATION_TYPE_COLUMN_NAME;
-		}
-		if ( collectionAuditTable != null ) {
-			if ( !isBlank( collectionAuditTable.name() ) ) {
-				explicitAuditTableName = collectionAuditTable.name();
-			}
-			if ( !isBlank( collectionAuditTable.schema() ) ) {
-				auditSchema = collectionAuditTable.schema();
-			}
-			if ( !isBlank( collectionAuditTable.catalog() ) ) {
-				auditCatalog = collectionAuditTable.catalog();
-			}
-		}
+		final String csIdColumnName =
+				auditTable == null ? DEFAULT_CHANGESET_ID_COLUMN_NAME : auditTable.changesetIdColumn();
+		final String modTypeColumnName =
+				auditTable == null ? DEFAULT_MODIFICATION_TYPE_COLUMN_NAME : auditTable.modificationTypeColumn();
 		final boolean hasExplicitAuditTableName = !isBlank( explicitAuditTableName );
 		final var auditLogTable = collector.addTable(
 				isBlank( auditSchema ) ? table.getSchema() : auditSchema,
@@ -158,9 +160,6 @@ public final class AuditHelper {
 					? resolveExcludedColumns( rootClass, table )
 					: Set.<String>of();
 			copyTableColumns( table, auditLogTable, excludedColumns );
-			if ( auditable instanceof RootClass rootClass ) {
-				relaxExcludedColumnNullability( rootClass, table, auditLogTable );
-			}
 			final var changesetIdColumn =
 					createAuditColumn( csIdColumnName,
 							getChangesetIdType( context ), auditLogTable, context );
@@ -210,14 +209,15 @@ public final class AuditHelper {
 		context.getMetadataCollector().addSecondPass( (OptionalDeterminationSecondPass) ignored -> {
 			for ( var join : rootClass.getSubclassJoinClosure() ) {
 				final var owner = join.getPersistentClass();
-				final var ownerDetails = context.getBootstrapContext().getModelsContext()
-						.getClassDetailsRegistry().getClassDetails( owner.getClassName() );
+				final var ownerDetails = findClassDetails( owner, context );
 				final Map<String, String> ownerTableNames = new HashMap<>( secondaryAuditTableNames );
-				ownerDetails.forEachAnnotationUsage(
-						Audited.SecondaryTable.class,
-						context.getBootstrapContext().getModelsContext(),
-						sat -> ownerTableNames.put( sat.secondaryTableName(), sat.secondaryAuditTableName() )
-				);
+				if ( ownerDetails != null ) {
+					ownerDetails.forEachAnnotationUsage(
+							Audited.SecondaryTable.class,
+							context.getBootstrapContext().getModelsContext(),
+							sat -> ownerTableNames.put( sat.secondaryTableName(), sat.secondaryAuditTableName() )
+					);
+				}
 				final var sourceTable = join.getTable();
 				final String customName = ownerTableNames.get( sourceTable.getName() );
 				final var secondaryAuditTable = createAuditTable(
@@ -229,7 +229,6 @@ public final class AuditHelper {
 						customName,
 						context
 				);
-				relaxExcludedColumnNullability( owner, sourceTable, secondaryAuditTable );
 				createAuditTableForeignKey(
 						secondaryAuditTable,
 						owner.getEntityName(),
@@ -278,24 +277,19 @@ public final class AuditHelper {
 			String csIdColumnName,
 			String modTypeColumnName,
 			MetadataBuildingContext context) {
-		final var modelsContext = context.getBootstrapContext().getModelsContext();
 		for ( var subclass : parent.getDirectSubclasses() ) {
 			if ( subclass instanceof TableOwner ) {
-				// Check if the subclass has its own @Audited.Table for table name/schema/catalog override
-				final var subclassDetails = modelsContext.getClassDetailsRegistry()
-						.getClassDetails( subclass.getClassName() );
-				final var subclassTable = subclassDetails.getDirectAnnotationUsage( Audited.Table.class );
-				final var effective = subclassTable != null ? subclassTable : auditTable;
+				final var effective = entityAuditTable( subclass, auditTable, context );
 				final var subclassAuditTable = createAuditTable(
 						subclass.getTable(),
 						csIdColumnName,
 						resolveExcludedColumns( subclass, subclass.getTable() ),
 						effective != null ? nullIfBlank( effective.schema() ) : null,
 						effective != null ? nullIfBlank( effective.catalog() ) : null,
-						effective != null ? nullIfBlank( effective.name() ) : null,
+						// Only the subclass's own @Audited.Table names its audit table, never the root's
+						effective != auditTable ? nullIfBlank( effective.name() ) : null,
 						context
 				);
-				relaxExcludedColumnNullability( subclass, subclass.getTable(), subclassAuditTable );
 				subclass.addAuxiliaryColumn( CHANGESET_ID, subclassAuditTable.getPrimaryKey().getColumn( 0 ) );
 				if ( subclass instanceof UnionSubclass ) {
 					// TABLE_PER_CLASS: each table is self-contained, needs its own REVTYPE and REVEND
@@ -337,47 +331,42 @@ public final class AuditHelper {
 	 * perspective the collection is part of the parent entity's state.
 	 */
 	static void bindOneToManyAuditTable(
-			@Nullable Audited.Table auditTable,
 			Collection collection,
 			String referencedEntityName,
+			@Nullable Audited.CollectionTable overrideAuditTable,
 			@Nullable Audited.CollectionTable collectionAuditTable,
 			MetadataBuildingContext context) {
 		final var collector = context.getMetadataCollector();
-		final var ownerTable = collection.getOwner().getTable();
+		final var owner = collection.getOwner();
+		final var auditTable = rootAuditTable( owner, context );
+		final var ownerAuditTable = entityAuditTable( owner, auditTable, context );
 
 		// Table name: @Audited.CollectionTable name, or {OwnerJpaEntityName}_{ChildJpaEntityName}_AUD
 		final var referencedEntity = collector.getEntityBinding( referencedEntityName );
-		final String auditTableName =
-				auditTableName( collection, collectionAuditTable, referencedEntity );
-
-		final String auditSchema;
-		final String auditCatalog;
-		final String csIdColumnName;
-		final String modTypeColumnName;
-		if ( auditTable != null ) {
-			auditSchema = auditTable.schema();
-			auditCatalog = auditTable.catalog();
-			csIdColumnName = auditTable.changesetIdColumn();
-			modTypeColumnName = auditTable.modificationTypeColumn();
-		}
-		else {
-			auditSchema = "";
-			auditCatalog = "";
-			csIdColumnName = DEFAULT_CHANGESET_ID_COLUMN_NAME;
-			modTypeColumnName = DEFAULT_MODIFICATION_TYPE_COLUMN_NAME;
-		}
-		final String schema =
-				collectionAuditTable != null && !isBlank( collectionAuditTable.schema() )
-						? collectionAuditTable.schema()
-						: !isBlank( auditSchema ) ? auditSchema : ownerTable.getSchema();
-		final String catalog =
-				collectionAuditTable != null && !isBlank( collectionAuditTable.catalog() )
-						? collectionAuditTable.catalog()
-						: !isBlank( auditCatalog ) ? auditCatalog : ownerTable.getCatalog();
+		final String explicitName =
+				collectionTableMember( Audited.CollectionTable::name, overrideAuditTable, collectionAuditTable, null );
+		final String schema = collectionTableMember(
+				Audited.CollectionTable::schema,
+				overrideAuditTable,
+				collectionAuditTable,
+				ownerAuditTable == null ? null : ownerAuditTable.schema()
+		);
+		final String catalog = collectionTableMember(
+				Audited.CollectionTable::catalog,
+				overrideAuditTable,
+				collectionAuditTable,
+				ownerAuditTable == null ? null : ownerAuditTable.catalog()
+		);
+		final String csIdColumnName =
+				auditTable == null ? DEFAULT_CHANGESET_ID_COLUMN_NAME : auditTable.changesetIdColumn();
+		final String modTypeColumnName =
+				auditTable == null ? DEFAULT_MODIFICATION_TYPE_COLUMN_NAME : auditTable.modificationTypeColumn();
 		final var middleAuditTable = collector.addTable(
-				schema,
-				catalog,
-				auditTableName,
+				isBlank( schema ) ? owner.getTable().getSchema() : schema,
+				isBlank( catalog ) ? owner.getTable().getCatalog() : catalog,
+				explicitName != null
+						? explicitName
+						: owner.getJpaEntityName() + "_" + referencedEntity.getJpaEntityName() + DEFAULT_TABLE_SUFFIX,
 				null,
 				false,
 				context,
@@ -414,21 +403,6 @@ public final class AuditHelper {
 			enableAudit( collection, middleAuditTable, changesetIdColumn, modificationTypeColumn );
 			addTransactionEndColumns( auditTable, collection, middleAuditTable, context );
 		} );
-	}
-
-	@Nonnull
-	private static String auditTableName(
-			Collection collection,
-			@Nullable Audited.CollectionTable collectionAuditTable,
-			PersistentClass referencedEntity) {
-		if ( collectionAuditTable != null && !isBlank( collectionAuditTable.name() ) ) {
-			return collectionAuditTable.name();
-		}
-		else {
-			final String ownerSimpleName = collection.getOwner().getJpaEntityName();
-			final String childSimpleName = referencedEntity.getJpaEntityName();
-			return ownerSimpleName + "_" + childSimpleName + DEFAULT_TABLE_SUFFIX;
-		}
 	}
 
 	static void bindChangelog(
@@ -813,11 +787,73 @@ public final class AuditHelper {
 		return supplier != null ? supplier.getChangelogClass().getName() : null;
 	}
 
+	/**
+	 * The {@code @Audited.Table} of the root entity, which determines the audit column
+	 * names of the whole hierarchy.
+	 */
+	private static @Nullable Audited.Table rootAuditTable(PersistentClass entity, MetadataBuildingContext context) {
+		final var classDetails = findClassDetails( entity.getRootClass(), context );
+		return classDetails == null ? null : EntityBinder.extract( Audited.Table.class, classDetails, context );
+	}
+
+	/**
+	 * The {@code @Audited.Table} determining the schema and catalog of the audit table
+	 * holding the state of the given entity: the annotation declared directly by the
+	 * entity owning its table (the entity itself, or its nearest superclass owning a
+	 * table for a SINGLE_TABLE subclass), otherwise the root's. Annotations of other
+	 * superclasses do not apply.
+	 */
+	private static @Nullable Audited.Table entityAuditTable(
+			PersistentClass entity,
+			@Nullable Audited.Table rootAuditTable,
+			MetadataBuildingContext context) {
+		var tableOwner = entity;
+		while ( !( tableOwner instanceof TableOwner ) ) {
+			tableOwner = tableOwner.getSuperclass();
+		}
+		final var classDetails = findClassDetails( tableOwner, context );
+		final var ownAuditTable =
+				classDetails == null ? null : classDetails.getDirectAnnotationUsage( Audited.Table.class );
+		return ownAuditTable == null ? rootAuditTable : ownAuditTable;
+	}
+
+	private static @Nullable ClassDetails findClassDetails(PersistentClass entity, MetadataBuildingContext context) {
+		final var className = entity.getClassName();
+		return className == null
+				? null
+				: context.getBootstrapContext().getModelsContext().getClassDetailsRegistry()
+						.findClassDetails( className );
+	}
+
+	private static @Nullable String collectionTableMember(
+			Function<Audited.CollectionTable, String> member,
+			@Nullable Audited.CollectionTable overrideAuditTable,
+			@Nullable Audited.CollectionTable collectionAuditTable,
+			@Nullable String defaultValue) {
+		if ( overrideAuditTable != null && !isBlank( member.apply( overrideAuditTable ) ) ) {
+			return member.apply( overrideAuditTable );
+		}
+		else if ( collectionAuditTable != null && !isBlank( member.apply( collectionAuditTable ) ) ) {
+			return member.apply( collectionAuditTable );
+		}
+		else {
+			return defaultValue;
+		}
+	}
+
+	/**
+	 * The nearest {@code @Audited.Override} of the named property declared by the owner
+	 * entity or its mapped superclasses.
+	 */
 	static @Nullable Audited.Override findAuditOverride(
 			String propertyName,
-			ClassDetails classDetails,
-			ModelsContext modelsContext) {
-		for ( var current = classDetails; current != null; current = current.getSuperClass() ) {
+			PersistentClass owner,
+			MetadataBuildingContext context) {
+		final var modelsContext = context.getBootstrapContext().getModelsContext();
+		final var superEntity = owner.getSuperclass();
+		for ( var current = findClassDetails( owner, context );
+				current != null && ( superEntity == null || !current.getName().equals( superEntity.getClassName() ) );
+				current = current.getSuperClass() ) {
 			final var override = current.getNamedAnnotationUsage(
 					Audited.Override.class,
 					propertyName,
@@ -831,44 +867,95 @@ public final class AuditHelper {
 		return null;
 	}
 
-	public static boolean isEffectivelyExcluded(PersistentClass persistentClass, Property property) {
-		if ( persistentClass.getRootClass().getStateManagementType() != AuditStateManagement.class ) {
-			return property.isAuditedExcluded();
-		}
-		final var className = persistentClass.getClassName();
-		if ( className != null ) {
-			final var modelsContext = property.getValue().getBuildingContext().getBootstrapContext().getModelsContext();
-			// Entities mapped without annotations (e.g. hbm.xml) have no class details
-			final var classDetails = modelsContext.getClassDetailsRegistry().findClassDetails( className );
-			if ( classDetails != null ) {
-				final var override = findAuditOverride( property.getName(), classDetails, modelsContext );
-				if ( override != null ) {
-					return !override.isAudited();
-				}
-			}
-		}
-		return property.isAuditedExcluded();
-	}
-
-	static void validateAuditOverrides(
+	/**
+	 * Validates the {@code @Audited.Override}s of the entity and its mapped superclasses,
+	 * and applies the nearest override of each property to its boot model. The search
+	 * stops at the nearest entity superclass, whose overrides were applied when it was
+	 * bound, so that an override may only target a property the entity owns.
+	 */
+	static void applyAuditOverrides(
 			PersistentClass persistentClass,
 			ClassDetails classDetails,
 			MetadataBuildingContext context) {
 		final var modelsContext = context.getBootstrapContext().getModelsContext();
-		for ( var current = classDetails; current != null; current = current.getSuperClass() ) {
+		final boolean audited = persistentClass.getRootClass().getStateManagementType() == AuditStateManagement.class;
+		final var superEntity = persistentClass.getSuperclass();
+		final Set<String> applied = new HashSet<>();
+		for ( var current = classDetails;
+				current != null && ( superEntity == null || !current.getName().equals( superEntity.getClassName() ) );
+				current = current.getSuperClass() ) {
 			final var declaringClass = current;
+			final Set<String> declared = new HashSet<>();
 			current.forEachAnnotationUsage( Audited.Override.class, modelsContext, override -> {
-				if ( isBlank( override.name() ) ) {
-					throw new MappingException( "Blank @Audited.Override property name '" + override.name()
+				final String name = override.name();
+				if ( isBlank( name ) ) {
+					throw new MappingException( "Blank @Audited.Override property name '" + name
 							+ "' on class '" + declaringClass.getName() + "'" );
 				}
-				if ( persistentClass.getRootClass().getStateManagementType() == AuditStateManagement.class
-						&& !persistentClass.hasProperty( override.name() ) ) {
-					throw new MappingException( "Unknown @Audited.Override property '" + override.name()
+				if ( !declared.add( name ) ) {
+					throw new MappingException( "Duplicate @Audited.Override of property '" + name
 							+ "' on class '" + declaringClass.getName() + "'" );
+				}
+				final var property = findProperty( persistentClass, name );
+				// On an unaudited hierarchy only collection overrides take effect (see CollectionBinder),
+				// and overrides of other properties are ignored, since a mapped superclass may be
+				// shared with audited entities
+				if ( audited || property != null && property.getValue() instanceof Collection ) {
+					if ( property == null ) {
+						throw new MappingException( "Unknown @Audited.Override property '" + name
+								+ "' on class '" + declaringClass.getName() + "'" );
+					}
+					if ( property == persistentClass.getIdentifierProperty() || property == persistentClass.getVersion() ) {
+						throw new MappingException( "@Audited.Override of identifier or version property '" + name
+								+ "' on class '" + declaringClass.getName() + "'" );
+					}
+					// A generic specialization is the entity's copy of a generic property of an entity superclass
+					final var owner = property.isGenericSpecialization()
+							? findProperty( persistentClass.getSuperclass(), name ).getPersistentClass()
+							: property.getPersistentClass();
+					if ( owner != persistentClass ) {
+						throw new MappingException( "@Audited.Override of property '" + name
+								+ "' on class '" + declaringClass.getName() + "' inherited from entity '"
+								+ owner.getEntityName() + "'" );
+					}
+					final var table = override.collectionTable();
+					if ( !isBlank( table.name() ) || !isBlank( table.schema() ) || !isBlank( table.catalog() ) ) {
+						if ( !( property.getValue() instanceof Collection collection ) ) {
+							throw new MappingException( "@Audited.Override collection table for non-collection property '"
+									+ name + "' on class '" + declaringClass.getName() + "'" );
+						}
+						if ( collection.isInverse() ) {
+							// The owning side of the association audits it, so there is no audit table
+							throw new MappingException( "@Audited.Override collection table for inverse collection property '"
+									+ name + "' on class '" + declaringClass.getName() + "'" );
+						}
+					}
+					if ( audited && applied.add( name ) ) {
+						property.setAuditedExcluded( !override.isAudited() );
+						if ( !override.isAudited() ) {
+							// Like @Audited.Excluded
+							property.setOptimisticLocked( false );
+						}
+					}
 				}
 			} );
 		}
+	}
+
+	/**
+	 * The named property of the entity, including a generic property of an abstract
+	 * entity, which {@link PersistentClass#getProperty} does not find.
+	 */
+	static @Nullable Property findProperty(PersistentClass persistentClass, String name) {
+		if ( persistentClass.hasProperty( name ) ) {
+			return persistentClass.getProperty( name );
+		}
+		for ( var property : persistentClass.getAllPropertyClosure() ) {
+			if ( property.getName().equals( name ) ) {
+				return property;
+			}
+		}
+		return null;
 	}
 
 	private static Set<String> resolveExcludedColumns(PersistentClass owner, Table table) {
@@ -906,7 +993,7 @@ public final class AuditHelper {
 		for ( var property : persistentClass.getPropertyClosure() ) {
 			if ( mapsTable( persistentClass, property, table )
 					&& !( property instanceof Backref )
-					&& !isEffectivelyExcluded( persistentClass, property ) ) {
+					&& !property.isAuditedExcluded() ) {
 				for ( var column : property.getColumns() ) {
 					auditedColumns.add( column.getCanonicalName() );
 				}
@@ -915,104 +1002,34 @@ public final class AuditHelper {
 	}
 
 	private static boolean mapsTable(PersistentClass persistentClass, Property property, Table table) {
+		// A TABLE_PER_CLASS table holds the columns of every property mapped to a table of its
+		// hierarchy, including generic specializations, whose value keeps the superclass table
 		return property.getValue().getTable() == table
 				|| persistentClass instanceof UnionSubclass && persistentClass.getTable() == table
-						&& property.getValue().getTable() == property.getPersistentClass().getTable();
-	}
-
-	private static void relaxExcludedColumnNullability(
-			PersistentClass owner,
-			Table sourceTable,
-			Table auditTable) {
-		relaxExcludedColumns( owner, sourceTable, auditTable );
-		if ( !( owner instanceof UnionSubclass ) ) {
-			for ( var subclass : owner.getSubclasses() ) {
-				if ( !( subclass instanceof UnionSubclass ) ) {
-					relaxExcludedColumns( subclass, sourceTable, auditTable );
-				}
-			}
-		}
-	}
-
-	private static void relaxExcludedColumns(
-			PersistentClass persistentClass,
-			Table sourceTable,
-			Table auditTable) {
-		for ( var property : persistentClass.getPropertyClosure() ) {
-			if ( mapsTable( persistentClass, property, sourceTable )
-					&& isEffectivelyExcluded( persistentClass, property ) ) {
-				for ( var column : property.getColumns() ) {
-					final var auditColumn = auditTable.getColumn( column );
-					if ( auditColumn != null && !sourceTable.getPrimaryKey().containsColumn( column ) ) {
-						auditColumn.setNullable( true );
-					}
-				}
-			}
-		}
+						&& persistentClass.getTableClosure().contains( property.getValue().getTable() );
 	}
 
 	// --- Runtime helpers ---
 
 	/**
-	 * Whether every concrete type in the loaded hierarchy excludes this
-	 * fetchable from auditing. Returns {@code false} immediately when there
-	 * is no temporal identifier (the common case for non-audit queries).
+	 * Whether the given fetchable is excluded from auditing and the
+	 * current context is loading from an audit table. Returns
+	 * {@code false} immediately when there is no temporal identifier
+	 * (the common case for non-audit queries).
 	 */
-	public static boolean isFetchableAuditExcluded(
-			Fetchable fetchable,
-			FetchParent fetchParent,
-			LoadQueryInfluencers influencers) {
-		final var attribute = fetchable.asAttributeMapping();
-		if ( attribute == null || influencers.getTemporalIdentifier() == null ) {
+	public static boolean isFetchableAuditExcluded(Fetchable fetchable, LoadQueryInfluencers influencers) {
+		if ( influencers.getTemporalIdentifier() == null ) {
 			return false;
 		}
-		final var type = getAuditFetchType( attribute, fetchParent );
-		return type != null
-				&& type.getEntityPersister().getAuditMapping() != null
-				&& type.getEntityPersister()
-						.isPropertyPolymorphicallyAuditedExcluded( attribute.getStateArrayPosition() );
-	}
-
-	public static boolean isFetchableAuditPartiallyExcluded(
-			Fetchable fetchable,
-			FetchParent fetchParent,
-			LoadQueryInfluencers influencers) {
-		final var attribute = fetchable.asAttributeMapping();
-		if ( attribute == null || influencers.getTemporalIdentifier() == null ) {
-			return false;
-		}
-		final var type = getAuditFetchType( attribute, fetchParent );
-		if ( type == null || type.getEntityPersister().getAuditMapping() == null ) {
-			return false;
-		}
-		final int position = attribute.getStateArrayPosition();
-		if ( type.getEntityPersister().isPropertyPolymorphicallyAuditedExcluded( position ) ) {
-			return false;
-		}
-		if ( !type.isAbstract() && type.getEntityPersister().isPropertyAuditedExcluded( position ) ) {
-			return true;
-		}
-		for ( var subtype : type.getSubMappingTypes() ) {
-			if ( !subtype.isAbstract() && subtype.getEntityPersister().isPropertyAuditedExcluded( position ) ) {
-				return true;
-			}
+		final var attr = fetchable.asAttributeMapping();
+		if ( attr != null
+				&& attr.getStateArrayPosition() >= 0
+				&& attr.getDeclaringType() instanceof EntityMappingType entityMappingType ) {
+			final var persister = entityMappingType.getEntityPersister();
+			return persister.getAuditMapping() != null
+					&& persister.isPropertyAuditedExcluded( attr.getStateArrayPosition() );
 		}
 		return false;
-	}
-
-	private static @Nullable EntityMappingType getAuditFetchType(AttributeMapping attribute, FetchParent fetchParent) {
-		if ( attribute.getStateArrayPosition() >= 0
-				&& attribute.getDeclaringType() instanceof EntityMappingType declaringType ) {
-			// Use the loaded type when it inherits the attribute, so that only its subtypes are considered
-			if ( fetchParent instanceof EntityResultGraphNode entityResult ) {
-				final var loadedType = entityResult.getReferencedMappingContainer();
-				if ( loadedType.isTypeOrSuperType( declaringType ) ) {
-					return loadedType;
-				}
-			}
-			return declaringType;
-		}
-		return null;
 	}
 
 	public static AuditStrategy determineAuditStrategy(Map<String, Object> configurationSettings) {

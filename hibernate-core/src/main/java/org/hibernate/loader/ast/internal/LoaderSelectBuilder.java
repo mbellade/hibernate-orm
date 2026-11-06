@@ -78,7 +78,6 @@ import org.hibernate.sql.results.internal.StandardEntityGraphTraversalStateImpl;
 
 import static java.util.Collections.singletonList;
 import static org.hibernate.boot.model.internal.AuditHelper.isFetchableAuditExcluded;
-import static org.hibernate.boot.model.internal.AuditHelper.isFetchableAuditPartiallyExcluded;
 import static org.hibernate.query.results.internal.ResultsHelper.attributeName;
 
 /**
@@ -895,8 +894,7 @@ public class LoaderSelectBuilder {
 			@Nonnull LoaderSqlAstCreationState creationState,
 			@Nonnull ImmutableFetchList.Builder fetches) {
 		return (fetchable, isKeyFetchable, isABag) -> {
-			if ( !fetchable.isSelectable()
-					|| isFetchableAuditExcluded( fetchable, fetchParent, loadQueryInfluencers ) ) {
+			if ( !fetchable.isSelectable() || isFetchableAuditExcluded( fetchable, loadQueryInfluencers ) ) {
 				return;
 			}
 
@@ -1002,12 +1000,6 @@ public class LoaderSelectBuilder {
 							joined = false;
 						}
 					}
-				}
-
-				if ( joined && fetchable instanceof ToOneAttributeMapping
-						&& isFetchableAuditPartiallyExcluded( fetchable, fetchParent, loadQueryInfluencers ) ) {
-					// A mandatory current-state association may have a null audit FK for some concrete types.
-					joined = false;
 				}
 
 				if ( joined && isFetchablePluralAttributeMapping ) {

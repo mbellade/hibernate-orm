@@ -22,11 +22,9 @@ import org.hibernate.engine.spi.EntityKey;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.hibernate.engine.spi.SharedSessionContractImplementor;
 import org.hibernate.metamodel.mapping.AuditMapping;
-import org.hibernate.metamodel.mapping.AttributeMapping;
-import org.hibernate.metamodel.mapping.EmbeddableMappingType;
 import org.hibernate.persister.collection.CollectionPersister;
-import org.hibernate.persister.entity.EntityPersister;
 import org.hibernate.persister.entity.mutation.EntityAuditSupport;
+import org.hibernate.sql.results.internal.ResultsHelper;
 import org.hibernate.sql.spi.mutation.MutationOperation;
 import org.hibernate.sql.model.MutationOperationGroup;
 import org.hibernate.type.Type;
@@ -107,8 +105,8 @@ public class CollectionAuditSupport {
 
 	private final CollectionMutationTarget mutationTarget;
 	private final AuditCollectionHelper auditHelper;
-	// Session-independent support, scoped to this collection's concrete owners.
-	private final ConcurrentHashMap<EntityPersister, EntityAuditSupport> ownerAuditSupports = new ConcurrentHashMap<>();
+	private final @Nullable EntityAuditSupport ownerMutationSupport;
+	private final Map<String, EntityAuditSupport> subclassOwnerMutationSupports = new ConcurrentHashMap<>();
 
 	public CollectionAuditSupport(
 			@Nonnull CollectionMutationTarget mutationTarget,
@@ -126,6 +124,10 @@ public class CollectionAuditSupport {
 				indexIncrementer,
 				auditMapping
 		);
+		final var ownerPersister = mutationTarget.getTargetPart().getCollectionDescriptor().getOwnerEntityPersister();
+		this.ownerMutationSupport = ownerPersister.getAuditMapping() == null
+				? null
+				: new EntityAuditSupport( ownerPersister, sessionFactory );
 	}
 
 	@Nonnull
@@ -133,58 +135,53 @@ public class CollectionAuditSupport {
 		return mutationTarget;
 	}
 
-	public static EntityPersister resolveOwnerPersister(
-			CollectionPersister collectionDescriptor,
-			@Nullable Object owner,
-			SharedSessionContractImplementor session) {
-		final var declaringPersister = collectionDescriptor.getOwnerEntityPersister();
-		if ( owner == null ) {
-			// Ownerless collection work can only use the mapping's declared owner.
-			return declaringPersister;
-		}
-		final var entry = session.getPersistenceContextInternal().getEntry( owner );
-		return entry != null ? entry.getPersister() : session.getEntityPersister( declaringPersister.getEntityName(), owner );
+	public @Nullable EntityAuditSupport getOwnerMutationSupport() {
+		return ownerMutationSupport;
 	}
 
-	public static boolean isCollectionAudited(
-			CollectionPersister collectionDescriptor,
-			EntityPersister ownerPersister) {
-		// Component collections follow their top-level owning property's audit mask.
-		AttributeMapping owningAttribute = collectionDescriptor.getAttributeMapping();
-		while ( owningAttribute.getDeclaringType() instanceof EmbeddableMappingType embeddable ) {
-			owningAttribute = embeddable.getEmbeddedValueMapping().asAttributeMapping();
-		}
-		final var attribute = ownerPersister.findAttributeMapping( owningAttribute.getAttributeName() );
-		return !ownerPersister.isPropertyAuditedExcluded( attribute.getStateArrayPosition() );
-	}
-
-	public static EntityKey resolveOwnerEntityKey(
-			Object owner,
-			EntityPersister ownerPersister,
-			SharedSessionContractImplementor session) {
-		final var entry = session.getPersistenceContextInternal().getEntry( owner );
-		// A property-ref collection key is not necessarily the owner's identifier.
-		return entry != null ? entry.getEntityKey()
-				: session.generateEntityKey( ownerPersister.getIdentifier( owner, session ), ownerPersister );
-	}
-
-	/// Resolve the concrete owner's MOD audit change implied by a collection mutation.
+	/// Resolve the owning entity change implied by an audited collection change.
+	///
+	/// Collection audit rows record the row-level ADD/DEL changes, while the
+	/// owning entity receives a MOD audit row so revision queries can see that the
+	/// association changed. The owner is resolved through
+	/// {@link ResultsHelper#getCollectionOwner}. If the owner cannot be resolved,
+	/// no owner MOD change is produced; the collection row audit work can still
+	/// be recorded.
 	@Nullable
 	public OwnerAuditChange resolveOwnerAuditChange(
-			@Nullable Object owner,
-			EntityPersister ownerPersister,
-			SharedSessionContractImplementor session) {
-		if ( owner == null || ownerPersister.getAuditMapping() == null ) {
+			@Nonnull Object ownerId,
+			@Nonnull PersistentCollection<?> collection,
+			@Nonnull SharedSessionContractImplementor session) {
+		final var collectionDescriptor = mutationTarget.getTargetPart().getCollectionDescriptor();
+		if ( ownerMutationSupport == null ) {
 			return null;
 		}
+		final var owner = ResultsHelper.getCollectionOwner(
+				session.getPersistenceContextInternal(),
+				collectionDescriptor,
+				collection,
+				ownerId,
+				session
+		);
+		if ( owner == null ) {
+			return null;
+		}
+
+		// The owner may be an instance of a subclass of the entity declaring the collection
+		final var ownerPersister = collectionDescriptor.getOwnerEntityPersister()
+				.getSubclassEntityPersister( owner, session.getFactory() );
+		final var ownerSupport = ownerPersister == ownerMutationSupport.getEntityPersister()
+				? ownerMutationSupport
+				: subclassOwnerMutationSupports.computeIfAbsent(
+						ownerPersister.getEntityName(),
+						name -> new EntityAuditSupport( ownerPersister, session.getFactory() )
+				);
 		return new OwnerAuditChange(
-				resolveOwnerEntityKey( owner, ownerPersister, session ),
+				// A property-ref collection key is not the owner's identifier
+				session.generateEntityKey( ownerPersister.getIdentifier( owner, session ), ownerPersister ),
 				owner,
 				ownerPersister.getValues( owner ),
-				ownerAuditSupports.computeIfAbsent(
-						ownerPersister,
-						persister -> new EntityAuditSupport( persister, persister.getFactory() )
-				)
+				ownerSupport
 		);
 	}
 

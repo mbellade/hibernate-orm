@@ -1680,10 +1680,10 @@ public abstract class CollectionBinder {
 		if ( !collection.isInverse() ) {
 			if ( isCollectionAudited() ) {
 				AuditHelper.bindOneToManyAuditTable(
-						extract( Audited.Table.class, property, buildingContext ),
 						collection,
 						oneToMany.getReferencedEntityName(),
-						collectionAuditTable(),
+						collectionAuditOverride(),
+						property.getDirectAnnotationUsage( Audited.CollectionTable.class ),
 						buildingContext
 				);
 			}
@@ -2543,55 +2543,40 @@ public abstract class CollectionBinder {
 		}
 		if ( isCollectionAudited() ) {
 			AuditHelper.bindAuditTable(
-					extract( Audited.Table.class, property, buildingContext ),
 					collection,
-					collectionAuditTable(),
+					collectionAuditOverride(),
+					property.getDirectAnnotationUsage( Audited.CollectionTable.class ),
 					buildingContext
 			);
 		}
 	}
 
 	private boolean isCollectionAudited() {
-		// Collection second passes run after the entire entity hierarchy has been registered.
+		// Runs in a second pass, after the owner hierarchy is bound and its audit overrides are applied
 		final var owner = collection.getOwner();
-		if ( extract( Audited.class, property, buildingContext ) == null
-				&& owner.getRootClass().getStateManagementType() != AuditStateManagement.class ) {
-			return false;
-		}
-		if ( propertyHolder instanceof ComponentPropertyHolder componentHolder ) {
-			if ( property.hasDirectAnnotationUsage( Audited.Excluded.class ) ) {
+		if ( owner.getRootClass().getStateManagementType() != AuditStateManagement.class ) {
+			// An override of a collection of an unaudited hierarchy takes precedence over its @Audited
+			final var override = propertyHolder.isComponent()
+					? null
+					: AuditHelper.findAuditOverride( propertyName, owner, buildingContext );
+			if ( override != null ) {
+				return override.isAudited();
+			}
+			else if ( extract( Audited.class, property, buildingContext ) == null ) {
 				return false;
 			}
-			final var component = componentHolder.getComponent();
-			if ( isComponentAudited( owner, component ) ) {
-				return true;
-			}
-			for ( var subclass : owner.getSubclasses() ) {
-				if ( isComponentAudited( subclass, component ) ) {
-					return true;
-				}
-			}
-			return false;
 		}
-		final var mapping = owner.getProperty( propertyName );
-		if ( !AuditHelper.isEffectivelyExcluded( owner, mapping ) ) {
-			return true;
+		if ( propertyHolder instanceof ComponentPropertyHolder componentHolder ) {
+			return !property.hasDirectAnnotationUsage( Audited.Excluded.class )
+					&& isComponentAudited( owner, componentHolder.getComponent() );
 		}
-		for ( var subclass : owner.getSubclasses() ) {
-			if ( !AuditHelper.isEffectivelyExcluded( subclass, mapping ) ) {
-				return true;
-			}
-		}
-		return false;
+		return !owner.getProperty( propertyName ).isAuditedExcluded();
 	}
 
 	private static boolean isComponentAudited(PersistentClass owner, Component target) {
-		if ( Boolean.TRUE.equals( owner.isAbstract() ) ) {
-			return false;
-		}
 		for ( var property : owner.getPropertyClosure() ) {
 			if ( property.getValue() instanceof Component component
-					&& !AuditHelper.isEffectivelyExcluded( owner, property )
+					&& !property.isAuditedExcluded()
 					&& containsAuditedComponent( component, target ) ) {
 				return true;
 			}
@@ -2613,30 +2598,16 @@ public abstract class CollectionBinder {
 		return false;
 	}
 
-	private Audited.CollectionTable collectionAuditTable() {
+	private Audited.CollectionTable collectionAuditOverride() {
 		if ( propertyHolder.isComponent() ) {
-			return property.getDirectAnnotationUsage( Audited.CollectionTable.class );
+			return null;
 		}
-		final var modelsContext = buildingContext.getBootstrapContext().getModelsContext();
-		final var ownerClass = collection.getOwner().getClassName();
-		final var ownerDetails =
-				ownerClass == null ? null : modelsContext.getClassDetailsRegistry().findClassDetails( ownerClass );
-		final var override = ownerDetails == null
-				? null
-				: AuditHelper.findAuditOverride( propertyName, ownerDetails, modelsContext );
-		if ( override != null && override.isAudited() ) {
-			final var table = override.collectionTable();
-			if ( !isBlank( table.name() ) || !isBlank( table.schema() ) || !isBlank( table.catalog() ) ) {
-				return table;
-			}
-		}
-		return property.getDirectAnnotationUsage( Audited.CollectionTable.class );
+		final var override = AuditHelper.findAuditOverride( propertyName, collection.getOwner(), buildingContext );
+		return override != null && override.isAudited() ? override.collectionTable() : null;
 	}
 
 	private static <T extends Annotation> T extract(
-			Class<T> annotationClass,
-			MemberDetails property,
-			MetadataBuildingContext context) {
+			Class<T> annotationClass, MemberDetails property, MetadataBuildingContext context) {
 		final var fromProperty = property.getDirectAnnotationUsage( annotationClass );
 		if ( fromProperty != null ) {
 			return fromProperty;

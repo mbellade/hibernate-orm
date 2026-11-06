@@ -47,13 +47,4 @@ public interface EntityResultGraphNode extends DomainResultGraphNode, FetchParen
 		final String entityName = getEntityValuedModelPart().getEntityMappingType().getEntityName();
 		return GraphHelper.appliesTo( graphImplementor, metamodel.entity( entityName ) );
 	}
-
-	/**
-	 * Whether this graph reads entity state from audit tables instead of the current-state
-	 * tables. Audit tables omit the columns of audit-excluded attributes, so initializers
-	 * built from this graph must not read those attributes.
-	 */
-	default boolean isAuditRead() {
-		return false;
-	}
 }
