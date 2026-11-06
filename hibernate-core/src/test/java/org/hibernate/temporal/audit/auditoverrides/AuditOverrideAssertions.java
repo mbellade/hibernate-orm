@@ -28,4 +28,18 @@ final class AuditOverrideAssertions {
 	static void assertNoColumn(Table table, String name) {
 		assertThat( table.getColumn( new Column( name ) ) ).as( table.getName() + "." + name ).isNull();
 	}
+
+	static void assertNullableColumn(Table table, String name) {
+		assertNullability( table, name, true );
+	}
+
+	static void assertNonNullableColumn(Table table, String name) {
+		assertNullability( table, name, false );
+	}
+
+	private static void assertNullability(Table table, String name, boolean nullable) {
+		final var column = table.getColumn( new Column( name ) );
+		assertThat( column ).as( table.getName() + "." + name ).isNotNull();
+		assertThat( column.isNullable() ).as( table.getName() + "." + name + " nullable" ).isEqualTo( nullable );
+	}
 }

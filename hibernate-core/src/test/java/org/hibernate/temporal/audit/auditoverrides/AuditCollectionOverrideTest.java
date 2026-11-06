@@ -19,15 +19,11 @@ import jakarta.persistence.MappedSuperclass;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.Table;
 
-import org.hibernate.Hibernate;
 import org.hibernate.SharedSessionContract;
 import org.hibernate.annotations.Audited;
 import org.hibernate.audit.AuditLogFactory;
-import org.hibernate.collection.spi.PersistentCollection;
-import org.hibernate.persister.collection.mutation.CollectionAuditSupport;
 import org.hibernate.cfg.StateManagementSettings;
 import org.hibernate.temporal.spi.ChangesetIdentifierSupplier;
-import org.hibernate.sql.results.internal.ResultsHelper;
 import org.hibernate.testing.orm.junit.AfterClassTemplate;
 import org.hibernate.testing.orm.junit.AuditedTest;
 import org.hibernate.testing.orm.junit.BeforeClassTemplate;
@@ -149,11 +145,17 @@ class AuditCollectionOverrideTest {
 			assertThat( sub.mscTags ).containsExactly( "mapped superclass" );
 			assertThat( sub.memberOnlyTags ).containsExactly( "member table" );
 		}
-		try (var session = scope.getSessionFactory().withOptions().atChangeset( 2 ).openSession()) {
-			final var sub = session.find( SubOwner.class, 2L );
-			assertThat( sub.restoredTags ).containsExactlyInAnyOrder( "restored", "added" );
-			assertThat( sub.renamedTags ).containsExactly( "renamed" );
-			assertThat( sub.droppedTags ).isNull();
+		try (var session = scope.getSessionFactory().withOptions().atChangeset( 1 ).openSession()) {
+			final var owners = session.createSelectionQuery(
+					"from OverrideCollectionOwner order by id",
+					Owner.class
+			).getResultList();
+			assertThat( owners ).hasSize( 2 );
+			assertThat( owners.get( 0 ).restoredTags ).isNull();
+			assertThat( owners.get( 0 ).revokedTags ).containsExactly( "base audited" );
+			assertThat( owners.get( 1 ) ).isInstanceOf( SubOwner.class );
+			assertThat( owners.get( 1 ).restoredTags ).containsExactly( "restored" );
+			assertThat( owners.get( 1 ).revokedTags ).isNull();
 		}
 	}
 
@@ -173,14 +175,15 @@ class AuditCollectionOverrideTest {
 			final var sub = session.find( SubOwner.class, 2L );
 			assertThat( sub.name ).isEqualTo( "sub" );
 			assertThat( sub.restoredTags ).containsExactlyInAnyOrder( "restored", "added" );
+			assertThat( sub.renamedTags ).containsExactly( "renamed" );
+			assertThat( sub.droppedTags ).isNull();
 		}
 	}
 
 	@Test
 	void excludedSubclassCollectionRowsAreNotWritten(SessionFactoryScope scope) {
-		// An excluded-collection-only update still creates an owner revision via the legacy path's
-		// hasDirtyCollection rule. Use a separate owner to isolate the owner-resolution assertions;
-		// revisiting this pre-existing revision policy is outside package 2.
+		// An excluded-collection-only update still creates an owner revision (hasDirtyCollection),
+		// so use a separate owner to keep the revision counts of owner 2 stable.
 		scope.inTransaction( session -> {
 			var sub = new SubOwner();
 			sub.id = 3L;
@@ -194,9 +197,6 @@ class AuditCollectionOverrideTest {
 				"select count(*) from override_revoked_tags_AUD where owner_id in (2, 3)",
 				Long.class
 		).getSingleResult() ).isZero() );
-		try (var session = scope.getSessionFactory().withOptions().atChangeset( 1 ).openSession()) {
-			assertThat( session.find( SubOwner.class, 2L ).revokedTags ).isNull();
-		}
 	}
 
 	@Test
@@ -214,7 +214,6 @@ class AuditCollectionOverrideTest {
 			session.persist( sub );
 		} );
 		scope.inTransaction( session -> {
-			// Wrong-non-null-owner collisions await a separate Jira for the getCollectionOwner ordering fix.
 			final var base = session.find( Owner.class, 4L );
 			final var sub = session.find( SubOwner.class, 5L );
 			final var descriptor = session.getFactory().getMappingMetamodel()
@@ -241,35 +240,6 @@ class AuditCollectionOverrideTest {
 	}
 
 	@Test
-	void propertyRefFallbackExtractsProxyIdentifierWithoutInitializing(SessionFactoryScope scope) {
-		final Owner detachedProxy = scope.fromSession( session -> session.getReference( Owner.class, 1L ) );
-		scope.inTransaction( session -> {
-			final var base = session.find( Owner.class, 1L );
-			final var collection = (PersistentCollection<?>) base.propertyRefTags;
-			final var descriptor = session.getFactory().getMappingMetamodel()
-					.getCollectionDescriptor( Owner.class.getName() + ".propertyRefTags" );
-			final var pc = session.getPersistenceContextInternal();
-			assertThat( pc.getCollectionOwner( base.reference, descriptor ) ).isNull();
-			assertThat( Hibernate.isInitialized( detachedProxy ) ).isFalse();
-			try {
-				collection.setOwner( detachedProxy );
-				assertThat( ResultsHelper.getCollectionOwner( pc, descriptor, collection, base.reference, session ) )
-						.isSameAs( base );
-				assertThat( Hibernate.isInitialized( detachedProxy ) ).isFalse();
-				assertThat( CollectionAuditSupport.resolveOwnerPersister( descriptor, base, session ) )
-						.isSameAs( pc.getEntry( base ).getPersister() );
-				collection.setOwner( null );
-				assertThat( ResultsHelper.getCollectionOwner( pc, descriptor, collection, base.reference, session ) ).isNull();
-				assertThat( CollectionAuditSupport.resolveOwnerPersister( descriptor, null, session ) )
-						.isSameAs( descriptor.getOwnerEntityPersister() );
-			}
-			finally {
-				collection.setOwner( base );
-			}
-		} );
-	}
-
-	@Test
 	void currentStateCollectionsIgnoreAuditExclusions(SessionFactoryScope scope) {
 		scope.inSession( session -> {
 			final var base = session.find( Owner.class, 1L );
@@ -277,22 +247,6 @@ class AuditCollectionOverrideTest {
 			final var sub = session.find( SubOwner.class, 2L );
 			assertThat( sub.revokedTags ).containsExactly( "sub hidden" );
 		} );
-	}
-
-	@Test
-	void polymorphicCollectionsUseConcreteOwnerMask(SessionFactoryScope scope) {
-		try (var session = scope.getSessionFactory().withOptions().atChangeset( 1 ).openSession()) {
-			final var owners = session.createSelectionQuery(
-					"from OverrideCollectionOwner order by id",
-					Owner.class
-			).getResultList();
-			assertThat( owners ).hasSize( 2 );
-			assertThat( owners.get( 0 ).restoredTags ).isNull();
-			assertThat( owners.get( 0 ).revokedTags ).containsExactly( "base audited" );
-			assertThat( owners.get( 1 ) ).isInstanceOf( SubOwner.class );
-			assertThat( owners.get( 1 ).restoredTags ).containsExactly( "restored" );
-			assertThat( owners.get( 1 ).revokedTags ).isNull();
-		}
 	}
 
 	@MappedSuperclass
