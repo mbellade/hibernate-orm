@@ -176,8 +176,8 @@ for the user at commit time).
 - Component-owned collection table existence follows the top-level component property's
   effective exclusion, unioned over concrete owner types. Nested component and collection
   declaration exclusions still apply at every depth; bare entity overrides do not match nested
-  members. Collection table naming remains declaration-based until dotted-path resolution
-  (package 3). Regressions: `AuditExcludedComponentCollectionTest` and
+  members. Collection table naming remains declaration-based (nested overrides are left to
+  the embeddables follow-up). Regressions: `AuditExcludedComponentCollectionTest` and
   `AuditEmbeddedCollectionOverrideTest`.
 - Unknown override names are validated only for audit state management, not temporal history.
 
@@ -264,11 +264,13 @@ which is behavior, not optimization). The settled design, per user decision:
   collection-only revision fixtures no longer co-update scalars. Read masking runs once at
   initializer construction, guarded by the restored `isAuditRead` graph flag; per-row audit
   checks are gone.
-- **Package 3 (embeddable sub-property overrides, dotted paths)**: as specified in the
-  "Embeddables" design section above. ON HOLD (user decision); do not start without asking.
-- **Final step (after all packages)**: consolidation pass on the auditoverrides test suite -
-  merge overlapping fixtures/classes where clean, keeping all pinned behaviors; rerun full
-  suite after. Deliberately last, so consolidation does not churn while packages 2/3 add cases.
+- **Package 3 (embeddables): moved to a follow-up change** (user decision). Nested
+  `@Audited.Excluded` was never supported on main, and supporting it touches shared
+  initializer and write paths unrelated to `@Audited.Override`. A first implementation
+  (nested `@Audited.Excluded`, static per embedding site) lives on the local branch
+  `HHH-20641-embeddables`; see "Embeddables" below.
+- **Final step**: consolidation pass on the auditoverrides test suite - merge overlapping
+  fixtures/classes where clean, keeping all pinned behaviors; rerun full suite after.
 - Docs decision (possibly nothing), spotless, final review, commit (user approval gates each).
 
 ### Semantics decisions (agreed)
@@ -278,18 +280,16 @@ which is behavior, not optimization). The settled design, per user decision:
 - A property audited only by some entities of a hierarchy yields a nullable `_AUD` column for
   entities that exclude it (no validation possible or sensible; documented + tested).
 
-### Embeddables (package 3)
+### Embeddables (follow-up change, not part of HHH-20641)
 
-- Dotted-path names: `@Audited.Override(name = "contactPerson.firstName", isAudited = false)`
-  at the embedding entity (or MSC above it); embeddable-local overrides
-  (`name = "firstName"`) on the `@Embeddable` class resolved at every embedding site.
-- Precedence: nearest site-level path override > member declaration flag > embeddable-local
-  override > default (audited).
-- Requires: recursion in `resolveExcludedColumns` (all overloads), an excluded-attribute-path
-  set on the persister consulted for nested fetchables (`isFetchableAuditExcluded` currently
-  bails for `EmbeddableMappingType`), and column-level masking within component value bindings
-  in `EntityAuditSupport`.
-- Collections nested in embeddables: `name = "address.tags", collectionTable = ...`.
+- Out of scope here: `@Audited.Excluded` on embeddable members stays silently ignored (as on
+  main), and `@Audited.Override` names only top-level properties (dotted names fail validation).
+- Planned shape, following Envers (`@AuditOverride` on the `@Embedded` member, simple member
+  names, one level at a time): the nested exclusion is a property of the embedding
+  declaration, identical for every subtype, so no per-subtype masks are needed. Dotted paths
+  and embeddable-local overrides are dropped.
+- Known pre-existing bug for the follow-up: an excluded collection nested in an embeddable is
+  read from the current-state table on audit reads.
 
 ## Implementation plan (original, superseded by the Status section)
 
