@@ -1,6 +1,5 @@
 package org.hibernate.boot.model.internal;
 
-import jakarta.annotation.Nullable;
 import jakarta.persistence.AttributeOverride;
 import jakarta.persistence.AttributeOverrides;
 import jakarta.persistence.CascadeType;
@@ -115,6 +114,7 @@ import org.hibernate.models.spi.ClassDetails;
 import org.hibernate.models.spi.MemberDetails;
 import org.hibernate.models.spi.ModelsContext;
 import org.hibernate.models.spi.TypeDetails;
+import org.hibernate.persister.state.internal.AuditStateManagement;
 import org.hibernate.resource.beans.spi.ManagedBean;
 import org.hibernate.usertype.CompositeUserType;
 import org.hibernate.usertype.UserCollectionType;
@@ -2554,12 +2554,8 @@ public abstract class CollectionBinder {
 	private boolean isCollectionAudited() {
 		// Collection second passes run after the entire entity hierarchy has been registered.
 		final var owner = collection.getOwner();
-		final var modelsContext = buildingContext.getBootstrapContext().getModelsContext();
-		final var rootDetails = findClassDetails( owner.getRootClass().getClassName(), modelsContext );
 		if ( extract( Audited.class, property, buildingContext ) == null
-				&& ( rootDetails == null
-						|| rootDetails.getAnnotationUsage( Audited.class, modelsContext ) == null
-								&& extractFromPackage( Audited.class, rootDetails, buildingContext ) == null ) ) {
+				&& owner.getRootClass().getStateManagementType() != AuditStateManagement.class ) {
 			return false;
 		}
 		if ( propertyHolder instanceof ComponentPropertyHolder componentHolder ) {
@@ -2587,14 +2583,6 @@ public abstract class CollectionBinder {
 			}
 		}
 		return false;
-	}
-
-	/**
-	 * Dynamic-map entities have no class name, and entities mapped without annotations
-	 * have no class details.
-	 */
-	private static @Nullable ClassDetails findClassDetails(@Nullable String className, ModelsContext modelsContext) {
-		return className == null ? null : modelsContext.getClassDetailsRegistry().findClassDetails( className );
 	}
 
 	private static boolean isComponentAudited(PersistentClass owner, Component target) {
@@ -2630,7 +2618,9 @@ public abstract class CollectionBinder {
 			return property.getDirectAnnotationUsage( Audited.CollectionTable.class );
 		}
 		final var modelsContext = buildingContext.getBootstrapContext().getModelsContext();
-		final var ownerDetails = findClassDetails( collection.getOwner().getClassName(), modelsContext );
+		final var ownerClass = collection.getOwner().getClassName();
+		final var ownerDetails =
+				ownerClass == null ? null : modelsContext.getClassDetailsRegistry().findClassDetails( ownerClass );
 		final var override = ownerDetails == null
 				? null
 				: AuditHelper.findAuditOverride( propertyName, ownerDetails, modelsContext );
@@ -2644,7 +2634,9 @@ public abstract class CollectionBinder {
 	}
 
 	private static <T extends Annotation> T extract(
-			Class<T> annotationClass, MemberDetails property, MetadataBuildingContext context) {
+			Class<T> annotationClass,
+			MemberDetails property,
+			MetadataBuildingContext context) {
 		final var fromProperty = property.getDirectAnnotationUsage( annotationClass );
 		if ( fromProperty != null ) {
 			return fromProperty;

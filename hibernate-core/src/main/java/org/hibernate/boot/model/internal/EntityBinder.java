@@ -126,6 +126,7 @@ import static org.hibernate.boot.model.internal.AnnotatedClassType.MAPPED_SUPERC
 import static org.hibernate.boot.model.internal.AnnotatedDiscriminatorColumn.DEFAULT_DISCRIMINATOR_COLUMN_NAME;
 import static org.hibernate.boot.model.internal.AnnotatedDiscriminatorColumn.buildDiscriminatorColumn;
 import static org.hibernate.boot.model.internal.AnnotatedJoinColumn.buildInheritanceJoinColumn;
+import static org.hibernate.boot.model.internal.AuditHelper.validateAuditOverrides;
 import static org.hibernate.boot.model.internal.BinderHelper.extractFromPackage;
 import static org.hibernate.boot.model.internal.BinderHelper.getMappedSuperclassOrNull;
 import static org.hibernate.boot.model.internal.BinderHelper.getPath;
@@ -262,14 +263,13 @@ public class EntityBinder {
 			bindTemporal( clazzToProcess, rootClass, context );
 			bindAudited( clazzToProcess, rootClass, context );
 		}
+		validateAuditOverrides( persistentClass, clazzToProcess, context );
 		if ( persistentClass instanceof Subclass subclass ) {
 			assert superEntity != null;
 			superEntity.addSubclass( subclass );
 		}
 
 		collector.addEntityBinding( persistentClass );
-		collector.addSecondPass( (OptionalDeterminationSecondPass) ignored ->
-				AuditHelper.validateAuditOverrides( persistentClass, clazzToProcess, context ) );
 		// process secondary tables and complementary definitions (ie o.h.a.Table)
 		collector.addSecondPass( new SecondaryTableFromAnnotationSecondPass( entityBinder, holder ) );
 		collector.addSecondPass( new SecondaryTableSecondPass( entityBinder, holder ) );

@@ -142,6 +142,7 @@ public final class AuditHelper {
 						|| table.getNameIdentifier().isExplicit()
 		);
 		collector.addTableNameBinding( table.getNameIdentifier(), auditLogTable );
+		auditable.setStateManagementType( AuditStateManagement.class );
 
 		// Defer audit column creation to a second pass so the transaction
 		// ID type is resolved after all entities are bound, including any
@@ -326,7 +327,6 @@ public final class AuditHelper {
 		model.setAuxiliaryTable( auditTable );
 		model.addAuxiliaryColumn( CHANGESET_ID, changesetIdColumn );
 		model.addAuxiliaryColumn( MODIFICATION_TYPE, modificationTypeColumn );
-		model.setStateManagementType( AuditStateManagement.class );
 	}
 
 	/**
@@ -383,6 +383,7 @@ public final class AuditHelper {
 				context,
 				false
 		);
+		collection.setStateManagementType( AuditStateManagement.class );
 		collector.addSecondPass( (OptionalDeterminationSecondPass) ignored -> {
 			final var keyColumns = new ArrayList<Column>();
 			// Copy the FK columns (parent key) from the collection's key
@@ -831,6 +832,9 @@ public final class AuditHelper {
 	}
 
 	public static boolean isEffectivelyExcluded(PersistentClass persistentClass, Property property) {
+		if ( persistentClass.getRootClass().getStateManagementType() != AuditStateManagement.class ) {
+			return property.isAuditedExcluded();
+		}
 		final var className = persistentClass.getClassName();
 		if ( className != null ) {
 			final var modelsContext = property.getValue().getBuildingContext().getBootstrapContext().getModelsContext();
@@ -846,8 +850,6 @@ public final class AuditHelper {
 		return property.isAuditedExcluded();
 	}
 
-	// todo marco : really? why do we need to do this on a second pass?? can't we just... validate once, when we read the overrides?
-	//  or validate directly, without second passes?
 	static void validateAuditOverrides(
 			PersistentClass persistentClass,
 			ClassDetails classDetails,
@@ -960,59 +962,55 @@ public final class AuditHelper {
 			Fetchable fetchable,
 			FetchParent fetchParent,
 			LoadQueryInfluencers influencers) {
-		if ( influencers.getTemporalIdentifier() == null ) {
+		final var attribute = fetchable.asAttributeMapping();
+		if ( attribute == null || influencers.getTemporalIdentifier() == null ) {
 			return false;
 		}
-		final var type = getAuditFetchType( fetchable, fetchParent );
-		if ( type != null ) {
-			final var attribute = type.findAttributeMapping( fetchable.asAttributeMapping().getAttributeName() );
-			return attribute.getStateArrayPosition() >= 0
-					&& type.getEntityPersister().getAuditMapping() != null
-					&& type.getEntityPersister()
-							.isPropertyPolymorphicallyAuditedExcluded( attribute.getStateArrayPosition() );
-		}
-		return false;
+		final var type = getAuditFetchType( attribute, fetchParent );
+		return type != null
+				&& type.getEntityPersister().getAuditMapping() != null
+				&& type.getEntityPersister()
+						.isPropertyPolymorphicallyAuditedExcluded( attribute.getStateArrayPosition() );
 	}
 
 	public static boolean isFetchableAuditPartiallyExcluded(
 			Fetchable fetchable,
 			FetchParent fetchParent,
 			LoadQueryInfluencers influencers) {
-		if ( influencers.getTemporalIdentifier() == null ) {
+		final var attribute = fetchable.asAttributeMapping();
+		if ( attribute == null || influencers.getTemporalIdentifier() == null ) {
 			return false;
 		}
-		final var type = getAuditFetchType( fetchable, fetchParent );
+		final var type = getAuditFetchType( attribute, fetchParent );
 		if ( type == null || type.getEntityPersister().getAuditMapping() == null ) {
 			return false;
 		}
-		final var attribute = type.findAttributeMapping( fetchable.asAttributeMapping().getAttributeName() );
 		final int position = attribute.getStateArrayPosition();
-		if ( position < 0 || type.getEntityPersister().isPropertyPolymorphicallyAuditedExcluded( position ) ) {
+		if ( type.getEntityPersister().isPropertyPolymorphicallyAuditedExcluded( position ) ) {
 			return false;
 		}
 		if ( !type.isAbstract() && type.getEntityPersister().isPropertyAuditedExcluded( position ) ) {
 			return true;
 		}
 		for ( var subtype : type.getSubMappingTypes() ) {
-			if ( !subtype.isAbstract() ) {
-				final var concreteAttribute = subtype.findAttributeMapping( attribute.getAttributeName() );
-				if ( subtype.getEntityPersister()
-						.isPropertyAuditedExcluded( concreteAttribute.getStateArrayPosition() ) ) {
-					return true;
-				}
+			if ( !subtype.isAbstract() && subtype.getEntityPersister().isPropertyAuditedExcluded( position ) ) {
+				return true;
 			}
 		}
 		return false;
 	}
 
-	private static @Nullable EntityMappingType getAuditFetchType(Fetchable fetchable, FetchParent fetchParent) {
-		final AttributeMapping attribute = fetchable.asAttributeMapping();
-		if ( attribute != null && attribute.getStateArrayPosition() >= 0
+	private static @Nullable EntityMappingType getAuditFetchType(AttributeMapping attribute, FetchParent fetchParent) {
+		if ( attribute.getStateArrayPosition() >= 0
 				&& attribute.getDeclaringType() instanceof EntityMappingType declaringType ) {
-			final var loadedType = fetchParent instanceof EntityResultGraphNode entityResult
-					? entityResult.getReferencedMappingContainer()
-					: declaringType;
-			return loadedType.findAttributeMapping( attribute.getAttributeName() ) != null ? loadedType : declaringType;
+			// Use the loaded type when it inherits the attribute, so that only its subtypes are considered
+			if ( fetchParent instanceof EntityResultGraphNode entityResult ) {
+				final var loadedType = entityResult.getReferencedMappingContainer();
+				if ( loadedType.isTypeOrSuperType( declaringType ) ) {
+					return loadedType;
+				}
+			}
+			return declaringType;
 		}
 		return null;
 	}

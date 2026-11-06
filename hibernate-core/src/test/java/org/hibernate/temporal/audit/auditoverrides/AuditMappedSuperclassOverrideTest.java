@@ -1,5 +1,10 @@
 package org.hibernate.temporal.audit.auditoverrides;
 
+import java.util.HashSet;
+import java.util.Set;
+
+import jakarta.persistence.CollectionTable;
+import jakarta.persistence.ElementCollection;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.MappedSuperclass;
@@ -33,7 +38,8 @@ import static org.hibernate.temporal.audit.auditoverrides.AuditOverrideAssertion
 		AuditMappedSuperclassOverrideTest.DefaultEntity.class,
 		AuditMappedSuperclassOverrideTest.IntermediateEntity.class,
 		AuditMappedSuperclassOverrideTest.NearestEntity.class,
-		AuditMappedSuperclassOverrideTest.EntityOverride.class
+		AuditMappedSuperclassOverrideTest.EntityOverride.class,
+		AuditMappedSuperclassOverrideTest.InheritedAuditEntity.class
 })
 @SessionFactory
 @ServiceRegistry(settings = @Setting(
@@ -76,10 +82,15 @@ class AuditMappedSuperclassOverrideTest {
 			entityOverride.secret = "entity override";
 			entityOverride.visible = "excluded";
 			session.persist( entityOverride );
+			var inherited = new InheritedAuditEntity();
+			inherited.id = 5L;
+			inherited.tags.add( "first" );
+			session.persist( inherited );
 		} );
 		scope.inTransaction( session -> {
 			session.find( IntermediateEntity.class, 2L ).secret = "updated secret";
 			session.find( NearestEntity.class, 3L ).visible = "updated visible";
+			session.find( InheritedAuditEntity.class, 5L ).tags.add( "second" );
 		} );
 	}
 
@@ -98,6 +109,18 @@ class AuditMappedSuperclassOverrideTest {
 				.getEntityBinding( IntermediateEntity.class.getName() ).getProperty( "secret" );
 		assertThat( property.isAuditedExcluded() ).isTrue();
 		assertThat( property.isOptimisticLocked() ).isFalse();
+	}
+
+	@Test
+	void collectionOfEntityAuditedThroughMappedSuperclass(DomainModelScope scope, SessionFactoryScope sfScope) {
+		assertThat( scope.getDomainModel()
+				.getCollectionBinding( InheritedAuditEntity.class.getName() + ".tags" )
+				.getAuxiliaryTable() ).isNotNull();
+		try (var auditLog = AuditLogFactory.create( sfScope.getSessionFactory() )) {
+			assertThat( auditLog.find( InheritedAuditEntity.class, 5L, 1 ).tags ).containsExactly( "first" );
+			assertThat( auditLog.find( InheritedAuditEntity.class, 5L, 2 ).tags )
+					.containsExactlyInAnyOrder( "first", "second" );
+		}
 	}
 
 	@Test
@@ -136,6 +159,13 @@ class AuditMappedSuperclassOverrideTest {
 	}
 
 	@MappedSuperclass
+	@Audited
+	static class AuditedBase {
+		@Id
+		long id;
+	}
+
+	@MappedSuperclass
 	@Audited.Override(name = "secret")
 	@Audited.Override(name = "visible", isAudited = false)
 	static class Intermediate extends Base {
@@ -167,5 +197,13 @@ class AuditMappedSuperclassOverrideTest {
 	@Audited.Override(name = "secret")
 	@Audited.Override(name = "visible", isAudited = false)
 	static class EntityOverride extends Base {
+	}
+
+	@Entity(name = "MscInheritedAudit")
+	@Table(name = "msc_inherited")
+	static class InheritedAuditEntity extends AuditedBase {
+		@ElementCollection
+		@CollectionTable(name = "msc_inherited_tags")
+		Set<String> tags = new HashSet<>();
 	}
 }
