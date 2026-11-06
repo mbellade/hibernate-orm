@@ -102,7 +102,8 @@ public final class AuditHelper {
 		final String csIdColumnName;
 		final String modTypeColumnName;
 		if ( auditTable != null ) {
-			explicitAuditTableName = auditTable.name();
+			// The entity's audit table name never applies to its collections
+			explicitAuditTableName = auditable instanceof Collection ? "" : auditTable.name();
 			auditSchema = auditTable.schema();
 			auditCatalog = auditTable.catalog();
 			csIdColumnName = auditTable.changesetIdColumn();
