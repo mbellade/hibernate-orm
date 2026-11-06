@@ -4,6 +4,7 @@ import jakarta.annotation.Nonnull;
 import jakarta.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.List;
 import java.util.Map;
 
@@ -33,7 +34,10 @@ import org.hibernate.sql.ast.spi.model.builder.TableInsertBuilderStandard;
 import org.hibernate.sql.ast.spi.model.builder.TableUpdateBuilderStandard;
 import org.hibernate.sql.model.internal.MutationGroupSingle;
 import org.hibernate.sql.model.internal.MutationGroupStandard;
+import org.hibernate.type.ComponentType;
 
+import static org.hibernate.boot.model.internal.AuditHelper.getNestedAuditExcludedJdbcIndexes;
+import static org.hibernate.boot.model.internal.AuditHelper.skippingAuditExcluded;
 import static org.hibernate.persister.entity.mutation.AbstractMutationCoordinator.createAuxiliaryTableMapping;
 import static org.hibernate.persister.entity.mutation.InsertCoordinatorStandard.getPropertiesToInsert;
 
@@ -106,6 +110,10 @@ public class EntityAuditSupport {
 	private final AuditMapping auditMapping;
 	private final EntityTableMapping[] auditTableMappings;
 	private final boolean[] auditedPropertyMask;
+	// Per attribute position, the JDBC indexes of @Audited.Excluded embeddable members, or null
+	private final @Nullable BitSet[] nestedAuditExclusions;
+	// Per attribute position, the dirty-checkable JDBC values (not excluded), or null without nested exclusions
+	private final @Nullable boolean[][] nestedAuditCheckable;
 	private final boolean useServerTransactionTimestamps;
 	@Nullable
 	private final String currentTimestampFunctionName;
@@ -129,6 +137,21 @@ public class EntityAuditSupport {
 		for ( int i = 0; i < auditedPropertyMask.length; i++ ) {
 			auditedPropertyMask[i] = !entityPersister.isPropertyAuditedExcluded( i );
 		}
+		this.nestedAuditExclusions = new BitSet[auditedPropertyMask.length];
+		this.nestedAuditCheckable = new boolean[auditedPropertyMask.length][];
+		final var attributeMappings = entityPersister.getAttributeMappings();
+		for ( int i = 0; i < nestedAuditExclusions.length; i++ ) {
+			final var attributeMapping = attributeMappings.get( i );
+			final var excluded = getNestedAuditExcludedJdbcIndexes( attributeMapping );
+			nestedAuditExclusions[i] = excluded;
+			if ( excluded != null ) {
+				final var checkable = new boolean[attributeMapping.getJdbcTypeCount()];
+				for ( int j = 0; j < checkable.length; j++ ) {
+					checkable[j] = !excluded.get( j );
+				}
+				nestedAuditCheckable[i] = checkable;
+			}
+		}
 		this.useServerTransactionTimestamps =
 				factory.getChangesetCoordinator().useServerTimestamp( factory.getJdbcServices().getDialect() );
 		this.currentTimestampFunctionName = useServerTransactionTimestamps
@@ -145,17 +168,38 @@ public class EntityAuditSupport {
 		return entityPersister;
 	}
 
-	/// The per-property audit inclusion mask.
+	/// Whether an update with the given dirty attributes changes audited state.
 	///
-	/// The returned array is owned by this support instance and must be treated as
-	/// read-only by callers. It is exposed directly because the legacy audit
-	/// coordinator keeps a reference for compatibility with its existing shape.
-	/// Code that needs to alter the mask should first clone it, as
-	/// [#resolvePropertyInclusions(Object, Object[], SharedSessionContractImplementor)]
-	/// does.
-	@Nonnull
-	public boolean[] getAuditedPropertyMask() {
-		return auditedPropertyMask;
+	/// A dirty embedded attribute only counts when one of its audited members changed,
+	/// which requires the old values; without them the update is audited.
+	public boolean shouldAuditUpdate(
+			@Nullable int[] dirtyAttributeIndexes,
+			boolean hasDirtyCollection,
+			@Nullable Object[] oldValues,
+			@Nonnull Object[] values,
+			@Nonnull SharedSessionContractImplementor session) {
+		if ( dirtyAttributeIndexes == null || dirtyAttributeIndexes.length == 0 || hasDirtyCollection ) {
+			return true;
+		}
+		for ( int dirtyIndex : dirtyAttributeIndexes ) {
+			if ( auditedPropertyMask[dirtyIndex] && isAuditedChange( dirtyIndex, oldValues, values, session ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private boolean isAuditedChange(
+			int attributeIndex,
+			@Nullable Object[] oldValues,
+			@Nonnull Object[] values,
+			@Nonnull SharedSessionContractImplementor session) {
+		final var checkable = nestedAuditCheckable[attributeIndex];
+		if ( checkable == null || oldValues == null
+				|| !( entityPersister.getPropertyTypes()[attributeIndex] instanceof ComponentType componentType ) ) {
+			return true;
+		}
+		return componentType.isDirty( oldValues[attributeIndex], values[attributeIndex], checkable, session );
 	}
 
 	@Nullable
@@ -275,10 +319,12 @@ public class EntityAuditSupport {
 			if ( propertyInclusions[attributeIndex] ) {
 				final var attributeMapping = attributeMappings.get( attributeIndex );
 				if ( !( attributeMapping instanceof PluralAttributeMapping ) ) {
+					final var excluded = nestedAuditExclusions[attributeIndex];
 					attributeMapping.decompose(
 							values[attributeIndex], 0, jdbcValueBindings, null,
 							(valueIndex, bindings, noop, jdbcValue, selectableMapping) -> {
-								if ( selectableMapping.isInsertable() && !selectableMapping.isFormula() ) {
+								if ( selectableMapping.isInsertable() && !selectableMapping.isFormula()
+										&& ( excluded == null || !excluded.get( valueIndex ) ) ) {
 									bindings.bindValue(
 											jdbcValue, tableName,
 											selectableMapping.getSelectionExpression(), ParameterUsage.SET
@@ -372,10 +418,12 @@ public class EntityAuditSupport {
 			if ( propertyInclusions[attributeIndex] ) {
 				final var attributeMapping = attributeMappings.get( attributeIndex );
 				if ( !( attributeMapping instanceof PluralAttributeMapping ) ) {
+					final var excluded = nestedAuditExclusions[attributeIndex];
 					attributeMapping.decompose(
 							values[attributeIndex], 0, jdbcValueBindings, null,
 							(valueIndex, bindings, noop, jdbcValue, selectableMapping) -> {
-								if ( selectableMapping.isInsertable() && !selectableMapping.isFormula() ) {
+								if ( selectableMapping.isInsertable() && !selectableMapping.isFormula()
+										&& ( excluded == null || !excluded.get( valueIndex ) ) ) {
 									bindings.bindValue(
 											jdbcValue,
 											selectableMapping.getSelectionExpression(),
@@ -489,18 +537,20 @@ public class EntityAuditSupport {
 			final var sourceMapping = sourceMappings[i];
 			for ( final int attributeIndex : sourceMapping.getAttributeIndexes() ) {
 				final var attributeMapping = attributeMappings.get( attributeIndex );
+				final var excluded = nestedAuditExclusions[attributeIndex];
+				final var insertableConsumer = skippingAuditExcluded( excluded, insertBuilder );
 				if ( propertyInclusions[attributeIndex] ) {
-					attributeMapping.forEachInsertable( insertBuilder );
+					attributeMapping.forEachInsertable( insertableConsumer );
 				}
 				else {
 					final var generator = attributeMapping.getGenerator();
 					if ( generator != null && isValueGenerated( generator ) ) {
 						if ( entity != null && generator.generatedBeforeExecution( entity, session ) ) {
 							propertyInclusions[attributeIndex] = true;
-							attributeMapping.forEachInsertable( insertBuilder );
+							attributeMapping.forEachInsertable( insertableConsumer );
 						}
 						else if ( isValueGenerationInSql( generator ) ) {
-							addSqlGeneratedValue( insertBuilder, attributeMapping, (OnExecutionGenerator) generator );
+							addSqlGeneratedValue( insertBuilder, attributeMapping, excluded, (OnExecutionGenerator) generator );
 						}
 					}
 				}
@@ -651,13 +701,15 @@ public class EntityAuditSupport {
 	private void addSqlGeneratedValue(
 			@Nonnull TableInsertBuilderStandard insertBuilder,
 			@Nonnull AttributeMapping attributeMapping,
+			@Nullable BitSet excluded,
 			@Nonnull OnExecutionGenerator generator) {
 		final boolean writePropertyValue = generator.writePropertyValue();
 		final String[] columnValues = writePropertyValue
 				? null
 				: generator.getReferencedColumnValues( factory.getJdbcServices().getDialect() );
-		attributeMapping.forEachSelectable( (j, mapping) ->
-				insertBuilder.addColumnAssignment( mapping, writePropertyValue ? "?" : columnValues[j] )
-		);
+		attributeMapping.forEachSelectable( skippingAuditExcluded(
+				excluded,
+				(j, mapping) -> insertBuilder.addColumnAssignment( mapping, writePropertyValue ? "?" : columnValues[j] )
+		) );
 	}
 }

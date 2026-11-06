@@ -102,6 +102,18 @@ public @interface Audited {
 	 * entity instance. Unless a subclass {@linkplain Override overrides}
 	 * this exclusion, the audit log table does not contain columns mapped
 	 * by excluded attributes.
+	 * <p>
+	 * The annotation may also be applied to a member of an embeddable class.
+	 * When the embeddable is an embedded attribute of an audited entity, directly
+	 * or nested within other embeddables, the columns mapped by the member are
+	 * omitted from the audit log table, the member reads as {@code null}, or as
+	 * the default value of a primitive type, from the audit log, and a change
+	 * affecting only excluded members does not create a new revision. The
+	 * exclusion is ignored when the embeddable is the element of an
+	 * {@linkplain jakarta.persistence.ElementCollection element collection}.
+	 * Excluding a member of an embeddable used as an identifier, as a natural id,
+	 * or mapped to a single aggregate (JSON, XML or struct) column of an audited
+	 * entity is a mapping error.
 	 */
 	@Documented
 	@Target({FIELD, METHOD})

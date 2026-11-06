@@ -52,8 +52,10 @@ the new `@Audited` core logic. Status: agreed design, pre-implementation.
      existence and naming.
 - Each `@Embedded` site gets a fresh `Component` with freshly bound sub-properties
   (`EmbeddableBinder`), so per-site embeddable resolution is naturally available.
-- `resolveExcludedColumns` does not recurse into components: `@Audited.Excluded` on an embeddable
-  sub-property is currently silently ignored.
+- `resolveExcludedColumns` originally did not recurse into components, so `@Audited.Excluded` on
+  an embeddable sub-property was silently ignored for basic and to-one members (collections
+  nested in embeddables were already honoured by `CollectionBinder.containsAuditedComponent`).
+  Package 3a makes it effective, see "Embeddables (package 3)".
 - Property names are unique within a hierarchy (`PersistentClass:714` duplicate check), so
   name-based override targeting is unambiguous.
 
@@ -176,8 +178,8 @@ for the user at commit time).
 - Component-owned collection table existence follows the top-level component property's
   effective exclusion, unioned over concrete owner types. Nested component and collection
   declaration exclusions still apply at every depth; bare entity overrides do not match nested
-  members. Collection table naming remains declaration-based until dotted-path resolution
-  (package 3). Regressions: `AuditExcludedComponentCollectionTest` and
+  members. Collection table naming remains declaration-based (dotted-path resolution was
+  dropped, see package 3). Regressions: `AuditExcludedComponentCollectionTest` and
   `AuditEmbeddedCollectionOverrideTest`.
 - Unknown override names are validated only for audit state management, not temporal history.
 
@@ -264,8 +266,9 @@ which is behavior, not optimization). The settled design, per user decision:
   collection-only revision fixtures no longer co-update scalars. Read masking runs once at
   initializer construction, guarded by the restored `isAuditRead` graph flag; per-row audit
   checks are gone.
-- **Package 3 (embeddable sub-property overrides, dotted paths)**: as specified in the
-  "Embeddables" design section above. ON HOLD (user decision); do not start without asking.
+- **Package 3a (static nested exclusion)**: implemented, see "Embeddables (package 3)".
+- **Package 3b (`@Audited.Override` on `@Embedded` members)**: as specified in the
+  "Embeddables" section. ON HOLD (user decision); do not start without asking.
 - **Final step (after all packages)**: consolidation pass on the auditoverrides test suite -
   merge overlapping fixtures/classes where clean, keeping all pinned behaviors; rerun full
   suite after. Deliberately last, so consolidation does not churn while packages 2/3 add cases.
@@ -280,16 +283,37 @@ which is behavior, not optimization). The settled design, per user decision:
 
 ### Embeddables (package 3)
 
-- Dotted-path names: `@Audited.Override(name = "contactPerson.firstName", isAudited = false)`
-  at the embedding entity (or MSC above it); embeddable-local overrides
-  (`name = "firstName"`) on the `@Embeddable` class resolved at every embedding site.
-- Precedence: nearest site-level path override > member declaration flag > embeddable-local
-  override > default (audited).
-- Requires: recursion in `resolveExcludedColumns` (all overloads), an excluded-attribute-path
-  set on the persister consulted for nested fetchables (`isFetchableAuditExcluded` currently
-  bails for `EmbeddableMappingType`), and column-level masking within component value bindings
-  in `EntityAuditSupport`.
-- Collections nested in embeddables: `name = "address.tags", collectionTable = ...`.
+Exclusion inside an embeddable is static: one boot `Component` and one
+`EmbeddableMappingTypeImpl` exist per embedded attribute per declaring entity and are shared by
+subtypes, so a nested exclusion is the same for every concrete subtype. No per-subtype logic is
+involved and `EntityInitializerImpl.applyAuditExclusionMasks` is untouched.
+
+- **Package 3a (static nested exclusion)**: `@Audited.Excluded` on a member of an `@Embeddable`
+  used as an embedded attribute of an audited entity (at any nesting depth) has the same
+  semantics as top-level exclusion:
+  - boot: `AuditHelper.collectPropertyColumns` / `relaxExcludedColumns` recurse into
+    non-aggregate components, so excluded nested columns are not copied into `_AUD` tables
+    (root, secondary, subclass tables);
+  - runtime flag: `EmbeddableMappingTypeImpl.isAttributeAuditedExcluded(position)`, set from the
+    boot property; no SPI change;
+  - read: `AuditHelper.isFetchableAuditExcluded` drops the fetch when walking up
+    `getEmbeddedValueMapping()` through `EmbeddedAttributeMapping`s reaches an audited entity
+    (skips ids, collection elements, inverse embeddables); `EmbeddableInitializerImpl` supplies
+    null / primitive defaults for unfetched members, which never make the embeddable non-null;
+    the TPC union subquery skips excluded nested selectables;
+  - write: `EntityAuditSupport` precomputes per attribute the excluded JDBC indexes and filters
+    the insert column list, SQL-generated values and both value-binding paths;
+  - dirty check: `EntityAuditSupport.shouldAuditUpdate` (both queues) ignores a dirty embedded
+    attribute whose audited members are unchanged (`ComponentType.isDirty` with a checkable
+    mask); without old state the update is audited;
+  - rejected at boot (`MappingException`) for audited entities: excluded members inside an
+    identifier, a natural id, or an aggregate (JSON/XML/struct) embeddable;
+  - ignored (documented) inside embeddables used as `@ElementCollection` elements.
+- **Package 3b (`@Audited.Override` on `@Embedded` members)**: Envers-style, the override is
+  declared on the `@Embedded` attribute itself and names a member of that embeddable by its
+  simple name; a deeper level is overridden on the nested `@Embedded` member. Dotted-path names
+  (`contactPerson.firstName`) at the embedding entity and embeddable-local overrides on the
+  `@Embeddable` class are dropped from the plan.
 
 ## Implementation plan (original, superseded by the Status section)
 

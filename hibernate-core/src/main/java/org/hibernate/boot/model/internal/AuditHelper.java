@@ -3,6 +3,7 @@ package org.hibernate.boot.model.internal;
 import java.lang.annotation.Annotation;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -26,6 +27,7 @@ import org.hibernate.mapping.Backref;
 import org.hibernate.mapping.BasicValue;
 import org.hibernate.mapping.Collection;
 import org.hibernate.mapping.Column;
+import org.hibernate.mapping.Component;
 import org.hibernate.mapping.PersistentClass;
 import org.hibernate.mapping.PrimaryKey;
 import org.hibernate.mapping.Property;
@@ -35,7 +37,12 @@ import org.hibernate.mapping.Table;
 import org.hibernate.mapping.TableOwner;
 import org.hibernate.mapping.UnionSubclass;
 import org.hibernate.metamodel.mapping.AttributeMapping;
+import org.hibernate.metamodel.mapping.EmbeddableMappingType;
 import org.hibernate.metamodel.mapping.EntityMappingType;
+import org.hibernate.metamodel.mapping.ManagedMappingType;
+import org.hibernate.metamodel.mapping.SelectableConsumer;
+import org.hibernate.metamodel.mapping.internal.EmbeddableMappingTypeImpl;
+import org.hibernate.metamodel.mapping.internal.EmbeddedAttributeMapping;
 import org.hibernate.models.spi.ClassDetails;
 import org.hibernate.models.spi.MemberDetails;
 import org.hibernate.models.spi.ModelsContext;
@@ -151,6 +158,9 @@ public final class AuditHelper {
 			// Auto-exclude @Version property from audit tables
 			if ( auditable instanceof RootClass rootClass && rootClass.isVersioned() ) {
 				rootClass.getVersion().setAuditedExcluded( true );
+			}
+			if ( auditable instanceof RootClass rootClass ) {
+				validateNestedExclusions( rootClass );
 			}
 			// Resolve exclusions at second-pass time so collection-managed FK columns
 			// (added during collection binding) are detected
@@ -871,6 +881,66 @@ public final class AuditHelper {
 		}
 	}
 
+	/**
+	 * {@code @Audited.Excluded} on an embeddable member is only supported for
+	 * non-aggregate embedded attributes which are neither identifiers nor natural ids.
+	 * Embedded attributes which are themselves excluded from auditing are not checked.
+	 */
+	private static void validateNestedExclusions(RootClass rootClass) {
+		if ( rootClass.getIdentifier() instanceof Component identifier ) {
+			rejectNestedExclusions( identifier, rootClass, "an identifier" );
+		}
+		final var identifierMapper = rootClass.getIdentifierMapper();
+		if ( identifierMapper != null ) {
+			rejectNestedExclusions( identifierMapper, rootClass, "an identifier" );
+		}
+		for ( var property : rootClass.getSubclassPropertyClosure() ) {
+			if ( !isExcludedForAllSubclasses( property ) ) {
+				validateNestedExclusions( property, rootClass );
+			}
+		}
+	}
+
+	private static boolean isExcludedForAllSubclasses(Property property) {
+		for ( var persistentClass : property.getPersistentClass().getSubclassClosure() ) {
+			if ( !isEffectivelyExcluded( persistentClass, property ) ) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	private static void validateNestedExclusions(Property property, RootClass rootClass) {
+		if ( property.getValue() instanceof Component component ) {
+			if ( property.isNaturalIdentifier() ) {
+				rejectNestedExclusions( component, rootClass, "a natural id" );
+			}
+			else if ( component.getAggregateColumn() != null ) {
+				rejectNestedExclusions( component, rootClass, "an aggregate embeddable" );
+			}
+			else {
+				for ( var nested : component.getProperties() ) {
+					if ( !nested.isAuditedExcluded() ) {
+						validateNestedExclusions( nested, rootClass );
+					}
+				}
+			}
+		}
+	}
+
+	private static void rejectNestedExclusions(Component component, RootClass rootClass, String context) {
+		for ( var nested : component.getProperties() ) {
+			if ( nested.isAuditedExcluded() ) {
+				throw new MappingException( "@Audited.Excluded is not supported on member '" + nested.getName()
+						+ "' of embeddable '" + component.getComponentClassName() + "' used as " + context
+						+ " of audited entity '" + rootClass.getEntityName() + "'" );
+			}
+			if ( nested.getValue() instanceof Component nestedComponent ) {
+				rejectNestedExclusions( nestedComponent, rootClass, context );
+			}
+		}
+	}
+
 	private static Set<String> resolveExcludedColumns(PersistentClass owner, Table table) {
 		final Set<String> auditedColumns = new HashSet<>();
 		collectPropertyColumns( owner, table, auditedColumns );
@@ -907,9 +977,32 @@ public final class AuditHelper {
 			if ( mapsTable( persistentClass, property, table )
 					&& !( property instanceof Backref )
 					&& !isEffectivelyExcluded( persistentClass, property ) ) {
-				for ( var column : property.getColumns() ) {
+				collectAuditedColumns( property, auditedColumns );
+			}
+		}
+	}
+
+	/**
+	 * Collect the columns of an audited property, skipping the columns of
+	 * {@code @Audited.Excluded} members nested in a (non-aggregate) embeddable.
+	 */
+	private static void collectAuditedColumns(Property property, Set<String> auditedColumns) {
+		if ( property.getValue() instanceof Component component && component.getAggregateColumn() == null ) {
+			for ( var nested : component.getProperties() ) {
+				if ( !( nested instanceof Backref ) && !nested.isAuditedExcluded() ) {
+					collectAuditedColumns( nested, auditedColumns );
+				}
+			}
+			final var discriminator = component.getDiscriminator();
+			if ( discriminator != null ) {
+				for ( var column : discriminator.getColumns() ) {
 					auditedColumns.add( column.getCanonicalName() );
 				}
+			}
+		}
+		else {
+			for ( var column : property.getColumns() ) {
+				auditedColumns.add( column.getCanonicalName() );
 			}
 		}
 	}
@@ -939,14 +1032,35 @@ public final class AuditHelper {
 			Table sourceTable,
 			Table auditTable) {
 		for ( var property : persistentClass.getPropertyClosure() ) {
-			if ( mapsTable( persistentClass, property, sourceTable )
-					&& isEffectivelyExcluded( persistentClass, property ) ) {
-				for ( var column : property.getColumns() ) {
-					final var auditColumn = auditTable.getColumn( column );
-					if ( auditColumn != null && !sourceTable.getPrimaryKey().containsColumn( column ) ) {
-						auditColumn.setNullable( true );
-					}
+			if ( mapsTable( persistentClass, property, sourceTable ) ) {
+				if ( isEffectivelyExcluded( persistentClass, property ) ) {
+					relaxColumns( property, sourceTable, auditTable );
 				}
+				else {
+					relaxNestedExcludedColumns( property, sourceTable, auditTable );
+				}
+			}
+		}
+	}
+
+	private static void relaxNestedExcludedColumns(Property property, Table sourceTable, Table auditTable) {
+		if ( property.getValue() instanceof Component component && component.getAggregateColumn() == null ) {
+			for ( var nested : component.getProperties() ) {
+				if ( nested.isAuditedExcluded() ) {
+					relaxColumns( nested, sourceTable, auditTable );
+				}
+				else {
+					relaxNestedExcludedColumns( nested, sourceTable, auditTable );
+				}
+			}
+		}
+	}
+
+	private static void relaxColumns(Property property, Table sourceTable, Table auditTable) {
+		for ( var column : property.getColumns() ) {
+			final var auditColumn = auditTable.getColumn( column );
+			if ( auditColumn != null && !sourceTable.getPrimaryKey().containsColumn( column ) ) {
+				auditColumn.setNullable( true );
 			}
 		}
 	}
@@ -965,6 +1079,10 @@ public final class AuditHelper {
 		final var attribute = fetchable.asAttributeMapping();
 		if ( attribute == null || influencers.getTemporalIdentifier() == null ) {
 			return false;
+		}
+		if ( attribute.getDeclaringType() instanceof EmbeddableMappingTypeImpl embeddableType ) {
+			return embeddableType.isAttributeAuditedExcluded( attribute.getStateArrayPosition() )
+					&& isEmbeddedInAuditedEntity( embeddableType );
 		}
 		final var type = getAuditFetchType( attribute, fetchParent );
 		return type != null
@@ -998,6 +1116,77 @@ public final class AuditHelper {
 			}
 		}
 		return false;
+	}
+
+	/**
+	 * Whether the embeddable is an attribute of an audited entity, possibly through other
+	 * embedded attributes. Identifiers, collection elements and inverse embeddables are not.
+	 */
+	private static boolean isEmbeddedInAuditedEntity(EmbeddableMappingType embeddableType) {
+		ManagedMappingType type = embeddableType;
+		while ( type instanceof EmbeddableMappingType embeddable ) {
+			if ( embeddable.getEmbeddedValueMapping() instanceof EmbeddedAttributeMapping attributeMapping ) {
+				type = attributeMapping.getDeclaringType();
+			}
+			else {
+				return false;
+			}
+		}
+		return type instanceof EntityMappingType entityType
+				&& entityType.getEntityPersister().getAuditMapping() != null;
+	}
+
+	/**
+	 * The JDBC value indexes, relative to the attribute, of the columns mapped by
+	 * {@code @Audited.Excluded} members nested in the given embedded attribute of an
+	 * audited entity, or {@code null} if there are none.
+	 */
+	public static @Nullable BitSet getNestedAuditExcludedJdbcIndexes(AttributeMapping attribute) {
+		if ( attribute instanceof EmbeddedAttributeMapping embedded
+				&& embedded.getEmbeddableTypeDescriptor() instanceof EmbeddableMappingTypeImpl embeddableType ) {
+			final var excluded = new BitSet();
+			collectNestedAuditExcludedJdbcIndexes( embeddableType, 0, excluded );
+			return excluded.isEmpty() ? null : excluded;
+		}
+		return null;
+	}
+
+	private static void collectNestedAuditExcludedJdbcIndexes(
+			EmbeddableMappingTypeImpl embeddableType,
+			int offset,
+			BitSet excluded) {
+		int span = offset;
+		final var attributeMappings = embeddableType.getAttributeMappings();
+		for ( int i = 0; i < attributeMappings.size(); i++ ) {
+			final var attributeMapping = attributeMappings.get( i );
+			final int jdbcTypeCount = attributeMapping.getJdbcTypeCount();
+			if ( embeddableType.isAttributeAuditedExcluded( i ) ) {
+				excluded.set( span, span + jdbcTypeCount );
+			}
+			else if ( attributeMapping instanceof EmbeddedAttributeMapping nested
+					&& nested.getEmbeddableTypeDescriptor() instanceof EmbeddableMappingTypeImpl nestedType ) {
+				collectNestedAuditExcludedJdbcIndexes( nestedType, span, excluded );
+			}
+			span += jdbcTypeCount;
+		}
+	}
+
+	/**
+	 * Wrap the consumer so that it skips the selectables at the given excluded
+	 * JDBC indexes, as returned by {@link #getNestedAuditExcludedJdbcIndexes}.
+	 *
+	 * @return the consumer itself if {@code excluded} is {@code null}
+	 */
+	public static SelectableConsumer skippingAuditExcluded(
+			@Nullable BitSet excluded,
+			SelectableConsumer consumer) {
+		return excluded == null
+				? consumer
+				: (index, selectable) -> {
+					if ( !excluded.get( index ) ) {
+						consumer.accept( index, selectable );
+					}
+				};
 	}
 
 	private static @Nullable EntityMappingType getAuditFetchType(AttributeMapping attribute, FetchParent fetchParent) {

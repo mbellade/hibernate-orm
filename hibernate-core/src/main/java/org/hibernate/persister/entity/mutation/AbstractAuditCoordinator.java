@@ -28,17 +28,15 @@ import org.hibernate.sql.model.MutationOperationGroup;
 @Internal
 abstract class AbstractAuditCoordinator extends AbstractMutationCoordinator implements AuditWriter {
 	protected final BasicBatchKey auditBatchKey;
-	protected final boolean[] auditedPropertyMask;
 	@Nullable
 	private final MutationOperationGroup staticAuditInsertGroup;
 	@Nullable
 	private final MutationOperationGroup transactionEndUpdateGroup;
-	private final EntityAuditSupport entityAuditSupport;
+	protected final EntityAuditSupport entityAuditSupport;
 
 	protected AbstractAuditCoordinator(@Nonnull EntityPersister entityPersister, @Nonnull SessionFactoryImplementor factory) {
 		super( entityPersister, factory );
 		this.entityAuditSupport = new EntityAuditSupport( entityPersister, factory );
-		this.auditedPropertyMask = entityAuditSupport.getAuditedPropertyMask();
 		this.auditBatchKey = new BasicBatchKey( entityPersister.getEntityName() + "#AUDIT_INSERT" );
 		final var staticAuditInsertMutationGroup = entityAuditSupport.getStaticAuditInsertMutationGroup();
 		this.staticAuditInsertGroup = staticAuditInsertMutationGroup == null

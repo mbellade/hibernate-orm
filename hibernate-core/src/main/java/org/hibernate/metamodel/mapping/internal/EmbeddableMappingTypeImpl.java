@@ -164,6 +164,9 @@ public class EmbeddableMappingTypeImpl extends AbstractEmbeddableMapping impleme
 	private final boolean preferSelectAggregateMapping;
 	private final boolean preferBindAggregateMapping;
 
+	// Attribute positions annotated @Audited.Excluded, see isAttributeAuditedExcluded
+	private final BitSet auditedExcludedAttributes = new BitSet();
+
 	private EmbeddableMappingTypeImpl(
 			Component bootDescriptor,
 			@Nullable Property componentProperty,
@@ -657,6 +660,9 @@ public class EmbeddableMappingTypeImpl extends AbstractEmbeddableMapping impleme
 			}
 
 			addAttribute( attributeMappings, attributeMapping );
+			if ( bootPropertyDescriptor.isAuditedExcluded() ) {
+				auditedExcludedAttributes.set( attributeIndex );
+			}
 
 			attributeIndex++;
 		}
@@ -670,6 +676,15 @@ public class EmbeddableMappingTypeImpl extends AbstractEmbeddableMapping impleme
 		);
 
 		return true;
+	}
+
+	/**
+	 * Whether the attribute at the given position is annotated {@code @Audited.Excluded}.
+	 * The flag only applies when this embeddable is (transitively) an attribute of an
+	 * audited entity; the boot model rejects it for identifiers, natural ids and aggregates.
+	 */
+	public boolean isAttributeAuditedExcluded(int position) {
+		return auditedExcludedAttributes.get( position );
 	}
 
 	private boolean isDefinedInClassOrSuperclass(Component bootDescriptor, String declaringClass, String subclass) {

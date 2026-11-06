@@ -40,7 +40,6 @@ import org.hibernate.event.monitor.spi.EventMonitor;
 import org.hibernate.event.spi.PreLoadEventListener;
 import org.hibernate.internal.util.ImmutableBitSet;
 import org.hibernate.loader.ast.spi.CascadingFetchProfile;
-import org.hibernate.metamodel.mapping.AttributeMapping;
 import org.hibernate.metamodel.mapping.AttributeMetadata;
 import org.hibernate.metamodel.mapping.CompositeIdentifierMapping;
 import org.hibernate.metamodel.mapping.EntityMappingType;
@@ -67,7 +66,6 @@ import org.hibernate.sql.results.graph.entity.EntityInitializer;
 import org.hibernate.sql.results.graph.entity.EntityResultGraphNode;
 import org.hibernate.sql.results.graph.internal.AbstractInitializer;
 import org.hibernate.sql.results.internal.DefaultValueAssembler;
-import org.hibernate.sql.results.internal.NullValueAssembler;
 import org.hibernate.sql.results.jdbc.spi.JdbcValuesSourceProcessingOptions;
 import org.hibernate.sql.results.jdbc.spi.RowProcessingState;
 import org.hibernate.type.ManyToOneType;
@@ -345,7 +343,7 @@ public class EntityInitializerImpl
 			final var fetch = resultDescriptor.findFetch( attributeMapping );
 			final var stateAssembler =
 					fetch == null
-							? unfetchedAttributeAssembler( attributeMapping )
+							? DefaultValueAssembler.forUnfetchedAttribute( attributeMapping )
 							: fetch.createAssembler( this, creationState );
 
 			final int stateArrayPosition = attributeMapping.getStateArrayPosition();
@@ -534,7 +532,8 @@ public class EntityInitializerImpl
 		// Attributes excluded by every concrete type have no fetch, so masking them is a no-op.
 		for ( int position = 0; position < concreteType.getNumberOfAttributeMappings(); position++ ) {
 			if ( persister.isPropertyAuditedExcluded( position ) ) {
-				assemblers[subclassId][position] = unfetchedAttributeAssembler( concreteType.getAttributeMapping( position ) );
+				assemblers[subclassId][position] =
+						DefaultValueAssembler.forUnfetchedAttribute( concreteType.getAttributeMapping( position ) );
 				if ( subInitializers[subclassId] != null ) {
 					subInitializers[subclassId][position] = null;
 					eagerSubInitializers[subclassId][position] = null;
@@ -546,18 +545,6 @@ public class EntityInitializerImpl
 				}
 			}
 		}
-	}
-
-	private static DomainResultAssembler<?> unfetchedAttributeAssembler(AttributeMapping attributeMapping) {
-		final var javaType = attributeMapping.getMappedType().getMappedJavaType();
-		final var propertyAccess = attributeMapping.getPropertyAccess();
-		// Audit tables omit the columns of excluded attributes. When assembling an entity
-		// from an audit row, supply null for reference attributes and defaults for primitives.
-		// Inspect the declared property type: int and Integer share the same JavaType descriptor.
-		assert propertyAccess != null;
-		return propertyAccess.getGetter().getReturnTypeClass().isPrimitive()
-				? new DefaultValueAssembler<>( javaType )
-				: new NullValueAssembler<>( javaType );
 	}
 
 	private static boolean hasCascadeRefresh(EntityValuedModelPart referencedModelPart) {

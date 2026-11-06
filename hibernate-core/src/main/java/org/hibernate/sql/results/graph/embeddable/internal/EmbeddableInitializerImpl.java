@@ -1,6 +1,7 @@
 package org.hibernate.sql.results.graph.embeddable.internal;
 
 import java.util.Arrays;
+import java.util.BitSet;
 import java.util.function.BiConsumer;
 
 import org.hibernate.bytecode.enhance.spi.LazyPropertyInitializer;
@@ -26,6 +27,7 @@ import org.hibernate.sql.results.graph.embeddable.EmbeddableInitializer;
 import org.hibernate.sql.results.graph.embeddable.EmbeddableResultGraphNode;
 import org.hibernate.sql.results.graph.entity.EntityInitializer;
 import org.hibernate.sql.results.graph.internal.AbstractInitializer;
+import org.hibernate.sql.results.internal.DefaultValueAssembler;
 import org.hibernate.sql.results.internal.NullValueAssembler;
 import org.hibernate.sql.results.jdbc.spi.RowProcessingState;
 
@@ -51,6 +53,8 @@ public class EmbeddableInitializerImpl
 
 	protected final DomainResultAssembler<?>[][] assemblers;
 	private final int[][] filteredAssociationIndexes;
+	// State positions without a fetch, e.g. audit-excluded members, which never make the embeddable non-null
+	private final @Nullable BitSet unfetchedPositions;
 	protected final BasicResultAssembler<?> discriminatorAssembler;
 	protected final @Nullable DomainResultAssembler<Boolean> nullIndicatorAssembler;
 	protected final @Nullable Initializer<InitializerData>[][] subInitializers;
@@ -122,13 +126,24 @@ public class EmbeddableInitializerImpl
 
 		boolean lazyCapable = false;
 		boolean hasLazySubInitializers = false;
+		BitSet unfetchedPositions = null;
 		for ( int stateArrayPosition = 0; stateArrayPosition < numberOfFetchables; stateArrayPosition++ ) {
 			final var stateArrayContributor = embeddableMappingType.getFetchable( stateArrayPosition );
 			final var fetch = resultDescriptor.findFetch( stateArrayContributor );
-			final var stateAssembler =
-					fetch == null
-							? new NullValueAssembler<>( stateArrayContributor.getJavaType() )
-							: fetch.createAssembler( this, creationState );
+			final DomainResultAssembler<?> stateAssembler;
+			if ( fetch == null ) {
+				final var attributeMapping = stateArrayContributor.asAttributeMapping();
+				stateAssembler = attributeMapping == null
+						? new NullValueAssembler<>( stateArrayContributor.getJavaType() )
+						: DefaultValueAssembler.forUnfetchedAttribute( attributeMapping );
+				if ( unfetchedPositions == null ) {
+					unfetchedPositions = new BitSet( numberOfFetchables );
+				}
+				unfetchedPositions.set( stateArrayPosition );
+			}
+			else {
+				stateAssembler = fetch.createAssembler( this, creationState );
+			}
 
 			if ( concreteEmbeddableTypes.isEmpty() ) {
 				assemblers[0][stateArrayPosition] = stateAssembler;
@@ -175,6 +190,7 @@ public class EmbeddableInitializerImpl
 			}
 		}
 		this.assemblers = assemblers;
+		this.unfetchedPositions = unfetchedPositions;
 		this.filteredAssociationIndexes = FilteredAssociationHydration.assemblerIndexes( assemblers );
 		this.discriminatorAssembler =
 				discriminatorFetch == null
@@ -503,7 +519,10 @@ public class EmbeddableInitializerImpl
 			final Object contributorValue = assembler == null ? null : assembler.assemble( rowProcessingState );
 			rowState[i] = contributorValue == BATCH_PROPERTY ? null : contributorValue;
 			if ( contributorValue != null ) {
-				stateAllNull = false;
+				// A primitive default supplied for an unfetched member does not make the embeddable non-null
+				if ( unfetchedPositions == null || !unfetchedPositions.get( i ) ) {
+					stateAllNull = false;
+				}
 			}
 			else if ( isPartOfKey ) {
 				// If this is a foreign key and there is a null part, the whole thing has to be turned into null

@@ -29,14 +29,12 @@ import org.hibernate.persister.entity.mutation.EntityAuditSupport;
 public class AuditEntityMutationPlanContributor implements EntityMutationPlanContributor {
 	private final EntityPersister entityPersister;
 	private final EntityAuditSupport entityAuditSupport;
-	private final boolean[] auditedPropertyMask;
 
 	public AuditEntityMutationPlanContributor(
 			EntityPersister entityPersister,
 			SessionFactoryImplementor sessionFactory) {
 		this.entityPersister = entityPersister;
 		this.entityAuditSupport = new EntityAuditSupport( entityPersister, sessionFactory );
-		this.auditedPropertyMask = entityAuditSupport.getAuditedPropertyMask();
 	}
 
 	@Override
@@ -56,7 +54,13 @@ public class AuditEntityMutationPlanContributor implements EntityMutationPlanCon
 	public void contributeAdditionalUpdate(
 			UpdateContext context,
 			Consumer<FlushOperation> operationConsumer) {
-		if ( !shouldAuditUpdate( context.action().getDirtyFields(), context.action().hasDirtyCollection() ) ) {
+		if ( !entityAuditSupport.shouldAuditUpdate(
+				context.action().getDirtyFields(),
+				context.action().hasDirtyCollection(),
+				context.previousState(),
+				context.state(),
+				context.session()
+		) ) {
 			return;
 		}
 
@@ -120,18 +124,4 @@ public class AuditEntityMutationPlanContributor implements EntityMutationPlanCon
 		throw new HibernateException( "Audit graph mutation plan used with non-graph action queue" );
 	}
 
-	private boolean shouldAuditUpdate(int[] dirtyAttributeIndexes, boolean hasDirtyCollection) {
-		if ( dirtyAttributeIndexes == null || dirtyAttributeIndexes.length == 0 ) {
-			return true;
-		}
-		if ( hasDirtyCollection ) {
-			return true;
-		}
-		for ( int dirtyIndex : dirtyAttributeIndexes ) {
-			if ( auditedPropertyMask[dirtyIndex] ) {
-				return true;
-			}
-		}
-		return false;
-	}
 }

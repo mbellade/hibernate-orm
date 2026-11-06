@@ -39,7 +39,8 @@ public class MergeCoordinatorAudit extends UpdateCoordinatorAudit {
 			@Nullable int[] dirtyAttributeIndexes,
 			boolean hasDirtyCollection,
 			@Nonnull SharedSessionContractImplementor session) {
-		final boolean shouldAudit = shouldAuditUpdate( dirtyAttributeIndexes, hasDirtyCollection );
+		final boolean shouldAudit =
+				shouldAuditUpdate( dirtyAttributeIndexes, hasDirtyCollection, incomingOldValues, values, session );
 		final boolean entityExists = shouldAudit && entityPersister().getDatabaseSnapshot( id, session ) != null;
 		final var generatedValues = currentUpdateCoordinator.update(
 				entity,
